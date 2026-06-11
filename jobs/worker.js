@@ -29,6 +29,11 @@ async function handle(type, p) {
     await sendTelegram(`👋 ${p.code} marked resigned.`);
     return 'resigned (app); disable on device if needed';
   }
+  if (type === 'reprocess_period') {
+    run('reprocessRange.js', { FROM: p.from, TO: p.to });
+    await sendTelegram(`🔄 Reprocessed attendance ${p.from} → ${p.to}.`);
+    return 'reprocessed ' + p.from + '..' + p.to;
+  }
   if (type === 'monthly_download') {
     const scope = p.scope === 'all' ? 'all' : p.scope === 'dept' ? 'dept:' + p.value : 'emp:' + p.value;
     const out = run('monthlyDownload.js', { MONTH: String(p.month || 0), SCOPE: scope });

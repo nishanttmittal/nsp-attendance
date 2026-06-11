@@ -24,6 +24,7 @@ export default function MonthlyDownload({ user }) {
   }
 
   return (
+    <div className="space-y-4">
     <form onSubmit={submit} className="bg-white rounded-xl shadow p-4 space-y-4">
       <h2 className="font-semibold text-gray-800">Download monthly attendance</h2>
 
@@ -64,6 +65,33 @@ export default function MonthlyDownload({ user }) {
       {status === 'mock' && <Note>Preview mode: request logged locally (wires to the job once Firebase is connected).</Note>}
       {status?.startsWith('error') && <Note>Could not queue: {status.slice(6)}</Note>}
     </form>
+    <ReprocessCard user={user} />
+    </div>
+  );
+}
+
+function ReprocessCard({ user }) {
+  const [r, setR] = useState({ from: '', to: '' });
+  const [st, setSt] = useState(null);
+  const toDmy = (iso) => { if (!iso) return ''; const [y, m, d] = iso.split('-'); return `${d}/${m}/${y}`; };
+  async function go() {
+    if (!r.from || !r.to) { setSt('pick both dates'); return; }
+    setSt('queuing');
+    try { await queueJob('reprocess_period', { from: toDmy(r.from), to: toDmy(r.to) }, user.email); setSt('queued'); }
+    catch (e) { setSt('error:' + e.message); }
+  }
+  return (
+    <div className="bg-white rounded-xl shadow p-4 space-y-3">
+      <h2 className="font-semibold text-gray-800">Reprocess attendance (period)</h2>
+      <p className="text-xs text-gray-500">Recompute attendance for a date range (all employees) — use after editing punches or rule changes.</p>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="From"><input className="w-full border rounded px-3 py-2" type="date" value={r.from} onChange={(e) => setR({ ...r, from: e.target.value })} /></Field>
+        <Field label="To"><input className="w-full border rounded px-3 py-2" type="date" value={r.to} onChange={(e) => setR({ ...r, to: e.target.value })} /></Field>
+      </div>
+      <button onClick={go} disabled={st === 'queuing'} className="w-full bg-gray-800 disabled:opacity-50 text-white rounded py-2 font-medium">{st === 'queuing' ? 'Requesting…' : 'Reprocess period'}</button>
+      {st === 'queued' && <Note ok>Queued — attendance will be reprocessed; you'll get a Telegram confirmation.</Note>}
+      {st && !['queuing', 'queued'].includes(st) && <Note>{st.replace(/^error:/, '')}</Note>}
+    </div>
   );
 }
 

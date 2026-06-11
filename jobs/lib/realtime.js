@@ -91,17 +91,18 @@ async function setField(page, sel, value) {
   }, value);
 }
 
-// Reprocess one day for all employees (recomputes attendance under current rules).
-async function reprocessDay(page, ddmmyyyy) {
+// Reprocess a date range for all employees (recomputes attendance under current rules).
+async function reprocessRange(page, fromDdmmyyyy, toDdmmyyyy) {
   await page.goto('https://onlinerealsoft.com/ManualProcess.aspx', { waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(1200);
-  await setField(page, '#MainContent_txtdate', ddmmyyyy);
-  await setField(page, '#MainContent_txttodate', ddmmyyyy);
+  await setField(page, '#MainContent_txtdate', fromDdmmyyyy);
+  await setField(page, '#MainContent_txttodate', toDdmmyyyy);
   await Promise.all([
-    page.waitForLoadState('networkidle', { timeout: 60000 }).catch(() => {}),
+    page.waitForLoadState('networkidle', { timeout: 90000 }).catch(() => {}),
     page.click('#MainContent_cmdShowReport'),
   ]);
-  await page.waitForTimeout(2500);
+  await page.waitForTimeout(3000);
 }
+const reprocessDay = (page, ddmmyyyy) => reprocessRange(page, ddmmyyyy, ddmmyyyy);
 
-module.exports = { SITE_URL, loadSecrets, launch, login, session, readGrid, selectFewEmployee, setField, reprocessDay };
+module.exports = { SITE_URL, loadSecrets, launch, login, session, readGrid, selectFewEmployee, setField, reprocessDay, reprocessRange };

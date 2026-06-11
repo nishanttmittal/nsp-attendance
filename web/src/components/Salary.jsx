@@ -89,8 +89,12 @@ export default function Salary({ user }) {
               <div className="grid grid-cols-2 gap-2 mt-3">
                 <button onClick={() => sharePdf(payslipOnePdf(emp, pay, MONTH), `payslip-${code}-${MONTH}.pdf`)} className="bg-red-700 text-white rounded-lg py-2 text-sm font-medium">📄 Share payslip</button>
                 <button onClick={async () => { await queueJob('payslip', { code, month: MONTH }, user.email); alert('Payslip will be sent to Telegram.'); }} className="border border-gray-300 rounded-lg py-2 text-sm font-medium">Telegram</button>
-                <LockButton locked={locked} canFinalize={canFinalize} onToggle={(next) => save(() => saveMonth(code, MONTH, { locked: next }))} />
+                <LockButton locked={locked} canFinalize={canFinalize} onToggle={(next) => save(() => {
+                  if (next) { const mode = (prompt('Payment mode (cash / bank / both):', 'bank') || 'bank').toLowerCase(); return saveMonth(code, MONTH, { locked: true, payment: { net: pay.net, date: new Date().toISOString().slice(0, 10), mode } }); }
+                  return saveMonth(code, MONTH, { locked: false });
+                })} />
               </div>
+              {locked && md.payment && <p className="text-xs text-green-700 mt-1">✓ Paid {rupee(md.payment.net)} on {md.payment.date} ({md.payment.mode}).</p>}
               {!canFinalize && !locked && <p className="text-xs text-gray-400 mt-1">Finalize unlocks at month-end (or now if the employee has left).</p>}
             </div>
 
