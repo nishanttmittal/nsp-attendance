@@ -45,12 +45,18 @@ async function handle(type, p) {
     ]);
     const emp = empDoc.exists ? empDoc.data() : null;
     if (!emp || !(emp.amount || emp.wage)) { await sendTelegram(`🧾 Payslip: no salary set for ${p.code}.`); return 'no salary config'; }
-    const att = attDoc.exists ? attDoc.data() : { presentDays: 0, absentDays: 0, otHrs: 0, lateHrs: 0, earlyHrs: 0 };
     const now = new Date();
     const first = new Date(now.getFullYear(), now.getMonth(), 1);
     const last = new Date(now.getFullYear(), now.getMonth() + 1, 0);
     const yest = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
     const mk = `${first.getFullYear()}-${String(first.getMonth() + 1).padStart(2, '0')}`;
+    let att;
+    if (emp.appOnly) {  // daily-wager: attendance from manual hours log
+      const log = (emp.attendanceLog && emp.attendanceLog[mk]) || [];
+      att = { presentDays: log.length, equivalentDays: log.reduce((s, d) => s + Math.min(Number(d.hours || 0), 11) / 11, 0), otHrs: 0, lateHrs: 0, earlyHrs: 0, absentDays: 0 };
+    } else {
+      att = attDoc.exists ? attDoc.data() : { presentDays: 0, absentDays: 0, otHrs: 0, lateHrs: 0, earlyHrs: 0 };
+    }
     const md = (emp.months && emp.months[mk]) || {};
     const adv = (emp.advances || []).filter(a => (a.date || '').startsWith(mk)).reduce((s, a) => s + Number(a.amount || 0), 0);
     const pay = computePay({

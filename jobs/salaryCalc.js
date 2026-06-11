@@ -51,7 +51,7 @@ function computePay({ emp, att, daysInMonth, elapsedDays, fullMonth, advances, a
     effElapsed = Math.max(0, Math.round((end - start) / DAY) + 1);
   }
   const base = emp.type === 'daily'
-    ? rate * att.presentDays
+    ? (emp.appOnly ? rate * (att.equivalentDays || 0) : rate * att.presentDays)
     : perDay * Math.max(0, effElapsed - att.absentDays);
   // net OT = Realtime OT (capped Working−Shift) minus late/early shortfall; can go negative
   const netOtHrs = (att.otHrs || 0) - (att.lateHrs || 0) - (att.earlyHrs || 0);

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { loadEmployees, loadEmployee, saveEmployee, addAdvance, addIncrement, monthData, saveMonth, loadAttendance, queueJob } from '../lib/data';
+import { loadEmployees, loadEmployee, saveEmployee, addAdvance, addIncrement, monthData, saveMonth, loadAttendance, dailyAtt, addDailyHours, queueJob } from '../lib/data';
 import { computePay } from '../lib/payroll';
 
 const MONTH = '2026-06';                 // current pay month (real app derives from date)
@@ -17,7 +17,8 @@ export default function Salary({ user }) {
 
   async function reload(c = code) {
     if (!c) return;
-    const [e, a] = await Promise.all([loadEmployee(c), loadAttendance(c)]);
+    const e = await loadEmployee(c);
+    const a = e.appOnly ? dailyAtt(e, MONTH) : await loadAttendance(c);
     setEmp(e); setAtt(a);
   }
   useEffect(() => { setEmp(null); reload(code); }, [code]);
@@ -44,6 +45,7 @@ export default function Salary({ user }) {
         return (
           <>
             <SetupCard key={'s' + code} emp={emp} disabled={locked || busy} onSave={(patch) => save(() => saveEmployee(code, patch))} />
+            {emp.appOnly && <DailyAttendanceCard key={'d' + code} emp={emp} att={att} disabled={locked || busy} onAdd={(entry) => save(() => addDailyHours(code, MONTH, entry))} />}
 
             <div className="bg-white rounded-xl shadow p-4">
               <div className="flex items-center justify-between mb-2">
@@ -82,6 +84,26 @@ export default function Salary({ user }) {
           </>
         );
       })()}
+    </div>
+  );
+}
+
+function DailyAttendanceCard({ emp, att, onAdd, disabled }) {
+  const [f, setF] = useState({ date: MONTH + '-01', hours: '11' });
+  const log = (emp.attendanceLog && emp.attendanceLog[MONTH]) || [];
+  return (
+    <div className="bg-white rounded-xl shadow p-4">
+      <div className="font-semibold text-gray-800 mb-1">Daily attendance (manual · 11-hr day)</div>
+      <p className="text-xs text-gray-500 mb-2">{att.presentDays} days logged · {att.hoursTotal}h · = {att.equivalentDays} pay-days</p>
+      <ul className="text-sm divide-y divide-gray-100 mb-2 max-h-40 overflow-auto">
+        {log.length === 0 && <li className="text-gray-400 py-1">No days entered yet</li>}
+        {log.map((d, i) => <li key={i} className="py-1 flex justify-between"><span>{d.date}</span><span className={d.hours < 11 ? 'text-amber-700' : 'text-gray-800'}>{d.hours}h{d.hours < 11 ? ' (part)' : ''}</span></li>)}
+      </ul>
+      {!disabled && <div className="grid grid-cols-3 gap-2">
+        <input className="border rounded px-2 py-1.5 col-span-2" type="date" value={f.date} onChange={e => setF({ ...f, date: e.target.value })} />
+        <input className="border rounded px-2 py-1.5" type="number" step="0.5" placeholder="hours" value={f.hours} onChange={e => setF({ ...f, hours: e.target.value })} />
+        <button onClick={() => { if (f.hours) onAdd({ date: f.date, hours: Number(f.hours) }); }} className="col-span-3 bg-gray-800 text-white rounded py-1.5 text-sm font-medium">Add day</button>
+      </div>}
     </div>
   );
 }

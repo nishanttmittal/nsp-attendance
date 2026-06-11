@@ -5,6 +5,8 @@ const DAY = 86400000;
 
 // Net work hours per shift (12H uses 12). Drives the 1× OT hourly rate.
 export const SHIFT_HOURS = { GEN: 8, '10H': 10, '12H': 12, wir: 10 };
+// App-only daily-wagers: 11-hour standard day; pay prorates by hours worked.
+export const DAILY_WAGER_HOURS = 11;
 
 // Effective pay = base + sum of increment deltas effective on/before the date.
 export function effectiveAmount(emp, toDate) {
@@ -29,9 +31,13 @@ export function computePay({ emp, att, daysInMonth, elapsedDays, fullMonth, adva
     if (emp.exitDate) { const x = new Date(emp.exitDate); if (x < end) end = x; }
     effElapsed = Math.max(0, Math.round((end - start) / DAY) + 1);
   }
-  const base = emp.type === 'daily' ? rate * (att.presentDays || 0) : perDay * Math.max(0, effElapsed - (att.absentDays || 0));
+  // app-only daily-wager: pay = wage × equivalent-days (Σ hours/11, each day capped at 1).
+  // machine daily-wage: wage × present days. monthly: prorated, deduct absences.
+  const base = emp.type === 'daily'
+    ? (emp.appOnly ? rate * (att.equivalentDays || 0) : rate * (att.presentDays || 0))
+    : perDay * Math.max(0, effElapsed - (att.absentDays || 0));
 
-  const netOtHrs = (att.otHrs || 0) - (att.lateHrs || 0) - (att.earlyHrs || 0);
+  const netOtHrs = emp.appOnly ? 0 : (att.otHrs || 0) - (att.lateHrs || 0) - (att.earlyHrs || 0);
   const hourlyRate = perDay / (SHIFT_HOURS[emp.shift] || 8);
   const otPay = netOtHrs * hourlyRate;
 

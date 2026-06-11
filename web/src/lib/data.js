@@ -55,7 +55,22 @@ const MOCK_ATT = {
   '00000018': { presentDays: 24, absentDays: 1, otHrs: 46.5, lateHrs: 1.5, earlyHrs: 0.5 },
   '00000061': { presentDays: 25, absentDays: 0, otHrs: 55, lateHrs: 0, earlyHrs: 0 },
 };
-const blankEmp = (code) => ({ code, increments: [], advances: [], months: {} });
+const blankEmp = (code) => ({ code, increments: [], advances: [], months: {}, attendanceLog: {} });
+export const DAILY_STD = 11; // app-only daily-wager standard hours/day
+
+// Attendance for an app-only daily-wager, derived from their manual hours log.
+export function dailyAtt(emp, month) {
+  const log = (emp.attendanceLog && emp.attendanceLog[month]) || [];
+  const hoursTotal = log.reduce((s, d) => s + Number(d.hours || 0), 0);
+  const equivalentDays = log.reduce((s, d) => s + Math.min(Number(d.hours || 0), DAILY_STD) / DAILY_STD, 0);
+  return { presentDays: log.length, equivalentDays: Math.round(equivalentDays * 100) / 100, hoursTotal, otHrs: 0, lateHrs: 0, earlyHrs: 0, absentDays: 0 };
+}
+export async function addDailyHours(code, month, entry) {
+  const e = await loadEmployee(code);
+  const log = { ...(e.attendanceLog || {}) };
+  log[month] = [...(log[month] || []), entry];
+  await saveEmployee(code, { attendanceLog: log });
+}
 export const monthData = (emp, month) =>
   (emp.months && emp.months[month]) || { advanceRecover: 0, fine: 0, loanInstallment: 0, advanceBalanceIn: 0, locked: false };
 
