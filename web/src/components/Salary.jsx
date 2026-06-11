@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { loadEmployees, loadEmployee, saveEmployee, addAdvance, addIncrement, monthData, saveMonth, loadAttendance, dailyAtt, addDailyHours, queueJob } from '../lib/data';
+import { loadEmployees, loadEmployee, saveEmployee, addAdvance, addIncrement, monthData, saveMonth, loadAttendance, loadAllAttendance, dailyAtt, addDailyHours, queueJob } from '../lib/data';
 import { computePay } from '../lib/payroll';
+import { payslipOnePdf, payslipAllPdf, sharePdf, advanceSplit } from '../lib/salaryPdf';
 
 const MONTH = '2026-06';                 // current pay month (real app derives from date)
 const MONTH_CTX = { daysInMonth: 30, elapsedDays: 30, fullMonth: true, monthStart: new Date('2026-06-01'), toDate: new Date('2026-06-30') };
@@ -25,14 +26,34 @@ export default function Salary({ user }) {
 
   const save = async (fn) => { setBusy(true); try { await fn(); await reload(); } finally { setBusy(false); } };
 
+  // Salary register PDF for ALL employees (name · days · OT · advance bank/cash · net · carried)
+  async function shareAllPdf() {
+    setBusy(true);
+    try {
+      const all = await loadEmployees();
+      const attMap = await loadAllAttendance();
+      const rows = all.map((e) => {
+        const a = e.appOnly ? dailyAtt(e, MONTH) : (attMap[e.code] || { presentDays: 0, absentDays: 0, otHrs: 0, lateHrs: 0, earlyHrs: 0 });
+        const md = monthData(e, MONTH);
+        const advs = (e.advances || []).filter((x) => (x.date || '').startsWith(MONTH));
+        const split = advanceSplit(advs);
+        const advTM = advs.reduce((s, x) => s + Number(x.amount || 0), 0);
+        const p = computePay({ emp: e, att: a, ...MONTH_CTX, advancesThisMonth: advTM, advanceBalanceIn: Number(md.advanceBalanceIn || 0), advanceRecover: Number(md.advanceRecover || 0), fines: Number(md.fine || 0), loanInstallment: Number(md.loanInstallment || 0) });
+        return { name: e.name || e.code, days: e.appOnly ? a.equivalentDays : p.presentDays, ot: p.otHrsNet, advBank: split.bank, advCash: split.cash, net: p.net, carried: p.advanceBalanceCarried };
+      });
+      await sharePdf(payslipAllPdf(rows, MONTH), `salary-register-${MONTH}.pdf`);
+    } finally { setBusy(false); }
+  }
+
   if (emps === null) return <p className="text-gray-500">Loading…</p>;
   if (emps.length === 0) return <p className="text-gray-500 text-sm">No employees yet. Add staff in the <b>Staff</b> tab, then set their salary here.</p>;
 
   return (
     <div className="space-y-4">
       <select className="w-full border rounded-lg px-3 py-2 bg-white" value={code} onChange={e => setCode(e.target.value)}>
-        {emps.map(e => <option key={e.code} value={e.code}>{e.name} ({e.code}) · {e.shift}</option>)}
+        {emps.map(e => <option key={e.code} value={e.code}>{e.name} ({e.code}) · {e.shift || (e.appOnly ? 'wager' : '')}</option>)}
       </select>
+      <button onClick={shareAllPdf} disabled={busy} className="w-full border border-gray-300 rounded-lg py-2 text-sm font-medium disabled:opacity-50">📄 Share salary register (all) — PDF/WhatsApp</button>
 
       {(!emp || !att) ? <p className="text-gray-500 text-sm">Loading employee…</p> : (() => {
         const md = monthData(emp, MONTH);
@@ -66,7 +87,8 @@ export default function Salary({ user }) {
               {pay.advanceDue > 0 && <p className="text-xs text-amber-700 mt-1">Advance owed {rupee(pay.advanceDue)} · carrying {rupee(pay.advanceBalanceCarried)} forward.</p>}
               {pay.suggestedWeeklyOffDock.days > 0 && <p className="text-xs text-amber-700 mt-1">⚠ {pay.absentDays} absences → suggest docking {pay.suggestedWeeklyOffDock.days} weekly-off ({rupee(pay.suggestedWeeklyOffDock.amount)}) — confirm to apply.</p>}
               <div className="grid grid-cols-2 gap-2 mt-3">
-                <button onClick={async () => { await queueJob('payslip', { code, month: MONTH }, user.email); alert('Payslip will be sent to Telegram.'); }} className="bg-red-700 text-white rounded-lg py-2 text-sm font-medium">Send to Telegram</button>
+                <button onClick={() => sharePdf(payslipOnePdf(emp, pay, MONTH), `payslip-${code}-${MONTH}.pdf`)} className="bg-red-700 text-white rounded-lg py-2 text-sm font-medium">📄 Share payslip</button>
+                <button onClick={async () => { await queueJob('payslip', { code, month: MONTH }, user.email); alert('Payslip will be sent to Telegram.'); }} className="border border-gray-300 rounded-lg py-2 text-sm font-medium">Telegram</button>
                 <LockButton locked={locked} canFinalize={canFinalize} onToggle={(next) => save(() => saveMonth(code, MONTH, { locked: next }))} />
               </div>
               {!canFinalize && !locked && <p className="text-xs text-gray-400 mt-1">Finalize unlocks at month-end (or now if the employee has left).</p>}
@@ -79,7 +101,7 @@ export default function Salary({ user }) {
               <NumRow key={'l' + code} label="Loan installment" val={md.loanInstallment} disabled={locked || busy} onSave={(v) => save(() => saveMonth(code, MONTH, { loanInstallment: v }))} />
             </div>
 
-            <AdvancesCard key={'a' + code} emp={emp} earnings={earnings} thisMonth={advancesThisMonth} disabled={locked || busy} onAdd={(a) => save(() => addAdvance(code, a))} />
+            <AdvancesCard key={'a' + code} emp={emp} earnings={earnings} thisMonth={advancesThisMonth} disabled={locked || busy} onAdd={(a) => save(() => addAdvance(code, { ...a, paidBy: user.email }))} />
             <IncrementsCard key={'i' + code} emp={emp} disabled={locked || busy} onAdd={(i) => save(() => addIncrement(code, i))} />
           </>
         );
@@ -131,10 +153,14 @@ function SetupCard({ emp, onSave, disabled }) {
 }
 
 function AdvancesCard({ emp, earnings = 0, thisMonth = 0, onAdd, disabled }) {
-  const [f, setF] = useState({ amount: '', date: MONTH + '-01', mode: 'cash', remark: '' });
+  const [f, setF] = useState({ amount: '', date: MONTH + '-01', mode: 'cash', remark: '', bank: '', cash: '' });
   const set = k => e => setF({ ...f, [k]: e.target.value });
-  const projected = Number(thisMonth || 0) + Number(f.amount || 0);
-  const over = f.amount && projected > earnings;
+  const total = f.mode === 'both' ? Number(f.bank || 0) + Number(f.cash || 0) : Number(f.amount || 0);
+  const over = total > 0 && (Number(thisMonth || 0) + total) > earnings;
+  function add() {
+    if (f.mode === 'both') { if (total) onAdd({ date: f.date, mode: 'both', amount: total, bank: Number(f.bank || 0), cash: Number(f.cash || 0), remark: f.remark }); }
+    else if (f.amount) onAdd({ date: f.date, mode: f.mode, amount: Number(f.amount), remark: f.remark });
+  }
   return (
     <div className="bg-white rounded-xl shadow p-4">
       <div className="font-semibold text-gray-800 mb-2">Advances</div>
@@ -143,12 +169,15 @@ function AdvancesCard({ emp, earnings = 0, thisMonth = 0, onAdd, disabled }) {
         {(emp.advances || []).map((a, i) => <li key={i} className="py-1 flex justify-between"><span>{a.date} · {a.mode}{a.paidBy ? ' · by ' + a.paidBy : ''}{a.remark ? ' · ' + a.remark : ''}</span><span className="font-semibold">{rupee(a.amount)}</span></li>)}
       </ul>
       {!disabled && <div className="grid grid-cols-2 gap-2">
-        <input className="border rounded px-2 py-1.5" type="number" placeholder="Amount" value={f.amount} onChange={set('amount')} />
         <input className="border rounded px-2 py-1.5" type="date" value={f.date} onChange={set('date')} />
-        <select className="border rounded px-2 py-1.5" value={f.mode} onChange={set('mode')}><option value="cash">Cash</option><option value="account">Account</option><option value="both">Both</option></select>
-        <input className="border rounded px-2 py-1.5" placeholder="Remark" value={f.remark} onChange={set('remark')} />
-        {over ? <p className="col-span-2 text-xs text-red-600 bg-red-50 border border-red-200 rounded p-1.5">⚠ Advance total {rupee(projected)} exceeds this month's earning {rupee(earnings)} — the extra will carry forward.</p> : null}
-        <button onClick={() => { if (f.amount) onAdd({ ...f, amount: Number(f.amount) }); }} className="col-span-2 bg-red-700 text-white rounded py-1.5 text-sm font-medium">Add advance</button>
+        <select className="border rounded px-2 py-1.5" value={f.mode} onChange={set('mode')}><option value="cash">Cash</option><option value="account">Bank</option><option value="both">Both</option></select>
+        {f.mode === 'both' ? <>
+          <input className="border rounded px-2 py-1.5" type="number" placeholder="Bank ₹" value={f.bank} onChange={set('bank')} />
+          <input className="border rounded px-2 py-1.5" type="number" placeholder="Cash ₹" value={f.cash} onChange={set('cash')} />
+        </> : <input className="border rounded px-2 py-1.5 col-span-2" type="number" placeholder="Amount ₹" value={f.amount} onChange={set('amount')} />}
+        <input className="border rounded px-2 py-1.5 col-span-2" placeholder="Remark" value={f.remark} onChange={set('remark')} />
+        {over ? <p className="col-span-2 text-xs text-red-600 bg-red-50 border border-red-200 rounded p-1.5">⚠ Advance total {rupee(Number(thisMonth || 0) + total)} exceeds this month's earning {rupee(earnings)} — the extra will carry forward.</p> : null}
+        <button onClick={add} className="col-span-2 bg-red-700 text-white rounded py-1.5 text-sm font-medium">Add advance</button>
       </div>}
     </div>
   );

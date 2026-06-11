@@ -70,6 +70,12 @@ export function dailyAtt(emp, month) {
   const equivalentDays = log.reduce((s, d) => s + Math.min(Number(d.hours || 0), DAILY_STD) / DAILY_STD, 0);
   return { presentDays: log.length, equivalentDays: Math.round(equivalentDays * 100) / 100, hoursTotal, otHrs: 0, lateHrs: 0, earlyHrs: 0, absentDays: 0 };
 }
+// All employees' monthly attendance at once (for the salary register PDF).
+export async function loadAllAttendance() {
+  if (!isConfigured || !db) return {};
+  const snap = await getDocs(collection(db, 'att_attendance'));
+  return Object.fromEntries(snap.docs.map(d => [d.id, d.data()]));
+}
 export async function addDailyHours(code, month, entry) {
   const e = await loadEmployee(code);
   const log = { ...(e.attendanceLog || {}) };
