@@ -1,0 +1,14 @@
+node_modules/
+.nativelibs/
+downloads/
+audit_output/
+apply_output/
+jobs/secrets.json
+jobs/telegram.local.json
+jobs/*serviceAccount*.json
+**/dist/
+*.log
+.env*
+jobs/firebase-admin.json
+jobs/lib/nativelibs/
+jobs/.nativelibs/

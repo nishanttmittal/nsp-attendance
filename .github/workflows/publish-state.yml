@@ -1,0 +1,24 @@
+name: Publish live floor state
+on:
+  schedule:
+    - cron: '*/15 3-16 * * *'   # every 15 min, ~09:00–21:30 IST (UTC+5:30)
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - working-directory: jobs
+        run: npm ci
+      - working-directory: jobs
+        run: npx playwright install --with-deps chromium
+      - working-directory: jobs
+        run: node publishState.js
+        env:
+          REALTIME_CORP: ${{ secrets.REALTIME_CORP }}
+          REALTIME_USER: ${{ secrets.REALTIME_USER }}
+          REALTIME_PASS: ${{ secrets.REALTIME_PASS }}
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}

@@ -1,0 +1,48 @@
+name: Scheduled alerts & maintenance
+on:
+  schedule:
+    - cron: '10 12 * * *'   # 17:40 IST — food headcount
+    - cron: '0 16 * * *'    # 21:30 IST — evening missed-punch (no OUT)
+    - cron: '30 4 * * *'    # 10:00 IST — morning missed-punch (yesterday)
+    - cron: '30 3 * * *'    # 09:00 IST — long absence (>4 days)
+    - cron: '30 1 * * *'    # 07:00 IST — reprocess yesterday
+    - cron: '0 2 * * 0'     # Sun 07:30 IST — weekly backup
+  workflow_dispatch:
+    inputs:
+      task:
+        description: which task to run manually
+        type: choice
+        options: [headcount, evening-miss, morning-miss, long-absence, reprocess, backup]
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - working-directory: jobs
+        run: npm ci
+      - working-directory: jobs
+        run: npx playwright install --with-deps chromium
+      - name: Run scheduled task
+        working-directory: jobs
+        env:
+          SCHED: ${{ github.event.schedule }}
+          TASK: ${{ github.event.inputs.task }}
+          REALTIME_CORP: ${{ secrets.REALTIME_CORP }}
+          REALTIME_USER: ${{ secrets.REALTIME_USER }}
+          REALTIME_PASS: ${{ secrets.REALTIME_PASS }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          case "${TASK:-$SCHED}" in
+            "headcount"|"10 12 * * *")   node eveningHeadcount.js ;;
+            "evening-miss"|"0 16 * * *")  MODE=evening node missedPunch.js ;;
+            "morning-miss"|"30 4 * * *")  MODE=morning node missedPunch.js ;;
+            "long-absence"|"30 3 * * *")  THRESHOLD=4 node longAbsence.js ;;
+            "reprocess"|"30 1 * * *")     node dailyReprocess.js ;;
+            "backup"|"0 2 * * 0")         node backup.js ;;
+            *) echo "no task matched ${TASK:-$SCHED}" ;;
+          esac

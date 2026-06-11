@@ -1,0 +1,105 @@
+import { useEffect, useState } from 'react';
+import { getDailyState } from '../lib/data';
+
+export default function Dashboard() {
+  const [s, setS] = useState(null);
+  const [err, setErr] = useState('');
+
+  useEffect(() => {
+    getDailyState().then(setS).catch((e) => setErr(String(e)));
+  }, []);
+
+  if (err) return <p className="text-red-600">{err}</p>;
+  if (!s) return <p className="text-gray-500">Loading floor…</p>;
+
+  return (
+    <div className="space-y-4">
+      {s._mock && <Banner>Showing sample data (live data wires in once the scraper job + Firebase are connected).</Banner>}
+
+      <div className="grid grid-cols-2 gap-3">
+        <Stat label="Present now" value={s.counts?.totalPresent ?? s.presentTotal} accent="text-green-700" />
+        <Stat label="Absent" value={s.counts?.totalAbsent ?? '—'} accent="text-gray-700" />
+        <Stat label="Late today" value={s.lateCount} accent="text-amber-600" />
+        <Stat label={`🍽️ Order food for`} value={s.mealHeadcount} accent="text-red-700"
+          sub={`still in, excl. ${s.mealExcludes}`} />
+      </div>
+
+      <Card title="Department attendance (present / total)">
+        <div className="space-y-2">
+          {Object.entries(s.deptRatio || {}).sort((a, b) => a[1].pct - b[1].pct).map(([d, r]) => (
+            <div key={d}>
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-700">{d}</span>
+                <span className="text-gray-600"><b>{r.present}/{r.total}</b> · {r.pct}%</span>
+              </div>
+              <div className="h-1.5 bg-gray-100 rounded mt-0.5">
+                <div className={`h-1.5 rounded ${r.pct < 50 ? 'bg-red-500' : r.pct < 80 ? 'bg-amber-500' : 'bg-green-600'}`}
+                  style={{ width: `${r.pct}%` }} />
+              </div>
+            </div>
+          ))}
+        </div>
+      </Card>
+
+      <Card title={`Late comings (${s.lateCount})`}>
+        {(!s.late || s.late.length === 0) ? <p className="text-sm text-gray-500">None 🎉</p> : (
+          <ul className="text-sm divide-y divide-gray-100">
+            {s.late.map((l) => (
+              <li key={l.code} className="py-1.5 flex justify-between">
+                <span>{l.name} <span className="text-gray-400">({l.dept})</span></span>
+                <span className="text-gray-500">in {l.inT} · {l.status}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
+
+      <Card title={`Absent today (${s.absentCount ?? (s.absent || []).length})`}>
+        {(!s.absent || s.absent.length === 0) ? <p className="text-sm text-gray-500">None</p> : (
+          <ul className="text-sm divide-y divide-gray-100">
+            {s.absent.map((a) => (
+              <li key={a.code} className="py-1.5 flex justify-between">
+                <span>{a.name}</span><span className="text-gray-400">{a.dept}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
+
+      {(s.longAbsence && s.longAbsence.length > 0) && (
+        <Card title="Long absence — >4 days this month">
+          <ul className="text-sm divide-y divide-gray-100">
+            {s.longAbsence.map((e) => (
+              <li key={e.code} className="py-1.5 flex justify-between">
+                <span>{e.name}</span><span className="font-semibold text-red-700">{e.absentDays} days</span>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
+
+      <p className="text-xs text-gray-400 text-center">Updated {s.at ? new Date(s.at).toLocaleString() : '—'}</p>
+    </div>
+  );
+}
+
+function Stat({ label, value, sub, accent }) {
+  return (
+    <div className="bg-white rounded-xl shadow p-4">
+      <div className="text-xs text-gray-500">{label}</div>
+      <div className={`text-3xl font-bold ${accent}`}>{value ?? '—'}</div>
+      {sub && <div className="text-[11px] text-gray-400">{sub}</div>}
+    </div>
+  );
+}
+function Card({ title, children }) {
+  return (
+    <div className="bg-white rounded-xl shadow p-4">
+      <div className="font-semibold text-gray-800 mb-2">{title}</div>
+      {children}
+    </div>
+  );
+}
+function Banner({ children }) {
+  return <div className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded p-2">{children}</div>;
+}

@@ -1,0 +1,16 @@
+{
+  "name": "attendance-app-jobs",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Scraper + alert jobs for the NSP attendance PWA (Realtime Biometrics)",
+  "scripts": {
+    "state": "node getState.js"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.60.0"
+  },
+  "dependencies": {
+    "firebase-admin": "^14.0.0",
+    "xlsx": "^0.18.5"
+  }
+}

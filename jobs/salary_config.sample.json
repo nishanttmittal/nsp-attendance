@@ -1,0 +1,62 @@
+{
+  "_note": "Sample only. Real data lives in Firebase (employees + advances). OT is paid at 1x the normal hourly rate (perDay / shift-hours); shift gives the net hours.",
+  "employees": {
+    "1": {
+      "type": "monthly",
+      "amount": 30000,
+      "shift": "GEN"
+    },
+    "00000018": {
+      "type": "monthly",
+      "amount": 18000,
+      "shift": "GEN",
+      "joinDate": "2026-06-05"
+    },
+    "00000003": {
+      "type": "monthly",
+      "amount": 14000,
+      "increments": [
+        {
+          "effective": "2026-06-01",
+          "amount": 1000,
+          "remark": "annual hike"
+        }
+      ],
+      "shift": "GEN"
+    },
+    "00000110": {
+      "type": "daily",
+      "wage": 650,
+      "shift": "GEN"
+    }
+  },
+  "advances": [
+    {
+      "code": "00000018",
+      "amount": 2000,
+      "date": "2026-06-03",
+      "remark": "festival advance"
+    },
+    {
+      "code": "00000003",
+      "amount": 1000,
+      "date": "2026-06-05",
+      "remark": ""
+    },
+    {
+      "code": "1",
+      "amount": 5000,
+      "date": "2026-06-02",
+      "remark": "big advance"
+    }
+  ],
+  "fines": {
+    "00000003": 500
+  },
+  "loans": {
+    "00000003": 1000
+  },
+  "advanceRecover": {
+    "00000018": 1000
+  }
+}

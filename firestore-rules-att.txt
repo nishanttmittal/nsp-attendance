@@ -1,0 +1,32 @@
+ATTENDANCE APP — Firestore security rules to ADD to your unico-operations project.
+
+In Firebase console → Firestore Database → Rules, paste these blocks INSIDE your existing
+  match /databases/{database}/documents { ... }
+(alongside your welder/plating rules — don't delete those), then Publish.
+
+    // ===== NSP Attendance (att_*) =====
+    function isAttAdmin() {
+      return request.auth != null && request.auth.token.email == 'nspenterprises24@gmail.com';
+    }
+    // live floor data: any signed-in user reads; only the jobs (Admin SDK) write
+    match /att_daily_stats/{doc} {
+      allow read: if request.auth != null;
+      allow write: if false;
+    }
+    // in-app action queue: signed-in users create; admin/jobs read+update
+    match /att_job_requests/{doc} {
+      allow create: if request.auth != null;
+      allow read, update: if isAttAdmin();
+    }
+    match /att_users/{uid} {
+      allow read: if request.auth != null;
+      allow write: if isAttAdmin();
+    }
+    // salary & employee data — admin only (jobs use Admin SDK, which bypasses rules)
+    match /att_salary/{doc}      { allow read, write: if isAttAdmin(); }
+    match /att_employees/{doc}   { allow read, write: if isAttAdmin(); }
+    match /att_advances/{doc}    { allow read, write: if isAttAdmin(); }
+    match /att_increments/{doc}  { allow read, write: if isAttAdmin(); }
+    match /att_loans/{doc}       { allow read, write: if isAttAdmin(); }
+    match /att_fines/{doc}       { allow read, write: if isAttAdmin(); }
+    match /att_month_locks/{doc} { allow read, write: if isAttAdmin(); }
