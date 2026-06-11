@@ -119,8 +119,13 @@ async function gatherState(page) {
     deptRatio[d] = { present, total, pct: total ? Math.round((present / total) * 100) : 0 };
   }
 
+  // dinner headcount = present staff who stayed past 17:30 (out-time after 17:30, or still in),
+  // excluding welders. Robust whether the job runs at 17:45 or later in the evening.
+  const toMin = t => { const m = String(t || '').match(/(\d{1,2}):(\d{2})/); return m ? (+m[1]) * 60 + (+m[2]) : null; };
+  const CUTOFF = 17 * 60 + 30; // 17:30
+  const stayedPastShift = r => { const o = toMin(r.outT); return o === null || o > CUTOFF; };
   const stillIn = present.rows.filter(r => !r.outT || !r.outT.trim());
-  const mealRows = stillIn.filter(r => (r.dept || '').toUpperCase() !== MEAL_EXCLUDE_DEPT);
+  const mealRows = present.rows.filter(r => stayedPastShift(r) && (r.dept || '').toUpperCase() !== MEAL_EXCLUDE_DEPT);
 
   return {
     at: new Date().toISOString(),

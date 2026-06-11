@@ -1,11 +1,11 @@
 import { useState } from 'react';
 import { queueJob } from '../lib/data';
 
-const MONTHS = [
-  { v: 0, label: 'This month' },
-  { v: 1, label: 'Last month' },
-  { v: 2, label: '2 months ago' },
-];
+// last 12 months
+const MONTHS = Array.from({ length: 12 }, (_, i) => {
+  const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - i);
+  return { v: i, label: (i === 0 ? 'This month — ' : '') + d.toLocaleString('default', { month: 'long', year: 'numeric' }) };
+});
 
 export default function MonthlyDownload({ user }) {
   const [month, setMonth] = useState(0);

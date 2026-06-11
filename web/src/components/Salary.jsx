@@ -38,6 +38,9 @@ export default function Salary({ user }) {
         const advancesThisMonth = (emp.advances || []).filter(a => (a.date || '').startsWith(MONTH)).reduce((s, a) => s + Number(a.amount || 0), 0);
         const pay = computePay({ emp, att, ...MONTH_CTX, advancesThisMonth, advanceBalanceIn: Number(md.advanceBalanceIn || 0), advanceRecover: Number(md.advanceRecover || 0), fines: Number(md.fine || 0), loanInstallment: Number(md.loanInstallment || 0) });
         const locked = md.locked;
+        const earnings = pay.base + pay.otPay + pay.perfectBonus;
+        // finalize only at month-end, unless the employee has left (resigned)
+        const canFinalize = (new Date() >= MONTH_CTX.toDate) || emp.active === false;
         return (
           <>
             <SetupCard key={'s' + code} emp={emp} disabled={locked || busy} onSave={(patch) => save(() => saveEmployee(code, patch))} />
@@ -62,8 +65,9 @@ export default function Salary({ user }) {
               {pay.suggestedWeeklyOffDock.days > 0 && <p className="text-xs text-amber-700 mt-1">⚠ {pay.absentDays} absences → suggest docking {pay.suggestedWeeklyOffDock.days} weekly-off ({rupee(pay.suggestedWeeklyOffDock.amount)}) — confirm to apply.</p>}
               <div className="grid grid-cols-2 gap-2 mt-3">
                 <button onClick={async () => { await queueJob('payslip', { code, month: MONTH }, user.email); alert('Payslip will be sent to Telegram.'); }} className="bg-red-700 text-white rounded-lg py-2 text-sm font-medium">Send to Telegram</button>
-                <LockButton locked={locked} onToggle={(next) => save(() => saveMonth(code, MONTH, { locked: next }))} />
+                <LockButton locked={locked} canFinalize={canFinalize} onToggle={(next) => save(() => saveMonth(code, MONTH, { locked: next }))} />
               </div>
+              {!canFinalize && !locked && <p className="text-xs text-gray-400 mt-1">Finalize unlocks at month-end (or now if the employee has left).</p>}
             </div>
 
             <div className="bg-white rounded-xl shadow p-4">
@@ -73,7 +77,7 @@ export default function Salary({ user }) {
               <NumRow key={'l' + code} label="Loan installment" val={md.loanInstallment} disabled={locked || busy} onSave={(v) => save(() => saveMonth(code, MONTH, { loanInstallment: v }))} />
             </div>
 
-            <AdvancesCard key={'a' + code} emp={emp} disabled={locked || busy} onAdd={(a) => save(() => addAdvance(code, a))} />
+            <AdvancesCard key={'a' + code} emp={emp} earnings={earnings} thisMonth={advancesThisMonth} disabled={locked || busy} onAdd={(a) => save(() => addAdvance(code, a))} />
             <IncrementsCard key={'i' + code} emp={emp} disabled={locked || busy} onAdd={(i) => save(() => addIncrement(code, i))} />
           </>
         );
@@ -104,21 +108,24 @@ function SetupCard({ emp, onSave, disabled }) {
   );
 }
 
-function AdvancesCard({ emp, onAdd, disabled }) {
+function AdvancesCard({ emp, earnings = 0, thisMonth = 0, onAdd, disabled }) {
   const [f, setF] = useState({ amount: '', date: MONTH + '-01', mode: 'cash', remark: '' });
   const set = k => e => setF({ ...f, [k]: e.target.value });
+  const projected = Number(thisMonth || 0) + Number(f.amount || 0);
+  const over = f.amount && projected > earnings;
   return (
     <div className="bg-white rounded-xl shadow p-4">
       <div className="font-semibold text-gray-800 mb-2">Advances</div>
       <ul className="text-sm divide-y divide-gray-100 mb-2">
         {(emp.advances || []).length === 0 && <li className="text-gray-400 py-1">None</li>}
-        {(emp.advances || []).map((a, i) => <li key={i} className="py-1 flex justify-between"><span>{a.date} · {a.mode}{a.remark ? ' · ' + a.remark : ''}</span><span className="font-semibold">{rupee(a.amount)}</span></li>)}
+        {(emp.advances || []).map((a, i) => <li key={i} className="py-1 flex justify-between"><span>{a.date} · {a.mode}{a.paidBy ? ' · by ' + a.paidBy : ''}{a.remark ? ' · ' + a.remark : ''}</span><span className="font-semibold">{rupee(a.amount)}</span></li>)}
       </ul>
       {!disabled && <div className="grid grid-cols-2 gap-2">
         <input className="border rounded px-2 py-1.5" type="number" placeholder="Amount" value={f.amount} onChange={set('amount')} />
         <input className="border rounded px-2 py-1.5" type="date" value={f.date} onChange={set('date')} />
         <select className="border rounded px-2 py-1.5" value={f.mode} onChange={set('mode')}><option value="cash">Cash</option><option value="account">Account</option><option value="both">Both</option></select>
         <input className="border rounded px-2 py-1.5" placeholder="Remark" value={f.remark} onChange={set('remark')} />
+        {over ? <p className="col-span-2 text-xs text-red-600 bg-red-50 border border-red-200 rounded p-1.5">⚠ Advance total {rupee(projected)} exceeds this month's earning {rupee(earnings)} — the extra will carry forward.</p> : null}
         <button onClick={() => { if (f.amount) onAdd({ ...f, amount: Number(f.amount) }); }} className="col-span-2 bg-red-700 text-white rounded py-1.5 text-sm font-medium">Add advance</button>
       </div>}
     </div>
@@ -145,9 +152,9 @@ function IncrementsCard({ emp, onAdd, disabled }) {
   );
 }
 
-function LockButton({ locked, onToggle }) {
-  if (!locked) return <button onClick={() => onToggle(true)} className="border border-gray-300 rounded-lg py-2 text-sm font-medium">Finalize & lock</button>;
-  return <button onClick={() => { const p = prompt('Admin password to unlock:'); if (p) onToggle(false); }} className="border border-amber-400 text-amber-700 rounded-lg py-2 text-sm font-medium">🔓 Unlock</button>;
+function LockButton({ locked, canFinalize, onToggle }) {
+  if (locked) return <button onClick={() => { const p = prompt('Admin password to unlock:'); if (p) onToggle(false); }} className="border border-amber-400 text-amber-700 rounded-lg py-2 text-sm font-medium">🔓 Unlock</button>;
+  return <button disabled={!canFinalize} onClick={() => onToggle(true)} className={`border rounded-lg py-2 text-sm font-medium ${canFinalize ? 'border-gray-300' : 'border-gray-200 text-gray-300'}`}>Finalize &amp; lock</button>;
 }
 
 function Row({ k, v }) { return <div className="flex justify-between text-sm py-0.5"><span className="text-gray-500">{k}</span><span className="text-gray-800">{v}</span></div>; }

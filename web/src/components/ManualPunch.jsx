@@ -1,10 +1,12 @@
-import { useState } from 'react';
-import { queueJob } from '../lib/data';
+import { useEffect, useState } from 'react';
+import { queueJob, loadEmployees } from '../lib/data';
 
 export default function ManualPunch({ user }) {
   const [f, setF] = useState({ emp: '', date: '', in: '', out: '', remark: '' });
   const [status, setStatus] = useState(null);
+  const [emps, setEmps] = useState([]);
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
+  useEffect(() => { loadEmployees().then(setEmps); }, []);
 
   async function submit(e) {
     e.preventDefault();
@@ -22,7 +24,12 @@ export default function ManualPunch({ user }) {
       <h2 className="font-semibold text-gray-800">Add a missed punch</h2>
       <p className="text-xs text-gray-500">Time in 24h HH:MM. Fill IN, OUT, or both. The day is reprocessed automatically.</p>
 
-      <Field label="Employee code"><input className="inp" placeholder="00000112" value={f.emp} onChange={set('emp')} /></Field>
+      <Field label="Employee">
+        <select className="inp" value={f.emp} onChange={set('emp')}>
+          <option value="">Select name…</option>
+          {emps.map((e) => <option key={e.code} value={e.code}>{e.name} ({e.code})</option>)}
+        </select>
+      </Field>
       <Field label="Date (dd/MM/yyyy)"><input className="inp" placeholder="09/06/2026" value={f.date} onChange={set('date')} /></Field>
       <div className="grid grid-cols-2 gap-3">
         <Field label="IN time"><input className="inp" placeholder="09:00" value={f.in} onChange={set('in')} /></Field>
