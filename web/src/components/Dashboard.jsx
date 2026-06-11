@@ -4,6 +4,7 @@ import { getDailyState } from '../lib/data';
 export default function Dashboard() {
   const [s, setS] = useState(null);
   const [err, setErr] = useState('');
+  const [showPresent, setShowPresent] = useState(false);
 
   useEffect(() => {
     getDailyState().then(setS).catch((e) => setErr(String(e)));
@@ -12,17 +13,35 @@ export default function Dashboard() {
   if (err) return <p className="text-red-600">{err}</p>;
   if (!s) return <p className="text-gray-500">Loading floor…</p>;
 
+  const presentRows = s.presentRows || [];
+
   return (
     <div className="space-y-4">
       {s._mock && <Banner>Showing sample data (live data wires in once the scraper job + Firebase are connected).</Banner>}
 
       <div className="grid grid-cols-2 gap-3">
-        <Stat label="Present now" value={s.counts?.totalPresent ?? s.presentTotal} accent="text-green-700" />
+        <Stat label="Present now ›" value={s.counts?.totalPresent ?? s.presentTotal} accent="text-green-700"
+          onClick={() => setShowPresent(v => !v)} />
         <Stat label="Absent" value={s.counts?.totalAbsent ?? '—'} accent="text-gray-700" />
         <Stat label="Late today" value={s.lateCount} accent="text-amber-600" />
         <Stat label={`🍽️ Order food for`} value={s.mealHeadcount} accent="text-red-700"
           sub={`still in, excl. ${s.mealExcludes}`} />
       </div>
+
+      {showPresent && (
+        <Card title={`Present (${presentRows.length})`}>
+          {presentRows.length === 0 ? <p className="text-sm text-gray-500">No names available.</p> : (
+            <ul className="text-sm divide-y divide-gray-100 max-h-72 overflow-auto">
+              {presentRows.map((r) => (
+                <li key={r.code} className="py-1.5 flex justify-between">
+                  <span>{r.name} <span className="text-gray-400">({r.dept})</span></span>
+                  <span className="text-gray-500">in {r.inT || '—'}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+      )}
 
       <Card title="Department attendance (present / total)">
         <div className="space-y-2">
@@ -83,9 +102,9 @@ export default function Dashboard() {
   );
 }
 
-function Stat({ label, value, sub, accent }) {
+function Stat({ label, value, sub, accent, onClick }) {
   return (
-    <div className="bg-white rounded-xl shadow p-4">
+    <div className={`bg-white rounded-xl shadow p-4 ${onClick ? 'cursor-pointer active:bg-gray-50' : ''}`} onClick={onClick}>
       <div className="text-xs text-gray-500">{label}</div>
       <div className={`text-3xl font-bold ${accent}`}>{value ?? '—'}</div>
       {sub && <div className="text-[11px] text-gray-400">{sub}</div>}

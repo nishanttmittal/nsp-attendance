@@ -33,6 +33,11 @@ const MOCK = {
     { code: '00000350', name: 'amit jitender welder', absentDays: 6 },
     { code: '00000262', name: 'prakash helper press', absentDays: 5 },
   ],
+  presentRows: [
+    { code: '00000018', name: 'sanjay pathak', dept: 'TOOL ROOM', inT: '09:23', outT: '' },
+    { code: '00000003', name: 'naveen press', dept: 'PRESS', inT: '09:11', outT: '' },
+    { code: '00000080', name: 'poonam fitting', dept: 'FITTING', inT: '09:16', outT: '' },
+  ],
   _mock: true,
 };
 
