@@ -1,7 +1,7 @@
 // Data layer. Shape matches the jobs' getState.gatherState() output.
 // Reads Firestore doc `daily_stats/today` when Firebase is configured; otherwise mock.
 import { isConfigured, db } from './firebase';
-import { doc, getDoc, setDoc, collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, getDoc, getDocs, setDoc, collection, addDoc, serverTimestamp } from 'firebase/firestore';
 
 const MOCK = {
   at: new Date().toISOString(),
@@ -42,60 +42,71 @@ export async function getDailyState() {
   return snap.exists() ? snap.data() : MOCK;
 }
 
-// ---- Salary store (localStorage in preview; swap to Firestore when wired) ----
+// ---- Salary store: Firestore att_salary/{code} when configured; localStorage fallback in preview ----
+// One doc per employee: { code, name, dept, shift, active, type, amount|wage, joinDate, increments[], advances[], months{} }
 const SAL_KEY = 'nsp_salary_v1';
 const loadSal = () => { try { return JSON.parse(localStorage.getItem(SAL_KEY)) || {}; } catch { return {}; } };
 const saveSal = (o) => localStorage.setItem(SAL_KEY, JSON.stringify(o));
-
-const SEED_EMPLOYEES = [
-  { code: '00000018', name: 'sanjay pathak', dept: 'TOOL ROOM', shift: 'GEN' },
-  { code: '00000003', name: 'naveen press', dept: 'PRESS', shift: 'GEN' },
-  { code: '00000110', name: 'abnesh tool room', dept: 'TOOL ROOM', shift: 'GEN' },
-  { code: '00000061', name: 'satish guard', dept: 'DEMO', shift: '12H' },
-  { code: '00000074', name: 'amarjeet wirecut', dept: 'TOOL ROOM', shift: 'wir' },
-];
-// Mock month attendance (real source = salaryData job → Firebase). Keyed by code.
+const SEED = { // preview-only sample
+  '00000018': { code: '00000018', name: 'sanjay pathak', dept: 'TOOL ROOM', shift: 'GEN' },
+  '00000061': { code: '00000061', name: 'satish guard', dept: 'DEMO', shift: '12H' },
+};
 const MOCK_ATT = {
   '00000018': { presentDays: 24, absentDays: 1, otHrs: 46.5, lateHrs: 1.5, earlyHrs: 0.5 },
-  '00000003': { presentDays: 25, absentDays: 0, otHrs: 40, lateHrs: 0.5, earlyHrs: 0 },
-  '00000110': { presentDays: 22, absentDays: 3, otHrs: 30, lateHrs: 2, earlyHrs: 1 },
   '00000061': { presentDays: 25, absentDays: 0, otHrs: 55, lateHrs: 0, earlyHrs: 0 },
-  '00000074': { presentDays: 23, absentDays: 2, otHrs: 38, lateHrs: 1, earlyHrs: 0.5 },
 };
+const blankEmp = (code) => ({ code, increments: [], advances: [], months: {} });
+export const monthData = (emp, month) =>
+  (emp.months && emp.months[month]) || { advanceRecover: 0, fine: 0, loanInstallment: 0, advanceBalanceIn: 0, locked: false };
 
-export function listEmployees(includeResigned = false) {
-  const store = loadSal();
-  const merged = SEED_EMPLOYEES.map(e => ({ ...e, ...(store[e.code] || {}) }));
-  // also include app-added employees not in the seed
-  for (const [code, v] of Object.entries(store)) if (!merged.find(m => m.code === code)) merged.push({ code, ...v });
-  return includeResigned ? merged : merged.filter(e => e.active !== false);
+export async function loadEmployees(includeResigned = false) {
+  let list;
+  if (isConfigured && db) {
+    const snap = await getDocs(collection(db, 'att_salary'));
+    list = snap.docs.map(d => ({ ...blankEmp(d.id), ...d.data(), code: d.id }));
+  } else {
+    const store = { ...SEED, ...loadSal() };
+    list = Object.entries(store).map(([code, v]) => ({ ...blankEmp(code), ...v, code }));
+  }
+  list.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  return includeResigned ? list : list.filter(e => e.active !== false);
 }
-// Mark an employee resigned: drops from active lists/salary here, and queues a machine update.
-export async function resignEmployee(code, by) {
-  saveEmployee(code, { active: false, resignedAt: new Date().toISOString().slice(0, 10) });
-  return queueJob('resign_employee', { code }, by);
+
+export async function loadEmployee(code) {
+  if (isConfigured && db) {
+    const s = await getDoc(doc(db, 'att_salary', code));
+    return { ...blankEmp(code), ...(s.exists() ? s.data() : {}), code };
+  }
+  const store = { ...SEED, ...loadSal() };
+  return { ...blankEmp(code), ...(store[code] || {}), code };
 }
-export function getEmployee(code) {
-  const store = loadSal();
-  const seed = SEED_EMPLOYEES.find(e => e.code === code) || { code };
-  return { increments: [], advances: [], months: {}, ...seed, ...(store[code] || {}) };
-}
-export function saveEmployee(code, patch) {
+
+export async function saveEmployee(code, patch) {
+  if (isConfigured && db) { await setDoc(doc(db, 'att_salary', code), patch, { merge: true }); return; }
   const store = loadSal(); store[code] = { ...(store[code] || {}), ...patch }; saveSal(store);
 }
-export function addAdvance(code, adv) {
-  const e = getEmployee(code); e.advances = [...(e.advances || []), adv]; saveEmployee(code, { advances: e.advances });
+export async function addAdvance(code, adv) {
+  const e = await loadEmployee(code); await saveEmployee(code, { advances: [...(e.advances || []), adv] });
 }
-export function addIncrement(code, inc) {
-  const e = getEmployee(code); e.increments = [...(e.increments || []), inc]; saveEmployee(code, { increments: e.increments });
+export async function addIncrement(code, inc) {
+  const e = await loadEmployee(code); await saveEmployee(code, { increments: [...(e.increments || []), inc] });
 }
-export function getMonth(code, month) {
-  return getEmployee(code).months?.[month] || { advanceRecover: 0, fine: 0, loanInstallment: 0, advanceBalanceIn: 0, locked: false };
+export async function saveMonth(code, month, data) {
+  const e = await loadEmployee(code); const months = { ...(e.months || {}) };
+  months[month] = { ...monthData(e, month), ...data }; await saveEmployee(code, { months });
 }
-export function saveMonth(code, month, data) {
-  const e = getEmployee(code); const months = { ...(e.months || {}) }; months[month] = { ...getMonth(code, month), ...data }; saveEmployee(code, { months });
+export async function resignEmployee(code, by) {
+  await saveEmployee(code, { active: false, resignedAt: new Date().toISOString().slice(0, 10) });
+  return queueJob('resign_employee', { code }, by);
 }
-export function getAttendance(code /*, month */) { return MOCK_ATT[code] || { presentDays: 0, absentDays: 0, otHrs: 0, lateHrs: 0, earlyHrs: 0 }; }
+// Monthly attendance per employee — written by the publishSalaryData job to att_attendance/{code}.
+export async function loadAttendance(code) {
+  if (isConfigured && db) {
+    const s = await getDoc(doc(db, 'att_attendance', code));
+    if (s.exists()) return s.data();
+  }
+  return MOCK_ATT[code] || { presentDays: 0, absentDays: 0, otHrs: 0, lateHrs: 0, earlyHrs: 0 };
+}
 
 // The app-data collections that make up a full backup (all namespaced att_*).
 const BACKUP_COLLECTIONS = ['att_employees', 'att_salary', 'att_advances', 'att_increments', 'att_loans', 'att_fines', 'att_month_locks'];

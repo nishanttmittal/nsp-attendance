@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import { listEmployees, getEmployee, saveEmployee, addAdvance, addIncrement, getMonth, saveMonth, getAttendance, queueJob } from '../lib/data';
+import { useEffect, useState } from 'react';
+import { loadEmployees, loadEmployee, saveEmployee, addAdvance, addIncrement, monthData, saveMonth, loadAttendance, queueJob } from '../lib/data';
 import { computePay } from '../lib/payroll';
 
 const MONTH = '2026-06';                 // current pay month (real app derives from date)
@@ -7,23 +7,25 @@ const MONTH_CTX = { daysInMonth: 30, elapsedDays: 30, fullMonth: true, monthStar
 const rupee = (n) => '₹' + Number(n || 0).toLocaleString('en-IN');
 
 export default function Salary({ user }) {
-  const emps = listEmployees();
-  const [code, setCode] = useState(emps[0]?.code || '');
-  const [tick, setTick] = useState(0);
-  const refresh = () => setTick(t => t + 1);
+  const [emps, setEmps] = useState(null);
+  const [code, setCode] = useState('');
+  const [emp, setEmp] = useState(null);
+  const [att, setAtt] = useState(null);
+  const [busy, setBusy] = useState(false);
 
-  const emp = useMemo(() => getEmployee(code), [code, tick]);
-  const md = useMemo(() => getMonth(code, MONTH), [code, tick]);
-  const att = getAttendance(code, MONTH);
-  const advancesThisMonth = (emp.advances || []).filter(a => (a.date || '').startsWith(MONTH)).reduce((s, a) => s + Number(a.amount || 0), 0);
+  useEffect(() => { loadEmployees().then(list => { setEmps(list); if (list[0]) setCode(list[0].code); }); }, []);
 
-  const pay = useMemo(() => computePay({
-    emp, att, ...MONTH_CTX,
-    advancesThisMonth, advanceBalanceIn: Number(md.advanceBalanceIn || 0),
-    advanceRecover: Number(md.advanceRecover || 0), fines: Number(md.fine || 0), loanInstallment: Number(md.loanInstallment || 0),
-  }), [emp, att, md, advancesThisMonth]);
+  async function reload(c = code) {
+    if (!c) return;
+    const [e, a] = await Promise.all([loadEmployee(c), loadAttendance(c)]);
+    setEmp(e); setAtt(a);
+  }
+  useEffect(() => { setEmp(null); reload(code); }, [code]);
 
-  const locked = md.locked;
+  const save = async (fn) => { setBusy(true); try { await fn(); await reload(); } finally { setBusy(false); } };
+
+  if (emps === null) return <p className="text-gray-500">Loading…</p>;
+  if (emps.length === 0) return <p className="text-gray-500 text-sm">No employees yet. Add staff in the <b>Staff</b> tab, then set their salary here.</p>;
 
   return (
     <div className="space-y-4">
@@ -31,51 +33,51 @@ export default function Salary({ user }) {
         {emps.map(e => <option key={e.code} value={e.code}>{e.name} ({e.code}) · {e.shift}</option>)}
       </select>
 
-      {/* Salary setup */}
-      <SetupCard emp={emp} onSave={(patch) => { saveEmployee(code, patch); refresh(); }} disabled={locked} />
+      {(!emp || !att) ? <p className="text-gray-500 text-sm">Loading employee…</p> : (() => {
+        const md = monthData(emp, MONTH);
+        const advancesThisMonth = (emp.advances || []).filter(a => (a.date || '').startsWith(MONTH)).reduce((s, a) => s + Number(a.amount || 0), 0);
+        const pay = computePay({ emp, att, ...MONTH_CTX, advancesThisMonth, advanceBalanceIn: Number(md.advanceBalanceIn || 0), advanceRecover: Number(md.advanceRecover || 0), fines: Number(md.fine || 0), loanInstallment: Number(md.loanInstallment || 0) });
+        const locked = md.locked;
+        return (
+          <>
+            <SetupCard key={'s' + code} emp={emp} disabled={locked || busy} onSave={(patch) => save(() => saveEmployee(code, patch))} />
 
-      {/* Payslip */}
-      <div className="bg-white rounded-xl shadow p-4">
-        <div className="flex items-center justify-between mb-2">
-          <div className="font-semibold text-gray-800">Payslip · {MONTH}</div>
-          {locked && <span className="text-xs bg-gray-800 text-white px-2 py-0.5 rounded">🔒 Locked</span>}
-        </div>
-        <Row k="Rate" v={`${rupee(pay.effectiveRate)} ${emp.type === 'daily' ? '/day' : '/month'}${pay.effectiveRemark ? ' (' + pay.effectiveRemark + ')' : ''}`} />
-        <Row k="Present / Absent" v={`${pay.presentDays} / ${pay.absentDays} (payable ${pay.payableDays}d)`} />
-        <Row k="OT" v={`${pay.otHrs}h → ${pay.otHrsNet}h net`} />
-        <hr className="my-2" />
-        <Row k="Base" v={rupee(pay.base)} />
-        <Row k="+ Overtime" v={rupee(pay.otPay)} />
-        {pay.perfectBonus > 0 && <Row k="+ Attendance bonus" v={rupee(pay.perfectBonus)} />}
-        {pay.fines > 0 && <Row k="− Fine" v={rupee(pay.fines)} />}
-        {pay.loanInstallment > 0 && <Row k="− Loan installment" v={rupee(pay.loanInstallment)} />}
-        {pay.advanceRecovered > 0 && <Row k="− Advance recovered" v={rupee(pay.advanceRecovered)} />}
-        <div className="flex justify-between mt-2 pt-2 border-t font-bold text-lg">
-          <span>Net pay</span><span className="text-red-700">{rupee(pay.net)}</span>
-        </div>
-        {pay.advanceDue > 0 && <p className="text-xs text-amber-700 mt-1">Advance owed {rupee(pay.advanceDue)} · carrying {rupee(pay.advanceBalanceCarried)} forward.</p>}
-        {pay.suggestedWeeklyOffDock.days > 0 && <p className="text-xs text-amber-700 mt-1">⚠ {pay.absentDays} absences → suggest docking {pay.suggestedWeeklyOffDock.days} weekly-off ({rupee(pay.suggestedWeeklyOffDock.amount)}) — confirm to apply.</p>}
+            <div className="bg-white rounded-xl shadow p-4">
+              <div className="flex items-center justify-between mb-2">
+                <div className="font-semibold text-gray-800">Payslip · {MONTH}</div>
+                {locked && <span className="text-xs bg-gray-800 text-white px-2 py-0.5 rounded">🔒 Locked</span>}
+              </div>
+              <Row k="Rate" v={`${rupee(pay.effectiveRate)} ${emp.type === 'daily' ? '/day' : '/month'}${pay.effectiveRemark ? ' (' + pay.effectiveRemark + ')' : ''}`} />
+              <Row k="Present / Absent" v={`${pay.presentDays} / ${pay.absentDays} (payable ${pay.payableDays}d)`} />
+              <Row k="OT" v={`${pay.otHrs}h → ${pay.otHrsNet}h net`} />
+              <hr className="my-2" />
+              <Row k="Base" v={rupee(pay.base)} />
+              <Row k="+ Overtime" v={rupee(pay.otPay)} />
+              {pay.perfectBonus > 0 && <Row k="+ Attendance bonus" v={rupee(pay.perfectBonus)} />}
+              {pay.fines > 0 && <Row k="− Fine" v={rupee(pay.fines)} />}
+              {pay.loanInstallment > 0 && <Row k="− Loan installment" v={rupee(pay.loanInstallment)} />}
+              {pay.advanceRecovered > 0 && <Row k="− Advance recovered" v={rupee(pay.advanceRecovered)} />}
+              <div className="flex justify-between mt-2 pt-2 border-t font-bold text-lg"><span>Net pay</span><span className="text-red-700">{rupee(pay.net)}</span></div>
+              {pay.advanceDue > 0 && <p className="text-xs text-amber-700 mt-1">Advance owed {rupee(pay.advanceDue)} · carrying {rupee(pay.advanceBalanceCarried)} forward.</p>}
+              {pay.suggestedWeeklyOffDock.days > 0 && <p className="text-xs text-amber-700 mt-1">⚠ {pay.absentDays} absences → suggest docking {pay.suggestedWeeklyOffDock.days} weekly-off ({rupee(pay.suggestedWeeklyOffDock.amount)}) — confirm to apply.</p>}
+              <div className="grid grid-cols-2 gap-2 mt-3">
+                <button onClick={async () => { await queueJob('payslip', { code, month: MONTH }, user.email); alert('Payslip will be sent to Telegram.'); }} className="bg-red-700 text-white rounded-lg py-2 text-sm font-medium">Send to Telegram</button>
+                <LockButton locked={locked} onToggle={(next) => save(() => saveMonth(code, MONTH, { locked: next }))} />
+              </div>
+            </div>
 
-        <div className="grid grid-cols-2 gap-2 mt-3">
-          <button onClick={async () => { await queueJob('payslip', { code, month: MONTH }, user.email); alert('Payslip will be sent to Telegram.'); }}
-            className="bg-red-700 text-white rounded-lg py-2 text-sm font-medium">Send to Telegram</button>
-          <LockButton locked={locked} onToggle={(next) => { saveMonth(code, MONTH, { locked: next }); refresh(); }} />
-        </div>
-      </div>
+            <div className="bg-white rounded-xl shadow p-4">
+              <div className="font-semibold text-gray-800 mb-2">This month — deductions</div>
+              <NumRow key={'r' + code} label={`Recover advance (owed ${rupee(pay.advanceDue)})`} val={md.advanceRecover} disabled={locked || busy} onSave={(v) => save(() => saveMonth(code, MONTH, { advanceRecover: v }))} />
+              <NumRow key={'f' + code} label="Fine" val={md.fine} disabled={locked || busy} onSave={(v) => save(() => saveMonth(code, MONTH, { fine: v }))} />
+              <NumRow key={'l' + code} label="Loan installment" val={md.loanInstallment} disabled={locked || busy} onSave={(v) => save(() => saveMonth(code, MONTH, { loanInstallment: v }))} />
+            </div>
 
-      {/* This-month deductions */}
-      <div className="bg-white rounded-xl shadow p-4">
-        <div className="font-semibold text-gray-800 mb-2">This month — deductions</div>
-        <NumRow label={`Recover advance (owed ${rupee(pay.advanceDue)})`} val={md.advanceRecover} onSave={(v) => { saveMonth(code, MONTH, { advanceRecover: v }); refresh(); }} disabled={locked} />
-        <NumRow label="Fine" val={md.fine} onSave={(v) => { saveMonth(code, MONTH, { fine: v }); refresh(); }} disabled={locked} />
-        <NumRow label="Loan installment" val={md.loanInstallment} onSave={(v) => { saveMonth(code, MONTH, { loanInstallment: v }); refresh(); }} disabled={locked} />
-      </div>
-
-      {/* Advances */}
-      <AdvancesCard emp={emp} disabled={locked} onAdd={(a) => { addAdvance(code, a); refresh(); }} />
-
-      {/* Increments */}
-      <IncrementsCard emp={emp} disabled={locked} onAdd={(i) => { addIncrement(code, i); refresh(); }} />
+            <AdvancesCard key={'a' + code} emp={emp} disabled={locked || busy} onAdd={(a) => save(() => addAdvance(code, a))} />
+            <IncrementsCard key={'i' + code} emp={emp} disabled={locked || busy} onAdd={(i) => save(() => addIncrement(code, i))} />
+          </>
+        );
+      })()}
     </div>
   );
 }
@@ -117,8 +119,7 @@ function AdvancesCard({ emp, onAdd, disabled }) {
         <input className="border rounded px-2 py-1.5" type="date" value={f.date} onChange={set('date')} />
         <select className="border rounded px-2 py-1.5" value={f.mode} onChange={set('mode')}><option value="cash">Cash</option><option value="account">Account</option><option value="both">Both</option></select>
         <input className="border rounded px-2 py-1.5" placeholder="Remark" value={f.remark} onChange={set('remark')} />
-        <button onClick={() => { if (f.amount) { onAdd({ ...f, amount: Number(f.amount) }); setF({ ...f, amount: '', remark: '' }); } }}
-          className="col-span-2 bg-red-700 text-white rounded py-1.5 text-sm font-medium">Add advance</button>
+        <button onClick={() => { if (f.amount) onAdd({ ...f, amount: Number(f.amount) }); }} className="col-span-2 bg-red-700 text-white rounded py-1.5 text-sm font-medium">Add advance</button>
       </div>}
     </div>
   );
@@ -138,8 +139,7 @@ function IncrementsCard({ emp, onAdd, disabled }) {
         <input className="border rounded px-2 py-1.5" type="number" placeholder="+ Amount" value={f.amount} onChange={set('amount')} />
         <input className="border rounded px-2 py-1.5" type="date" value={f.effective} onChange={set('effective')} />
         <input className="border rounded px-2 py-1.5 col-span-2" placeholder="Remark (e.g. annual hike)" value={f.remark} onChange={set('remark')} />
-        <button onClick={() => { if (f.amount) { onAdd({ ...f, amount: Number(f.amount) }); setF({ ...f, amount: '', remark: '' }); } }}
-          className="col-span-2 bg-green-700 text-white rounded py-1.5 text-sm font-medium">Add increment</button>
+        <button onClick={() => { if (f.amount) onAdd({ ...f, amount: Number(f.amount) }); }} className="col-span-2 bg-green-700 text-white rounded py-1.5 text-sm font-medium">Add increment</button>
       </div>}
     </div>
   );

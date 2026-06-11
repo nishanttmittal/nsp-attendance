@@ -23,6 +23,7 @@ In Firebase console → Firestore Database → Rules, paste these blocks INSIDE 
       allow write: if isAttAdmin();
     }
     // salary & employee data — admin only (jobs use Admin SDK, which bypasses rules)
+    match /att_attendance/{doc}  { allow read: if isAttAdmin(); allow write: if false; }
     match /att_salary/{doc}      { allow read, write: if isAttAdmin(); }
     match /att_employees/{doc}   { allow read, write: if isAttAdmin(); }
     match /att_advances/{doc}    { allow read, write: if isAttAdmin(); }

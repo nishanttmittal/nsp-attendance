@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { queueJob, saveEmployee, listEmployees, resignEmployee } from '../lib/data';
+import { useEffect, useState } from 'react';
+import { queueJob, saveEmployee, loadEmployees, resignEmployee } from '../lib/data';
 
 const DEPTS = ['FITTING', 'WELDING', 'PRESS', 'POWDER', 'TOOL ROOM', 'HELPER', 'FRAME', 'DEMO'];
 const SHIFTS = ['GEN', '10H', '12H', 'wir'];
@@ -7,14 +7,16 @@ const SHIFTS = ['GEN', '10H', '12H', 'wir'];
 export default function Employees({ user }) {
   const [f, setF] = useState({ name: '', cardno: '', dept: 'FITTING', shift: 'GEN', gender: 'Male' });
   const [status, setStatus] = useState(null);
-  const [tick, setTick] = useState(0);
+  const [staff, setStaff] = useState([]);
   const set = k => e => setF({ ...f, [k]: e.target.value });
-  const staff = listEmployees(); // active only
+
+  const refresh = () => loadEmployees().then(setStaff);
+  useEffect(() => { refresh(); }, []);
 
   async function resign(emp) {
     if (!confirm(`Mark ${emp.name} as resigned? They'll drop from active staff, salary and counts.`)) return;
     await resignEmployee(emp.code, user.email);
-    setTick(t => t + 1);
+    refresh();
   }
 
   async function submit(e) {
@@ -23,9 +25,10 @@ export default function Employees({ user }) {
     setStatus({ busy: true });
     try {
       await queueJob('onboard_employee', { ...f }, user.email);   // -> machine (sets policy = shift)
-      saveEmployee(f.cardno.trim(), { code: f.cardno.trim(), name: f.name.trim(), dept: f.dept, shift: f.shift }); // app salary list
+      await saveEmployee(f.cardno.trim(), { code: f.cardno.trim(), name: f.name.trim(), dept: f.dept, shift: f.shift }); // app salary list
       setStatus({ ok: true, t: `${f.name} queued — being added to the machine with ${f.shift} shift & policy.` });
       setF({ name: '', cardno: '', dept: f.dept, shift: f.shift, gender: 'Male' });
+      refresh();
     } catch (e) { setStatus({ ok: false, t: 'Failed: ' + e.message }); }
   }
 
@@ -50,7 +53,7 @@ export default function Employees({ user }) {
       <style>{`.inp{width:100%;border:1px solid #d1d5db;border-radius:.5rem;padding:.55rem .75rem;background:#fff}`}</style>
 
       {/* Current staff + resign */}
-      <div className="pt-2" key={tick}>
+      <div className="pt-2">
         <div className="font-semibold text-gray-800 mb-1">Current staff ({staff.length})</div>
         <ul className="text-sm divide-y divide-gray-100">
           {staff.map((e) => (

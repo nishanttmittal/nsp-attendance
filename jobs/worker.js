@@ -37,14 +37,35 @@ async function handle(type, p) {
     return 'generated but no file matched';
   }
   if (type === 'payslip') {
-    // basic: compute current-month payslip from Firestore salary config + live attendance
     const { computePay } = require('./salaryCalc');
-    const empDoc = await db().collection('att_salary').doc(p.code).get();
+    const fdb = db();
+    const [empDoc, attDoc] = await Promise.all([
+      fdb.collection('att_salary').doc(p.code).get(),
+      fdb.collection('att_attendance').doc(p.code).get(),
+    ]);
     const emp = empDoc.exists ? empDoc.data() : null;
-    if (!emp) { await sendTelegram(`Payslip: no salary set for ${p.code}.`); return 'no salary config'; }
-    // (attendance + full calc wired with the monthly job; here send the saved config summary)
-    await sendTelegram(`🧾 Payslip request for ${p.code} (${emp.type} ${emp.amount || emp.wage}). Full payslip generation runs in the monthly job.`);
-    return 'payslip acknowledged';
+    if (!emp || !(emp.amount || emp.wage)) { await sendTelegram(`🧾 Payslip: no salary set for ${p.code}.`); return 'no salary config'; }
+    const att = attDoc.exists ? attDoc.data() : { presentDays: 0, absentDays: 0, otHrs: 0, lateHrs: 0, earlyHrs: 0 };
+    const now = new Date();
+    const first = new Date(now.getFullYear(), now.getMonth(), 1);
+    const last = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    const yest = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+    const mk = `${first.getFullYear()}-${String(first.getMonth() + 1).padStart(2, '0')}`;
+    const md = (emp.months && emp.months[mk]) || {};
+    const adv = (emp.advances || []).filter(a => (a.date || '').startsWith(mk)).reduce((s, a) => s + Number(a.amount || 0), 0);
+    const pay = computePay({
+      emp, att, daysInMonth: last.getDate(), elapsedDays: yest.getDate(), fullMonth: false, monthStart: first, toDate: yest,
+      advancesThisMonth: adv, advanceBalanceIn: Number(md.advanceBalanceIn || 0), advanceRecover: Number(md.advanceRecover || 0),
+      fines: Number(md.fine || 0), loanInstallment: Number(md.loanInstallment || 0),
+    });
+    const r = n => '₹' + Number(n || 0).toLocaleString('en-IN');
+    const lines = [`🧾 <b>Payslip — ${emp.name || p.code} (${mk})</b>`,
+      `Rate ${r(pay.effectiveRate)} ${emp.type === 'daily' ? '/day' : '/mo'}  ·  Present ${pay.presentDays} / Absent ${pay.absentDays}`,
+      `Base ${r(pay.base)} + OT ${r(pay.otPay)}${pay.perfectBonus ? ' + bonus ' + r(pay.perfectBonus) : ''}`,
+      `${pay.fines ? '− Fine ' + r(pay.fines) + '  ' : ''}${pay.loanInstallment ? '− Loan ' + r(pay.loanInstallment) + '  ' : ''}${pay.advanceRecovered ? '− Advance ' + r(pay.advanceRecovered) : ''}`,
+      `<b>NET ${r(pay.net)}</b>${pay.advanceBalanceCarried ? '  (advance bal ' + r(pay.advanceBalanceCarried) + ')' : ''}`];
+    await sendTelegram(lines.filter(Boolean).join('\n'));
+    return 'payslip sent';
   }
   return 'unknown job type';
 }
