@@ -6,6 +6,7 @@ import MonthlyDownload from './components/MonthlyDownload.jsx';
 import ManualPunch from './components/ManualPunch.jsx';
 import Salary from './components/Salary.jsx';
 import Employees from './components/Employees.jsx';
+import Advance from './components/Advance.jsx';
 import Settings from './components/Settings.jsx';
 
 const TABS = [
@@ -13,6 +14,7 @@ const TABS = [
   { key: 'salary', label: 'Salary', feature: 'salary' },
   { key: 'monthly', label: 'Monthly', feature: 'monthly' },
   { key: 'manual', label: 'Punch', feature: 'manual' },
+  { key: 'advance', label: 'Advance', feature: 'advance' },
   { key: 'employees', label: 'Staff', feature: 'employees' },
   { key: 'settings', label: 'Settings', feature: 'settings' },
 ];
@@ -23,6 +25,15 @@ export default function App() {
 
   if (loading) return <Center>Loading…</Center>;
   if (!user) return <Login />;
+  if (!user.role) return (
+    <Center>
+      <div className="text-center p-6">
+        <p className="text-gray-700 font-medium">No access yet</p>
+        <p className="text-sm text-gray-500 mt-1">{user.email}<br />Ask the admin to add you in Settings → Managers.</p>
+        <button onClick={signOut} className="mt-4 text-sm bg-gray-200 px-3 py-1.5 rounded">Sign out</button>
+      </div>
+    </Center>
+  );
 
   const visible = TABS.filter((t) => canSee(user.role, t.feature));
   const active = visible.find((t) => t.key === tab) ? tab : visible[0]?.key;
@@ -52,6 +63,7 @@ export default function App() {
         {active === 'manual' && canSee(user.role, 'manual') && <ManualPunch user={user} />}
         {active === 'salary' && canSee(user.role, 'salary') && <Salary user={user} />}
         {active === 'employees' && canSee(user.role, 'employees') && <Employees user={user} />}
+        {active === 'advance' && canSee(user.role, 'advance') && <Advance user={user} />}
         {active === 'settings' && canSee(user.role, 'settings') && <Settings />}
       </main>
     </div>

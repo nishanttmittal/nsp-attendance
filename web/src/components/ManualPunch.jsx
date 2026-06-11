@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
-import { queueJob, loadEmployees } from '../lib/data';
+import { queueJob, loadRoster } from '../lib/data';
 
 export default function ManualPunch({ user }) {
   const [f, setF] = useState({ emp: '', date: '', in: '', out: '', remark: '' });
   const [status, setStatus] = useState(null);
   const [emps, setEmps] = useState([]);
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
-  useEffect(() => { loadEmployees().then(setEmps); }, []);
+  useEffect(() => { loadRoster().then(setEmps); }, []);
 
   async function submit(e) {
     e.preventDefault();

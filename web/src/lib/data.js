@@ -70,6 +70,30 @@ export function dailyAtt(emp, month) {
   const equivalentDays = log.reduce((s, d) => s + Math.min(Number(d.hours || 0), DAILY_STD) / DAILY_STD, 0);
   return { presentDays: log.length, equivalentDays: Math.round(equivalentDays * 100) / 100, hoursTotal, otHrs: 0, lateHrs: 0, earlyHrs: 0, absentDays: 0 };
 }
+// Salary-free roster (att_meta/roster) — readable by managers for name pickers.
+export async function loadRoster() {
+  if (!isConfigured || !db) return [{ code: '00000018', name: 'sanjay pathak', dept: 'TOOL ROOM' }, { code: '00000003', name: 'naveen press', dept: 'PRESS' }];
+  const s = await getDoc(doc(db, 'att_meta', 'roster'));
+  return s.exists() ? (s.data().employees || []) : [];
+}
+// Managers / access (att_users keyed by lowercased email)
+export async function listManagers() {
+  if (!isConfigured || !db) return [];
+  const snap = await getDocs(collection(db, 'att_users'));
+  return snap.docs.map(d => ({ email: d.id, ...d.data() }));
+}
+export async function addManager(email, telegramChatId, role = 'manager') {
+  if (!isConfigured || !db) return;
+  await setDoc(doc(db, 'att_users', email.toLowerCase()), { role, telegramChatId: telegramChatId || '', addedAt: new Date().toISOString() }, { merge: true });
+}
+export async function removeManager(email) {
+  if (!isConfigured || !db) return;
+  const { deleteDoc } = await import('firebase/firestore');
+  await deleteDoc(doc(db, 'att_users', email.toLowerCase()));
+}
+// Manager advance → job queue (worker applies with admin rights so salary stays admin-only)
+export async function queueAdvance(code, advance, by) { return queueJob('add_advance', { code, advance }, by); }
+
 // All employees' monthly attendance at once (for the salary register PDF).
 export async function loadAllAttendance() {
   if (!isConfigured || !db) return {};

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { queueJob, saveEmployee, loadEmployees, resignEmployee } from '../lib/data';
+import { queueJob, saveEmployee, loadEmployees, loadRoster, resignEmployee } from '../lib/data';
 
 const DEPTS = ['FITTING', 'WELDING', 'PRESS', 'POWDER', 'TOOL ROOM', 'HELPER', 'FRAME', 'DEMO'];
 const SHIFTS = ['GEN', '10H', '12H', 'wir'];
@@ -10,8 +10,9 @@ export default function Employees({ user }) {
   const [status, setStatus] = useState(null);
   const [staff, setStaff] = useState([]);
   const set = k => e => setF({ ...f, [k]: e.target.value });
+  const isAdmin = user.role === 'admin';
 
-  const refresh = () => loadEmployees().then(setStaff);
+  const refresh = () => (isAdmin ? loadEmployees() : loadRoster()).then(setStaff);
   useEffect(() => { refresh(); }, []);
 
   async function resign(emp) {
@@ -44,6 +45,7 @@ export default function Employees({ user }) {
 
   return (
     <form onSubmit={submit} className="bg-white rounded-xl shadow p-4 space-y-3">
+      {isAdmin && (<>
       <div className="font-semibold text-gray-800">Add employee</div>
       <div className="flex gap-2 text-sm">
         <button type="button" onClick={() => setKind('machine')} className={`flex-1 rounded-lg py-2 border ${kind === 'machine' ? 'border-red-700 text-red-700 font-medium' : 'border-gray-200 text-gray-500'}`}>Machine employee</button>
@@ -72,6 +74,7 @@ export default function Employees({ user }) {
         {status?.busy ? 'Adding…' : (kind === 'machine' ? 'Add to machine' : 'Add daily-wager')}
       </button>
       {status && !status.busy && <p className={`text-sm rounded p-2 border ${status.ok ? 'text-green-800 bg-green-50 border-green-200' : 'text-red-700 bg-red-50 border-red-200'}`}>{status.t}</p>}
+      </>)}
 
       <style>{`.inp{width:100%;border:1px solid #d1d5db;border-radius:.5rem;padding:.55rem .75rem;background:#fff}`}</style>
 
@@ -81,8 +84,8 @@ export default function Employees({ user }) {
         <ul className="text-sm divide-y divide-gray-100">
           {staff.map((e) => (
             <li key={e.code} className="py-2 flex items-center justify-between">
-              <span>{e.name} <span className="text-gray-400">({e.code}) · {e.shift}</span></span>
-              <button type="button" onClick={() => resign(e)} className="text-xs text-red-700 border border-red-200 rounded px-2 py-1">Resign</button>
+              <span>{e.name} <span className="text-gray-400">({e.code}){e.shift ? ' · ' + e.shift : ''}</span></span>
+              {isAdmin && <button type="button" onClick={() => resign(e)} className="text-xs text-red-700 border border-red-200 rounded px-2 py-1">Resign</button>}
             </li>
           ))}
         </ul>

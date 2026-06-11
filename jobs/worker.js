@@ -34,6 +34,15 @@ async function handle(type, p) {
     await sendTelegram(`🔄 Reprocessed attendance ${p.from} → ${p.to}.`);
     return 'reprocessed ' + p.from + '..' + p.to;
   }
+  if (type === 'add_advance') {  // manager-created; applied with admin SDK (bypasses rules)
+    const ref = db().collection('att_salary').doc(p.code);
+    const snap = await ref.get();
+    const advances = (snap.exists && snap.data().advances) || [];
+    advances.push(p.advance);
+    await ref.set({ advances }, { merge: true });
+    await sendTelegram(`💸 Advance ₹${p.advance.amount} to ${p.code} (${p.advance.mode}) by ${p.advance.paidBy || '?'}.`);
+    return 'advance added';
+  }
   if (type === 'monthly_download') {
     const scope = p.scope === 'all' ? 'all' : p.scope === 'dept' ? 'dept:' + p.value : 'emp:' + p.value;
     const out = run('monthlyDownload.js', { MONTH: String(p.month || 0), SCOPE: scope });

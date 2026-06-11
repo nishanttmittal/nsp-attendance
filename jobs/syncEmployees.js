@@ -16,17 +16,23 @@ const col = (h, ...names) => { const l = h.map(x => x.toLowerCase()); for (const
     const ci = col(h, 'empcode', 'emp code', 'code'), ni = col(h, 'empname', 'emp name', 'name'), di = col(h, 'dept_name', 'dept', 'department');
     const fdb = db();
     let batch = fdb.batch(), n = 0, total = 0;
+    const roster = [];
     for (const r of grid.slice(1)) {
       const code = (ci >= 0 ? r[ci] : '').trim();
       if (!code) continue;
+      const name = (ni >= 0 ? r[ni] : '').trim();
+      const dept = (di >= 0 ? r[di] : '').trim().toUpperCase();
       const ref = fdb.collection('att_salary').doc(code);
       const snap = await ref.get();
-      const patch = { code, name: (ni >= 0 ? r[ni] : '').trim(), dept: (di >= 0 ? r[di] : '').trim().toUpperCase() };
+      const patch = { code, name, dept };
       if (!snap.exists) patch.shift = 'GEN';        // default only for new docs
       batch.set(ref, patch, { merge: true });
+      roster.push({ code, name, dept, shift: (snap.exists && snap.data().shift) || 'GEN' });
       if (++n >= 300) { await batch.commit(); total += n; batch = fdb.batch(); n = 0; }
     }
     if (n) { await batch.commit(); total += n; }
-    console.log(`synced ${total} employees into att_salary`);
+    // salary-free roster for manager-accessible pickers (att_meta/roster, readable by any signed-in user)
+    await fdb.collection('att_meta').doc('roster').set({ employees: roster, updatedAt: new Date().toISOString() });
+    console.log(`synced ${total} employees into att_salary + att_meta/roster`);
   } finally { await browser.close(); }
 })();

@@ -12,15 +12,15 @@ export const ADMIN_EMAILS = [
   'nspenterprises24@gmail.com',
 ];
 
-// Manager-visible features (owner-defined): Floor dashboard, manual punch, resign employee.
-// Salary and monthly download stay admin-only.
-export const MANAGER_FEATURES = ['dashboard', 'manual', 'resign'];
-export const ALL_FEATURES = ['dashboard', 'monthly', 'manual', 'salary', 'employees', 'resign', 'longabsence', 'settings', 'admin'];
+// Manager-visible features (owner-defined): Floor dashboard, manual punch, staff, add advance.
+// Salary, monthly, settings stay admin-only.
+export const MANAGER_FEATURES = ['dashboard', 'manual', 'employees', 'advance'];
+export const ALL_FEATURES = ['dashboard', 'salary', 'monthly', 'manual', 'employees', 'advance', 'resign', 'longabsence', 'settings', 'admin'];
 
 export function canSee(role, feature) {
   if (role === 'admin') return true;
   if (role === 'manager') return MANAGER_FEATURES.includes(feature);
-  return false;
+  return false; // no role = no access
 }
 
 const MOCK_KEY = 'nsp_mock_user';
@@ -40,8 +40,11 @@ export function useAuth() {
     let unsubDoc = null;
     const unsub = onAuthStateChanged(auth, (u) => {
       if (!u) { setUser(null); setLoading(false); return; }
-      unsubDoc = onSnapshot(doc(db, 'att_users', u.uid), (s) => {
-        const role = ADMIN_EMAILS.includes((u.email || '').toLowerCase()) ? 'admin' : (s.data()?.role || 'manager');
+      const email = (u.email || '').toLowerCase();
+      // role keyed by email (matches other apps). Admins via ADMIN_EMAILS; everyone else must be
+      // added to att_users by an admin, else NO access (random Google users are locked out).
+      unsubDoc = onSnapshot(doc(db, 'att_users', email), (s) => {
+        const role = ADMIN_EMAILS.includes(email) ? 'admin' : (s.data()?.role || null);
         setUser({ uid: u.uid, email: u.email, role });
         setLoading(false);
       });
