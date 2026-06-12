@@ -1,0 +1,29 @@
+name: NSP Ops command bot
+on:
+  schedule:
+    - cron: '*/5 3-17 * * *'   # every 5 min, ~08:30–23:00 IST (long-polls ~4.5 min each)
+  workflow_dispatch:
+
+# Only one bot listener at a time (offset is persisted in att_meta/bot_state).
+concurrency:
+  group: command-bot
+  cancel-in-progress: true
+
+jobs:
+  listen:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - working-directory: jobs
+        run: npm ci
+      - name: Listen for commands
+        working-directory: jobs
+        run: node commandBot.js
+        env:
+          RUN_SECONDS: '270'
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}

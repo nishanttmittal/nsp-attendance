@@ -1,0 +1,60 @@
+name: Scheduled alerts & maintenance
+on:
+  schedule:
+    - cron: '10 12 * * *'   # 17:40 IST — food headcount
+    - cron: '0 16 * * *'    # 21:30 IST — evening missed-punch (no OUT)
+    - cron: '30 4 * * *'    # 10:00 IST — morning missed-punch (yesterday)
+    - cron: '30 3 * * *'    # 09:00 IST — long absence (>4 days)
+    - cron: '0 5 * * *'     # 10:30 IST — morning attendance summary + understaffed
+    - cron: '30 1 * * *'    # 07:00 IST — reprocess yesterday
+    - cron: '45 1 * * *'    # 07:15 IST — publish salary attendance (att_attendance)
+    - cron: '0 2 * * 0'     # Sun 07:30 IST — weekly backup
+    - cron: '30 2 * * 0'    # Sun 08:00 IST — sync employee list (att_salary)
+    - cron: '30 14 * * *'   # 20:00 IST — welder daily production summary
+    - cron: '35 14 * * *'   # 20:05 IST — plating daily summary
+    - cron: '30 13 * * 6'   # Sat 19:00 IST — welder contractor pay-ready (last 7 days)
+  workflow_dispatch:
+    inputs:
+      task:
+        description: which task to run manually
+        type: choice
+        options: [headcount, evening-miss, morning-miss, morning-summary, long-absence, reprocess, salary-data, backup, sync-employees, welder-production, plating-summary, welder-pay]
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - working-directory: jobs
+        run: npm ci
+      - working-directory: jobs
+        run: npx playwright install --with-deps chromium
+      - name: Run scheduled task
+        working-directory: jobs
+        env:
+          SCHED: ${{ github.event.schedule }}
+          TASK: ${{ github.event.inputs.task }}
+          REALTIME_CORP: ${{ secrets.REALTIME_CORP }}
+          REALTIME_USER: ${{ secrets.REALTIME_USER }}
+          REALTIME_PASS: ${{ secrets.REALTIME_PASS }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          case "${TASK:-$SCHED}" in
+            "headcount"|"10 12 * * *")   node eveningHeadcount.js ;;
+            "evening-miss"|"0 16 * * *")  MODE=evening node missedPunch.js ;;
+            "morning-miss"|"30 4 * * *")  MODE=morning node missedPunch.js ;;
+            "morning-summary"|"0 5 * * *") node morningSummary.js ;;
+            "long-absence"|"30 3 * * *")  THRESHOLD=4 node longAbsence.js ;;
+            "reprocess"|"30 1 * * *")     node dailyReprocess.js ;;
+            "salary-data"|"45 1 * * *")   node publishSalaryData.js ;;
+            "backup"|"0 2 * * 0")         node backup.js ;;
+            "sync-employees"|"30 2 * * 0") node syncEmployees.js ;;
+            "welder-production"|"30 14 * * *") node welderProduction.js ;;
+            "plating-summary"|"35 14 * * *")  node platingSummary.js ;;
+            "welder-pay"|"30 13 * * 6")        node welderContractorPay.js ;;
+            *) echo "no task matched ${TASK:-$SCHED}" ;;
+          esac
