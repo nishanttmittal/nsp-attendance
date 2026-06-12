@@ -13,3 +13,4 @@ jobs/firebase-admin.json
 jobs/lib/nativelibs/
 jobs/.nativelibs/
 jobs/nspops.local.json
+jobs/telegram.local.bak.json

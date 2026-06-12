@@ -1,37 +1,30 @@
-// Welder — DAILY PRODUCTION SUMMARY. Sums today's dispatches (the day's output) grouped
-// by welder and product, plus a contractor-pay-ready figure (qty × active welding rate).
-// Read-only on the welder app's Firestore; pushes one digest to the NSP Ops bot.
-// Run once at end of day (cron). Set DATE=YYYY-MM-DD to summarise a specific day.
+// Welder — DAILY PRODUCTION SUMMARY. Sums a day's dispatches (the day's output) grouped
+// by welder and product, plus a pay-ready figure (qty × active welding rate).
+// Read-only on the welder app's Firestore. Exports buildProduction() so the command bot
+// and the scheduled job share identical output. Run via cron (DATE=YYYY-MM-DD optional).
 const { db } = require('./lib/firestore');
 const { sendTelegram } = require('./lib/notify');
 const { istToday, prettyDate } = require('./lib/opsdate');
 
 async function activeRates(fdb) {
-  // productName -> rate, for the active welding rate rows.
   const snap = await fdb.collection('apps/welder/rates').where('process', '==', 'welding').get();
   const map = {};
   snap.forEach(d => { const r = d.data(); if (r.isActive) map[r.productName] = Number(r.rate) || 0; });
   return map;
 }
 
-async function main() {
+function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+
+async function buildProduction(day = istToday()) {
   const fdb = db();
-  const day = process.env.DATE || istToday();
   const snap = await fdb.collection('apps/welder/dispatches').where('date', '==', day).get();
-  if (snap.empty) {
-    await sendTelegram(`🔧 <b>Welder production — ${prettyDate(day)}</b>\nNo challans recorded today.`);
-    console.log('No dispatches for', day); return;
-  }
+  if (snap.empty) return `🔧 <b>Welder production — ${prettyDate(day)}</b>\nNo challans recorded today.`;
   const rates = await activeRates(fdb);
 
-  const byWelder = {};   // welder -> { qty, pay, products:{name:qty} }
-  let totQty = 0, totPay = 0;
+  const byWelder = {}; let totQty = 0, totPay = 0;
   snap.forEach(d => {
     const c = d.data();
-    const w = c.welder || '—';
-    const qty = Number(c.qty) || 0;
-    const rate = rates[c.productName] || 0;
-    const pay = qty * rate;
+    const w = c.welder || '—', qty = Number(c.qty) || 0, pay = qty * (rates[c.productName] || 0);
     const e = byWelder[w] || (byWelder[w] = { qty: 0, pay: 0, products: {} });
     e.qty += qty; e.pay += pay;
     const pn = c.finishedName || c.productName || '—';
@@ -46,11 +39,13 @@ async function main() {
   }
   lines.push(`\nTotal: <b>${totQty} pcs</b>${totPay ? ` · pay-ready ₹${totPay.toLocaleString('en-IN')}` : ''}`);
   if (!totPay) lines.push('<i>(set active welding rates to see pay-ready amounts)</i>');
-
-  await sendTelegram(lines.join('\n'));
-  console.log('Sent production summary for', day, '—', totQty, 'pcs');
+  return lines.join('\n');
 }
 
-function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+module.exports = { buildProduction };
 
-main().catch(e => { console.error(e); process.exit(1); });
+if (require.main === module) {
+  buildProduction(process.env.DATE || istToday())
+    .then(t => sendTelegram(t).then(() => console.log('sent production summary')))
+    .catch(e => { console.error(e); process.exit(1); });
+}

@@ -1,28 +1,29 @@
-// Plating — DAILY SUMMARY. Digest of today's plating job-work: challans out (sent for
+// Plating — DAILY SUMMARY. Digest of a day's plating job-work: challans out (sent for
 // plating) vs in (received back), per-party piece totals, plus new incoming feeds from the
-// welder app. Read-only on the plating app's Firestore; one message to the NSP Ops bot.
-// Run once at end of day (cron). Set DATE=YYYY-MM-DD for a specific day.
+// welder app. Read-only on the plating app. Exports buildPlating() for the command bot.
+// Run once daily via cron (DATE=YYYY-MM-DD optional).
 const { db } = require('./lib/firestore');
 const { sendTelegram } = require('./lib/notify');
 const { istToday, prettyDate } = require('./lib/opsdate');
 
 function qtyOf(items) {
-  // items is a JSON string: [{product, quantity}, ...]
   try { return (typeof items === 'string' ? JSON.parse(items) : items || []).reduce((s, i) => s + (Number(i.quantity) || 0), 0); }
   catch { return 0; }
 }
+function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+function topParties(parties) {
+  return Object.entries(parties).sort((a, b) => b[1] - a[1]).map(([p, q]) => `${esc(p)} ${q}`).join(', ');
+}
 
-async function main() {
+async function buildPlating(day = istToday()) {
   const fdb = db();
-  const day = process.env.DATE || istToday();
-
   const chSnap = await fdb.collection('apps/platingjobwork/challans').where('date', '==', day).get();
   const inSnap = await fdb.collection('apps/platingjobwork/incoming').where('date', '==', day).get();
 
   const out = { count: 0, qty: 0, parties: {} };
   const inn = { count: 0, qty: 0, parties: {} };
   chSnap.forEach(d => {
-    const c = d.data(); const q = qtyOf(c.items);
+    const c = d.data(), q = qtyOf(c.items);
     const bucket = c.direction === 'in' ? inn : out;
     bucket.count++; bucket.qty += q;
     bucket.parties[c.party || '—'] = (bucket.parties[c.party || '—'] || 0) + q;
@@ -38,15 +39,13 @@ async function main() {
     lines.push(`From welder (incoming): <b>${inSnap.size}</b> feed(s) · ${feedQty} pcs`);
   }
   if (!chSnap.size && inSnap.empty) lines.push('No plating activity recorded today.');
-
-  await sendTelegram(lines.join('\n'));
-  console.log('Sent plating summary for', day, '— out', out.count, 'in', inn.count);
+  return lines.join('\n');
 }
 
-function topParties(parties) {
-  return Object.entries(parties).sort((a, b) => b[1] - a[1])
-    .map(([p, q]) => `${esc(p)} ${q}`).join(', ');
-}
-function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+module.exports = { buildPlating };
 
-main().catch(e => { console.error(e); process.exit(1); });
+if (require.main === module) {
+  buildPlating(process.env.DATE || istToday())
+    .then(t => sendTelegram(t).then(() => console.log('sent plating summary')))
+    .catch(e => { console.error(e); process.exit(1); });
+}
