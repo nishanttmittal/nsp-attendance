@@ -37,7 +37,8 @@ export function computePay({ emp, att, daysInMonth, elapsedDays, fullMonth, adva
     ? (emp.appOnly ? rate * (att.equivalentDays || 0) : rate * (att.presentDays || 0))
     : perDay * Math.max(0, effElapsed - (att.absentDays || 0));
 
-  const netOtHrs = emp.appOnly ? 0 : (att.otHrs || 0) - (att.lateHrs || 0) - (att.earlyHrs || 0);
+  // Net OT = raw OT − late − early, floored at 0 (lateness is also handled by the penalty tab)
+  const netOtHrs = emp.appOnly ? 0 : Math.max(0, (att.otHrs || 0) - (att.lateHrs || 0) - (att.earlyHrs || 0));
   const hourlyRate = perDay / (SHIFT_HOURS[emp.shift] || 8);
   const otPay = netOtHrs * hourlyRate;
 

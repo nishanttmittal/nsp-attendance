@@ -54,7 +54,7 @@ function computePay({ emp, att, daysInMonth, elapsedDays, fullMonth, advances, a
     ? (emp.appOnly ? rate * (att.equivalentDays || 0) : rate * att.presentDays)
     : perDay * Math.max(0, effElapsed - att.absentDays);
   // net OT = Realtime OT (capped Working−Shift) minus late/early shortfall; can go negative
-  const netOtHrs = (att.otHrs || 0) - (att.lateHrs || 0) - (att.earlyHrs || 0);
+  const netOtHrs = Math.max(0, (att.otHrs || 0) - (att.lateHrs || 0) - (att.earlyHrs || 0)); // floored at 0
   // OT paid at NORMAL 1× rate = perDay / shift-hours. (Saturday-worked hours flow in via Realtime's OT.)
   const shiftHrs = SHIFT_HOURS[emp.shift] || 8;
   const hourlyRate = perDay / shiftHrs;

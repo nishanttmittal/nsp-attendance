@@ -7,6 +7,7 @@ const { db } = require('./lib/firestore');
 const { sendTelegram, sendTelegramDocument } = require('./lib/notify');
 const { drainSelfPunch } = require('./selfPunch');
 const { captureLate } = require('./lateCapture');
+const { alertLate } = require('./lateAlert');
 
 const DL = path.resolve(__dirname, 'downloads');
 
@@ -98,6 +99,20 @@ async function handle(type, p) {
   catch (e) { console.error('self-punch drain failed:', e.message); }
   try { const n = await captureLate(); if (n) console.log(`late-log: captured ${n}`); }
   catch (e) { console.error('late capture failed:', e.message); }
+  try { const n = await alertLate(); if (n) console.log(`late-alert: messaged ${n}`); }
+  catch (e) { console.error('late alert failed:', e.message); }
+
+  // once-a-day: scan the in-out report for missed punches (for the app's Punch tab list)
+  try {
+    const sref = db().collection('att_alert_state').doc('missed_scan');
+    const today = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
+    if ((await sref.get()).data()?.date !== today) {
+      const { scanMissed } = require('./missedPunchScan');
+      const n = await scanMissed();
+      await sref.set({ date: today, count: n, at: new Date().toISOString() });
+      console.log(`missed-punch scan: ${n}`);
+    }
+  } catch (e) { console.error('missed scan failed:', e.message); }
 
   const snap = await db().collection('att_job_requests').where('status', '==', 'pending').limit(10).get();
   if (snap.empty) { console.log('no pending jobs'); return; }

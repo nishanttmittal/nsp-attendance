@@ -214,6 +214,13 @@ export async function loadLatePenaltyTasks(month) {
   pending.sort((a, b) => b.count - a.count); decided.sort((a, b) => b.count - a.count);
   return { month: mk, pending, decided };
 }
+// Missed punches this month (att_missed_punch, from the in-out report scan) — for the Punch tab.
+export async function loadMissedPunches(month) {
+  const mk = month || new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 7);
+  if (!isConfigured || !db) return [];
+  const snap = await getDoc(doc(db, 'att_missed_punch', mk));
+  return (snap.exists() && snap.data().entries) || [];
+}
 export async function saveLatePenalty(code, month, fraction, by) {
   await saveMonth(code, month, {
     latePenaltyDays: Number(fraction) || 0,
