@@ -14,9 +14,11 @@ function run(file, env) {
 
 // min = IST minutes from midnight; day = weekday 0-6 (undefined = every day)
 const TASKS = [
-  { name: 'settings-guard', min: 6 * 60 + 45, run: () => run('settingsGuard.js') },               // 06:45 alert if Realtime shift/policy settings drifted (before reprocess!)
-  { name: 'reprocess', min: 7 * 60, run: () => run('dailyReprocess.js') },                       // 07:00 reprocess yesterday
-  { name: 'salary-data', min: 7 * 60 + 15, run: () => run('publishSalaryData.js') },              // 07:15 publish salary attendance
+  { name: 'settings-guard', min: 6 * 60 + 45, run: () => run('settingsGuard.js') },               // 06:45 alert if Realtime shift/policy settings drifted (before processing!)
+  // owner-set processing times: reprocess yesterday+today, publish current+last month, rescan punches
+  { name: 'process-am', min: 10 * 60, run: () => run('processData.js') },                          // 10:00
+  { name: 'process-pm', min: 17 * 60 + 40, run: () => run('processData.js') },                     // 17:40
+  { name: 'process-night', min: 21 * 60, run: () => run('processData.js') },                       // 21:00
   { name: 'long-absence', min: 9 * 60, run: () => run('longAbsence.js', { THRESHOLD: '4' }) },     // 09:00 long absence
   { name: 'morning-miss', min: 10 * 60, run: () => run('missedPunch.js', { MODE: 'morning' }) },   // 10:00 yesterday's missed punch
   { name: 'morning-summary', min: 10 * 60 + 30, run: () => run('morningSummary.js') },             // 10:30 present/absent/late summary

@@ -229,6 +229,45 @@ export async function loadMissedPunches(month) {
   const snap = await getDoc(doc(db, 'att_missed_punch', mk));
   return (snap.exists() && snap.data().entries) || [];
 }
+export const istMonth = () => new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 7);
+
+// Missed punches + short-hours days together (one scan doc per month).
+export async function loadMissedDoc(month) {
+  const mk = month || istMonth();
+  if (!isConfigured || !db) return { entries: [], shortHours: [] };
+  const snap = await getDoc(doc(db, 'att_missed_punch', mk));
+  const d = snap.exists() ? snap.data() : {};
+  return { entries: d.entries || [], shortHours: d.shortHours || [] };
+}
+// "Leave as is" decision for a missed punch — stored on att_salary so the daily rescan
+// (which overwrites the scan doc) can't lose it.
+export async function leaveMissedPunch(code, month, date) {
+  const e = await loadEmployee(code);
+  const ml = { ...(e.missedLeave || {}) };
+  ml[month] = [...new Set([...(ml[month] || []), date])];
+  await saveEmployee(code, { missedLeave: ml });
+}
+// Everyone with >= minDays late marks this month (view-only list; machine applies the cuts).
+export async function loadLateList(month, minDays = 3) {
+  const mk = month || istMonth();
+  if (!isConfigured || !db) return [];
+  const logSnap = await getDoc(doc(db, 'att_late_log', mk));
+  const byCode = (logSnap.exists() && logSnap.data().byCode) || {};
+  const out = [];
+  for (const [code, e] of Object.entries(byCode)) {
+    const days = Object.entries(e.days || {}).map(([date, inT]) => ({ date, inT })).sort((a, b) => (a.date < b.date ? -1 : 1));
+    if (days.length >= minDays) out.push({ code, name: e.name || code, dept: e.dept || '', count: days.length, days });
+  }
+  out.sort((a, b) => b.count - a.count);
+  return out;
+}
+// Resign prompts (set by publishMonthly when someone is absent a full month).
+export async function decideResignPrompt(code, decision, by) {
+  const e = await loadEmployee(code);
+  const rp = { ...(e.resignPrompt || {}), status: decision, decidedBy: by || '', decidedAt: new Date().toISOString() };
+  await saveEmployee(code, { resignPrompt: rp });
+  if (decision === 'resigned') return resignEmployee(code, by);
+}
 // Absence dock approval tasks: every 3 real absences → 1 Saturday cut, each approved/rejected
 // per person. Approved count → weeklyOffDockDays (the engine deduction).
 export async function loadAbsenceDockTasks(month) {

@@ -10,13 +10,16 @@ const addHrs = (hhmm, h) => {
   return `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`;
 };
 
-export default function ManualPunch({ user }) {
+export default function ManualPunch({ user, leftSet, onLeave }) {
   const [f, setF] = useState({ emp: '', date: '', in: '', out: '', remark: '' });
   const [status, setStatus] = useState(null);
   const [emps, setEmps] = useState([]);
-  const [missed, setMissed] = useState([]);
+  const [missedRaw, setMissedRaw] = useState([]);
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
-  useEffect(() => { loadRoster().then(setEmps); loadMissedPunches().then(setMissed); }, []);
+  useEffect(() => { loadRoster().then(setEmps); loadMissedPunches().then(setMissedRaw); }, []);
+  const setMissed = setMissedRaw;
+  // hide entries the owner chose to leave as-is (salary counts them per machine rules)
+  const missed = missedRaw.filter((m) => !leftSet || !leftSet.has(m.code + '|' + m.date));
 
   // tap a missed-punch row → prefill the person, date, and the punch that IS present
   function prefill(m) {
@@ -69,6 +72,7 @@ export default function ManualPunch({ user }) {
                   <button type="button" onClick={() => fillMissed(m, 1)} className="flex-1 bg-green-700 text-white rounded py-1.5 text-xs font-medium">Full shift</button>
                   <button type="button" onClick={() => fillMissed(m, 0.5)} className="flex-1 bg-amber-600 text-white rounded py-1.5 text-xs font-medium">Half day</button>
                   <button type="button" onClick={() => prefill(m)} className="border border-gray-300 text-gray-700 rounded py-1.5 px-3 text-xs">Manual</button>
+                  {onLeave && <button type="button" onClick={() => onLeave(m)} className="border border-gray-300 text-gray-500 rounded py-1.5 px-3 text-xs">Leave</button>}
                 </div>
               </li>
             ))}

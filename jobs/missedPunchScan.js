@@ -28,21 +28,38 @@ async function scanMissed() {
     await dl.saveAs(file);
 
     const rows = XLSX.utils.sheet_to_json(XLSX.readFile(file).Sheets.Sheet1, { header: 1, defval: '' }).slice(1);
-    // names from att_salary
-    const sal = {}; (await db().collection('att_salary').get()).forEach(d => { sal[d.id] = d.data().name || ''; });
+    // names + shifts from att_salary
+    const sal = {}; (await db().collection('att_salary').get()).forEach(d => { sal[d.id] = d.data(); });
+    const nameOf = c => (sal[c] && sal[c].name) || c;
 
-    const entries = [];
+    // short-hours: worked span (minus 30-min lunch) clearly below the shift's net hours
+    const SHIFT_HOURS = { GEN: 8, '10H': 10, '12H': 12, wir: 10 };
+    const toMin = s => { const m = /^(\d{1,2}):(\d{2})/.exec(String(s).trim()); return m ? +m[1] * 60 + +m[2] : null; };
+
+    const entries = [], shortHours = [];
     for (const r of rows) {
       const code = String(r[0] || '').trim(); if (!code) continue;
       const inNA = isNA(r[2]), outNA = isNA(r[3]);
-      if (inNA === outNA) continue;                    // both present or both NA → not a missed punch
-      entries.push({
-        code, name: sal[code] || code, date: toDDMMYYYY(r[1]),
-        which: inNA ? 'in' : 'out',                    // which punch is missing
-        otherTime: String(inNA ? r[3] : r[2]).trim(),  // the punch that IS present
-      });
+      if (inNA !== outNA) {                            // exactly one punch → missed punch
+        entries.push({
+          code, name: nameOf(code), date: toDDMMYYYY(r[1]),
+          which: inNA ? 'in' : 'out',                    // which punch is missing
+          otherTime: String(inNA ? r[3] : r[2]).trim(),  // the punch that IS present
+        });
+        continue;
+      }
+      if (inNA) continue;                              // both NA → absent, nothing to report
+      const i = toMin(r[2]), o = toMin(r[3]);
+      if (i == null || o == null) continue;
+      let mins = o - i; if (mins < 0) mins += 1440;    // overnight (guards)
+      const hours = +(mins / 60 - 0.5).toFixed(1);     // minus lunch
+      const need = SHIFT_HOURS[(sal[code] || {}).shift] || 8;
+      if (hours < need - 0.25) {
+        shortHours.push({ code, name: nameOf(code), date: toDDMMYYYY(r[1]), in: String(r[2]).trim(), out: String(r[3]).trim(), hours, need });
+      }
     }
-    await db().collection('att_missed_punch').doc(label).set({ month: label, entries, updatedAt: new Date().toISOString() });
+    shortHours.sort((a, b) => (a.date < b.date ? 1 : -1));
+    await db().collection('att_missed_punch').doc(label).set({ month: label, entries, shortHours, updatedAt: new Date().toISOString() });
     return entries.length;
   } finally { await browser.close(); }
 }

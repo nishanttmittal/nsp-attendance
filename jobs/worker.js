@@ -83,7 +83,9 @@ async function handle(type, p) {
     const adv = (emp.advances || []).filter(a => (a.date || '').startsWith(mk)).reduce((s, a) => s + Number(a.amount || 0), 0);
     const pay = computePay({
       emp, att, daysInMonth: last.getDate(), elapsedDays: yest.getDate(), fullMonth: false, monthStart: first, toDate: yest,
-      advancesThisMonth: adv, advanceBalanceIn: Number(md.advanceBalanceIn || 0), advanceRecover: Number(md.advanceRecover || 0),
+      advancesThisMonth: adv, advanceBalanceIn: Number(md.advanceBalanceIn || 0),
+      // owner rule: deduct the FULL outstanding advance by default (override per month if needed)
+      advanceRecover: md.advanceRecover != null ? Number(md.advanceRecover) : adv + Number(md.advanceBalanceIn || 0),
       fines: Number(md.fine || 0), loanInstallment: Number(md.loanInstallment || 0),
     });
     const r = n => '₹' + Number(n || 0).toLocaleString('en-IN');

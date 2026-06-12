@@ -7,8 +7,20 @@ const MONTHS = Array.from({ length: 12 }, (_, i) => {
   return { v: i, label: (i === 0 ? 'This month — ' : '') + d.toLocaleString('default', { month: 'long', year: 'numeric' }) };
 });
 
+// Realtime report buttons on NewMonthly.aspx — owner-facing names
+const REPORTS = [
+  { v: 'perfbtn', label: 'Performance Report' },
+  { v: 'Button10', label: 'Monthly Summary (Excel)' },
+  { v: 'Button15', label: 'Daily In-Out times (Excel)' },
+  { v: 'Button8', label: 'OT Summary' },
+  { v: 'Button13', label: 'Late Arrival' },
+  { v: 'Button4', label: 'Absent Report' },
+  { v: 'Btn_MonthlyMusterBookReport', label: 'Muster Book' },
+];
+
 export default function MonthlyDownload({ user }) {
   const [month, setMonth] = useState(0);
+  const [report, setReport] = useState('perfbtn');
   const [scope, setScope] = useState('all');
   const [value, setValue] = useState('');
   const [range, setRange] = useState({ from: '', to: '' });
@@ -20,7 +32,7 @@ export default function MonthlyDownload({ user }) {
   async function submit(e) {
     e.preventDefault();
     setStatus('queuing');
-    const payload = { month: Number(month), scope, value: value.trim(), from: toDmy(range.from), to: toDmy(range.to) };
+    const payload = { month: Number(month), scope, value: value.trim(), from: toDmy(range.from), to: toDmy(range.to), report };
     try {
       const r = await queueJob('monthly_download', payload, user.email);
       setStatus(r.mock ? 'mock' : 'queued');
@@ -30,7 +42,13 @@ export default function MonthlyDownload({ user }) {
   return (
     <div className="space-y-4">
     <form onSubmit={submit} className="bg-white rounded-xl shadow p-4 space-y-4">
-      <h2 className="font-semibold text-gray-800">Download monthly attendance</h2>
+      <h2 className="font-semibold text-gray-800">Download a report — it arrives on Telegram</h2>
+
+      <Field label="Report">
+        <select className="w-full border rounded px-3 py-2" value={report} onChange={(e) => setReport(e.target.value)}>
+          {REPORTS.map((r) => <option key={r.v} value={r.v}>{r.label}</option>)}
+        </select>
+      </Field>
 
       <Field label="Month">
         <select className="w-full border rounded px-3 py-2" value={month} onChange={(e) => setMonth(e.target.value)}>

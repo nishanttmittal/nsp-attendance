@@ -112,22 +112,38 @@ async function selectEmployee(page, code) {
     await page.screenshot({ path: path.join(OUT_DIR, 'monthly_prepared.png'), fullPage: true });
     if (DRY) { console.log('=> DRY: prepared only'); await browser.close(); return; }
 
-    const outName = `monthly_${label}_${scopeTag}.xls`;
-    const outPath = path.join(OUT_DIR, outName);
+    let outName = `monthly_${label}_${scopeTag}.xls`;
+    let outPath = path.join(OUT_DIR, outName);
     try {
       const [download] = await Promise.all([
-        page.waitForEvent('download', { timeout: 35000 }),
+        page.waitForEvent('download', { timeout: 25000 }),
         page.click('#MainContent_' + REPORT),
       ]);
       await download.saveAs(outPath);
       const sz = fs.statSync(outPath).size;
       console.log(`=> DOWNLOADED ${outName} (${sz} bytes) suggested="${download.suggestedFilename()}"`);
     } catch (e) {
-      // no download — maybe inline table or popup; capture both for diagnosis
-      await page.waitForTimeout(1500);
-      await page.screenshot({ path: path.join(OUT_DIR, 'monthly_after_click.png'), fullPage: true });
-      const pages = context.pages();
-      console.log(`=> NO DOWNLOAD (${e.message.split('\n')[0]}). open pages=${pages.length}; screenshot saved.`);
+      // No direct download — viewer reports (Performance etc.) open in NewReportViewer.aspx
+      // with an SSRS export menu. Click Export → PDF and capture that download instead.
+      try {
+        await page.waitForTimeout(2000);
+        const exportBtn = page.locator('a[title="Export"]').first();
+        await exportBtn.waitFor({ state: 'visible', timeout: 20000 });
+        await exportBtn.click();
+        const pdfLink = page.locator('a[title="PDF"]').first();
+        await pdfLink.waitFor({ state: 'visible', timeout: 10000 });
+        outName = `report_${REPORT}_${label}_${scopeTag}.pdf`;
+        outPath = path.join(OUT_DIR, outName);
+        const [download] = await Promise.all([
+          page.waitForEvent('download', { timeout: 90000 }),
+          pdfLink.click(),
+        ]);
+        await download.saveAs(outPath);
+        console.log(`=> DOWNLOADED ${outName} (${fs.statSync(outPath).size} bytes) via viewer-export`);
+      } catch (e2) {
+        await page.screenshot({ path: path.join(OUT_DIR, 'monthly_after_click.png'), fullPage: true }).catch(() => {});
+        console.log(`=> NO DOWNLOAD (${e.message.split('\n')[0]}; viewer-export: ${e2.message.split('\n')[0]}). Screenshot saved.`);
+      }
     }
   } finally { await browser.close(); }
 })();

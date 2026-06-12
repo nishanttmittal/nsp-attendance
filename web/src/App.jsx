@@ -2,23 +2,17 @@ import { useState } from 'react';
 import { useAuth, canSee, signOut } from './lib/auth';
 import Login from './components/Login.jsx';
 import Dashboard from './components/Dashboard.jsx';
+import Pay from './components/Pay.jsx';
 import MonthlyDownload from './components/MonthlyDownload.jsx';
-import ManualPunch from './components/ManualPunch.jsx';
-import Salary from './components/Salary.jsx';
-import SelfPunchCard from './components/SelfPunchCard.jsx';
-import LatePenalties from './components/LatePenalties.jsx';
-import AbsenceDocks from './components/AbsenceDocks.jsx';
+import Attention from './components/Attention.jsx';
 import Employees from './components/Employees.jsx';
-import Advance from './components/Advance.jsx';
 import Settings from './components/Settings.jsx';
 
 const TABS = [
   { key: 'dashboard', label: 'Floor', feature: 'dashboard' },
-  { key: 'salary', label: 'Salary', feature: 'salary' },
-  { key: 'penalties', label: 'Late', feature: 'penalties' },
-  { key: 'monthly', label: 'Monthly', feature: 'monthly' },
-  { key: 'manual', label: 'Punch', feature: 'manual' },
-  { key: 'advance', label: 'Advance', feature: 'advance' },
+  { key: 'pay', label: 'Pay', feature: 'pay' },
+  { key: 'attention', label: 'Attention', feature: 'attention' },
+  { key: 'reports', label: 'Reports', feature: 'reports' },
   { key: 'employees', label: 'Staff', feature: 'employees' },
   { key: 'settings', label: 'Settings', feature: 'settings' },
 ];
@@ -63,12 +57,10 @@ export default function App() {
 
       <main className="flex-1 p-4 max-w-3xl w-full mx-auto">
         {active === 'dashboard' && <Dashboard />}
-        {active === 'monthly' && <MonthlyDownload user={user} />}
-        {active === 'manual' && canSee(user.role, 'manual') && <ManualPunch user={user} />}
-        {active === 'salary' && canSee(user.role, 'salary') && <><SelfPunchCard /><Salary user={user} /></>}
-        {active === 'penalties' && canSee(user.role, 'penalties') && <div className="space-y-4"><LatePenalties user={user} /><AbsenceDocks user={user} /></div>}
+        {active === 'pay' && canSee(user.role, 'pay') && <Pay user={user} />}
+        {active === 'attention' && canSee(user.role, 'attention') && <Attention user={user} />}
+        {active === 'reports' && canSee(user.role, 'reports') && <MonthlyDownload user={user} />}
         {active === 'employees' && canSee(user.role, 'employees') && <Employees user={user} />}
-        {active === 'advance' && canSee(user.role, 'advance') && <Advance user={user} />}
         {active === 'settings' && canSee(user.role, 'settings') && <Settings />}
       </main>
     </div>
