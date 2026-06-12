@@ -3,6 +3,8 @@ on:
   schedule:
     - cron: '*/5 3-17 * * *'   # every 5 min, ~08:30–23:00 IST (long-polls ~4.5 min each)
   workflow_dispatch:
+  repository_dispatch:       # external pinger heartbeat (GitHub cron is unreliable)
+    types: [heartbeat]
 
 # Only one bot listener at a time (offset is persisted in att_meta/bot_state).
 concurrency:
