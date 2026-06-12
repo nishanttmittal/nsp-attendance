@@ -5,9 +5,17 @@ export default function Dashboard() {
   const [s, setS] = useState(null);
   const [err, setErr] = useState('');
   const [showPresent, setShowPresent] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const load = (manual = false) => {
+    if (manual) setRefreshing(true);
+    return getDailyState().then(setS).catch((e) => setErr(String(e))).finally(() => setRefreshing(false));
+  };
 
   useEffect(() => {
-    getDailyState().then(setS).catch((e) => setErr(String(e)));
+    load();
+    const id = setInterval(() => load(), 120000); // auto-refresh every 2 min
+    return () => clearInterval(id);
   }, []);
 
   if (err) return <p className="text-red-600">{err}</p>;
@@ -20,6 +28,14 @@ export default function Dashboard() {
     <div className="space-y-4">
       {s._mock && <Banner>Showing sample data (live data wires in once the scraper job + Firebase are connected).</Banner>}
       {freshness && <FreshnessBanner f={freshness} />}
+
+      <div className="flex justify-end -mb-1">
+        <button onClick={() => load(true)} disabled={refreshing}
+          className="text-sm flex items-center gap-1.5 text-red-700 border border-red-200 rounded-lg px-3 py-1.5 active:bg-red-50 disabled:opacity-50">
+          <span className={refreshing ? 'inline-block animate-spin' : 'inline-block'}>↻</span>
+          {refreshing ? 'Refreshing…' : 'Refresh'}
+        </button>
+      </div>
 
       <div className="grid grid-cols-2 gap-3">
         <Stat label="Present now ›" value={s.counts?.totalPresent ?? s.presentTotal} accent="text-green-700"
