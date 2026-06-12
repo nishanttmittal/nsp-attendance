@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>My Attendance · NSP</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+         background: #f3f4f6; color: #111827; min-height: 100vh; }
+  .wrap { max-width: 460px; margin: 0 auto; padding: 20px 16px 40px; }
+  .card { background: #fff; border-radius: 16px; box-shadow: 0 1px 4px rgba(0,0,0,.08); padding: 18px; margin-bottom: 16px; }
+  h1 { font-size: 22px; margin: 6px 0 2px; }
+  .sub { color: #6b7280; font-size: 14px; }
+  .times { display: flex; gap: 12px; margin-top: 10px; }
+  .t { flex: 1; background: #f9fafb; border: 1px solid #eee; border-radius: 12px; padding: 12px; text-align: center; }
+  .t .lab { font-size: 12px; color: #6b7280; }
+  .t .val { font-size: 26px; font-weight: 700; margin-top: 2px; }
+  button.big { width: 100%; border: none; border-radius: 16px; color: #fff; font-size: 26px; font-weight: 700;
+               padding: 26px; margin-top: 14px; }
+  .in { background: #15803d; } .out { background: #b91c1c; }
+  button.big:active { filter: brightness(.92); }
+  button:disabled { opacity: .5; }
+  .toast { text-align: center; margin-top: 14px; font-size: 15px; min-height: 22px; }
+  .ok { color: #15803d; } .err { color: #b91c1c; }
+  .hint { color: #9ca3af; font-size: 12px; text-align: center; margin-top: 18px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    <h1 id="name">…</h1>
+    <div class="sub" id="date"></div>
+    <div class="times">
+      <div class="t"><div class="lab">अंदर · IN</div><div class="val" id="inT">—</div></div>
+      <div class="t"><div class="lab">बाहर · OUT</div><div class="val" id="outT">—</div></div>
+    </div>
+  </div>
+  <button class="big in"  id="btnIn"  disabled>अंदर आया · IN</button>
+  <button class="big out" id="btnOut" disabled>बाहर गया · OUT</button>
+  <div class="toast" id="toast"></div>
+  <div class="hint">Tap IN when you arrive, OUT when you leave. Recorded automatically.</div>
+</div>
+
+<script type="module">
+import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
+import { getFirestore, doc, onSnapshot, collection, addDoc, serverTimestamp }
+  from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
+
+const cfg = {
+  apiKey: 'AIzaSyCK0M-EfmOp9nh1-ZJcrBqT7c4plNxL2FM',
+  authDomain: 'unico-operations.firebaseapp.com',
+  projectId: 'unico-operations',
+  storageBucket: 'unico-operations.firebasestorage.app',
+  messagingSenderId: '367786260524',
+  appId: '1:367786260524:web:ae49d5da0ef1a71a9e3989',
+};
+const db = getFirestore(initializeApp(cfg));
+
+const q = new URLSearchParams(location.search);
+const code = q.get('e'), token = q.get('k');
+const $ = id => document.getElementById(id);
+const istToday = () => new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
+const istTime = () => new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(11, 16);
+
+function setDate() {
+  const d = new Date(Date.now() + 5.5 * 3600 * 1000);
+  $('date').textContent = d.toUTCString().slice(0, 16);
+}
+setDate();
+
+if (!code || !token) {
+  $('name').textContent = 'Invalid link';
+  $('toast').innerHTML = '<span class="err">This link is missing its code. Ask the office for your link.</span>';
+} else {
+  // live view of this worker's name + today's punches (public, no salary)
+  onSnapshot(doc(db, 'att_punch', code), (snap) => {
+    if (!snap.exists()) { $('name').textContent = 'Invalid link'; return; }
+    const d = snap.data();
+    $('name').textContent = d.name || 'My attendance';
+    const today = (d.days && d.days[istToday()]) || {};
+    $('inT').textContent = today.in || '—';
+    $('outT').textContent = today.out || '—';
+    $('btnIn').disabled = false; $('btnOut').disabled = false;
+  }, () => { $('name').textContent = 'My attendance'; $('btnIn').disabled = false; $('btnOut').disabled = false; });
+
+  async function punch(dir) {
+    $('btnIn').disabled = true; $('btnOut').disabled = true;
+    $('toast').textContent = 'Saving…';
+    try {
+      await addDoc(collection(db, 'att_self_punch'), {
+        code, token, dir, date: istToday(), localTime: istTime(), ts: serverTimestamp(),
+      });
+      $('toast').innerHTML = `<span class="ok">✓ ${dir === 'in' ? 'IN' : 'OUT'} recorded at ${istTime()}</span>`;
+    } catch (e) {
+      $('toast').innerHTML = '<span class="err">Could not save — check internet and try again.</span>';
+    }
+    setTimeout(() => { $('btnIn').disabled = false; $('btnOut').disabled = false; }, 1500);
+  }
+  $('btnIn').onclick = () => punch('in');
+  $('btnOut').onclick = () => punch('out');
+}
+</script>
+</body>
+</html>
