@@ -19,7 +19,7 @@ export function effectiveAmount(emp, toDate) {
 }
 
 // One employee's pay for the period. att = {presentDays,absentDays,otHrs,lateHrs,earlyHrs}.
-export function computePay({ emp, att, daysInMonth, elapsedDays, fullMonth, advancesThisMonth = 0, advanceBalanceIn = 0, advanceRecover = 0, fines = 0, loanInstallment = 0, latePenaltyDays = 0, monthStart, toDate }) {
+export function computePay({ emp, att, daysInMonth, elapsedDays, fullMonth, advancesThisMonth = 0, advanceBalanceIn = 0, advanceRecover = 0, fines = 0, loanInstallment = 0, latePenaltyDays = 0, weeklyOffDockDays = 0, monthStart, toDate }) {
   const eff = effectiveAmount(emp, toDate);
   const rate = eff.amount;
   const perDay = emp.type === 'daily' ? rate : rate / daysInMonth;
@@ -47,8 +47,11 @@ export function computePay({ emp, att, daysInMonth, elapsedDays, fullMonth, adva
 
   // late-arrival penalty: approved 25% (¼ day) or 50% (½ day) of a day's pay
   const latePenalty = round(perDay * Number(latePenaltyDays || 0));
+  // weekly-off dock: every 3 absences = 1 Saturday cut (owner-set; 0 if Realtime already did it)
+  const weeklyOffDock = round(perDay * Number(weeklyOffDockDays || 0));
+  const suggestedDockDays = Math.floor((att.absentDays || 0) / 3);
   const earnings = base + otPay + perfectBonus;
-  const fixed = Number(fines || 0) + Number(loanInstallment || 0) + latePenalty;
+  const fixed = Number(fines || 0) + Number(loanInstallment || 0) + latePenalty + weeklyOffDock;
   const avail = Math.max(0, earnings - fixed);
   const advanceDue = Number(advancesThisMonth || 0) + Number(advanceBalanceIn || 0);
   const advanceRecovered = Math.min(Number(advanceRecover || 0), advanceDue, avail);
@@ -60,6 +63,7 @@ export function computePay({ emp, att, daysInMonth, elapsedDays, fullMonth, adva
     base: round(base), otPay: round(otPay), perfectBonus: round(perfectBonus),
     fines: round(Number(fines || 0)), loanInstallment: round(Number(loanInstallment || 0)),
     latePenalty: round(latePenalty), latePenaltyDays: Number(latePenaltyDays || 0),
+    weeklyOffDock: round(weeklyOffDock), weeklyOffDockDays: Number(weeklyOffDockDays || 0), suggestedDockDays,
     advanceDue: round(advanceDue), advanceRecovered: round(advanceRecovered),
     advanceBalanceCarried: round(advanceDue - advanceRecovered),
     suggestedWeeklyOffDock: { days: penaltyDays, amount: round(perDay * penaltyDays) },

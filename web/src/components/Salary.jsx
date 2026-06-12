@@ -38,7 +38,7 @@ export default function Salary({ user }) {
         const advs = (e.advances || []).filter((x) => (x.date || '').startsWith(MONTH));
         const split = advanceSplit(advs);
         const advTM = advs.reduce((s, x) => s + Number(x.amount || 0), 0);
-        const p = computePay({ emp: e, att: a, ...MONTH_CTX, advancesThisMonth: advTM, advanceBalanceIn: Number(md.advanceBalanceIn || 0), advanceRecover: Number(md.advanceRecover || 0), fines: Number(md.fine || 0), loanInstallment: Number(md.loanInstallment || 0), latePenaltyDays: Number(md.latePenaltyDays || 0) });
+        const p = computePay({ emp: e, att: a, ...MONTH_CTX, advancesThisMonth: advTM, advanceBalanceIn: Number(md.advanceBalanceIn || 0), advanceRecover: Number(md.advanceRecover || 0), fines: Number(md.fine || 0), loanInstallment: Number(md.loanInstallment || 0), latePenaltyDays: Number(md.latePenaltyDays || 0), weeklyOffDockDays: Number(md.weeklyOffDockDays || 0) });
         return { name: e.name || e.code, days: e.appOnly ? a.equivalentDays : p.presentDays, ot: p.otHrsNet, advBank: split.bank, advCash: split.cash, net: p.net, carried: p.advanceBalanceCarried };
       });
       await sharePdf(payslipAllPdf(rows, MONTH), `salary-register-${MONTH}.pdf`);
@@ -58,7 +58,7 @@ export default function Salary({ user }) {
       {(!emp || !att) ? <p className="text-gray-500 text-sm">Loading employee…</p> : (() => {
         const md = monthData(emp, MONTH);
         const advancesThisMonth = (emp.advances || []).filter(a => (a.date || '').startsWith(MONTH)).reduce((s, a) => s + Number(a.amount || 0), 0);
-        const pay = computePay({ emp, att, ...MONTH_CTX, advancesThisMonth, advanceBalanceIn: Number(md.advanceBalanceIn || 0), advanceRecover: Number(md.advanceRecover || 0), fines: Number(md.fine || 0), loanInstallment: Number(md.loanInstallment || 0), latePenaltyDays: Number(md.latePenaltyDays || 0) });
+        const pay = computePay({ emp, att, ...MONTH_CTX, advancesThisMonth, advanceBalanceIn: Number(md.advanceBalanceIn || 0), advanceRecover: Number(md.advanceRecover || 0), fines: Number(md.fine || 0), loanInstallment: Number(md.loanInstallment || 0), latePenaltyDays: Number(md.latePenaltyDays || 0), weeklyOffDockDays: Number(md.weeklyOffDockDays || 0) });
         const locked = md.locked;
         const earnings = pay.base + pay.otPay + pay.perfectBonus;
         // finalize only at month-end, unless the employee has left (resigned)
@@ -82,11 +82,12 @@ export default function Salary({ user }) {
               {pay.perfectBonus > 0 && <Row k="+ Attendance bonus" v={rupee(pay.perfectBonus)} />}
               {pay.fines > 0 && <Row k="− Fine" v={rupee(pay.fines)} />}
               {pay.loanInstallment > 0 && <Row k="− Loan installment" v={rupee(pay.loanInstallment)} />}
+              {pay.weeklyOffDock > 0 && <Row k={`− Weekly-off dock (${pay.weeklyOffDockDays}d)`} v={rupee(pay.weeklyOffDock)} />}
               {pay.latePenalty > 0 && <Row k={`− Late penalty (${pay.latePenaltyDays * 100}%)`} v={rupee(pay.latePenalty)} />}
               {pay.advanceRecovered > 0 && <Row k="− Advance recovered" v={rupee(pay.advanceRecovered)} />}
               <div className="flex justify-between mt-2 pt-2 border-t font-bold text-lg"><span>Net pay</span><span className="text-red-700">{rupee(pay.net)}</span></div>
               {pay.advanceDue > 0 && <p className="text-xs text-amber-700 mt-1">Advance owed {rupee(pay.advanceDue)} · carrying {rupee(pay.advanceBalanceCarried)} forward.</p>}
-              {pay.suggestedWeeklyOffDock.days > 0 && <p className="text-xs text-amber-700 mt-1">⚠ {pay.absentDays} absences → suggest docking {pay.suggestedWeeklyOffDock.days} weekly-off ({rupee(pay.suggestedWeeklyOffDock.amount)}) — confirm to apply.</p>}
+              {pay.suggestedDockDays > 0 && pay.weeklyOffDockDays === 0 && <p className="text-xs text-amber-700 mt-1">⚠ {pay.absentDays} absences → suggest cutting <b>{pay.suggestedDockDays}</b> Saturday(s). Set it below to apply, or leave 0 if Realtime already cut it.</p>}
               <div className="grid grid-cols-2 gap-2 mt-3">
                 <button onClick={() => sharePdf(payslipOnePdf(emp, pay, MONTH), `payslip-${code}-${MONTH}.pdf`)} className="bg-red-700 text-white rounded-lg py-2 text-sm font-medium">📄 Share payslip</button>
                 <button onClick={async () => { await queueJob('payslip', { code, month: MONTH }, user.email); alert('Payslip will be sent to Telegram.'); }} className="border border-gray-300 rounded-lg py-2 text-sm font-medium">Telegram</button>
@@ -104,6 +105,7 @@ export default function Salary({ user }) {
               <NumRow key={'r' + code} label={`Recover advance (owed ${rupee(pay.advanceDue)})`} val={md.advanceRecover} disabled={locked || busy} onSave={(v) => save(() => saveMonth(code, MONTH, { advanceRecover: v }))} />
               <NumRow key={'f' + code} label="Fine" val={md.fine} disabled={locked || busy} onSave={(v) => save(() => saveMonth(code, MONTH, { fine: v }))} />
               <NumRow key={'l' + code} label="Loan installment" val={md.loanInstallment} disabled={locked || busy} onSave={(v) => save(() => saveMonth(code, MONTH, { loanInstallment: v }))} />
+              <NumRow key={'w' + code} label={`Weekly-off dock — Saturdays cut (suggest ${pay.suggestedDockDays})`} val={md.weeklyOffDockDays ?? (pay.suggestedDockDays || 0)} disabled={locked || busy} onSave={(v) => save(() => saveMonth(code, MONTH, { weeklyOffDockDays: v }))} />
             </div>
 
             <AdvancesCard key={'a' + code} emp={emp} earnings={earnings} thisMonth={advancesThisMonth} disabled={locked || busy} onAdd={(a) => save(() => addAdvance(code, { ...a, paidBy: user.email }))} />
