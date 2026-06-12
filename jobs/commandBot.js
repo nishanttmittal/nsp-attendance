@@ -8,9 +8,9 @@
 const fs = require('fs');
 const path = require('path');
 const { db, FieldValue } = require('./lib/firestore');
-const { buildProduction } = require('./welderProduction');
+const { buildProduction, buildProductionWeek } = require('./welderProduction');
 const { buildPayReady } = require('./welderContractorPay');
-const { buildPlating } = require('./platingSummary');
+const { buildPlating, buildPlatingWeek } = require('./platingSummary');
 const { buildPayslipText } = require('./lib/payslipText');
 const { istToday, prettyDate } = require('./lib/opsdate');
 
@@ -67,8 +67,8 @@ const HELP = [
   '<b>present</b> / <b>absent</b> / <b>late</b> — today\'s lists',
   '<b>food</b> — dinner headcount',
   '<b>floor</b> — quick summary (counts + per-dept)',
-  '<b>production</b> [dd/mm] — welder output today',
-  '<b>plating</b> [dd/mm] — plating in/out today',
+  '<b>production</b> [dd/mm | week] — welder output',
+  '<b>plating</b> [dd/mm | week] — plating in/out',
   '<b>pay</b> — welder pay-ready (last 7 days) 🔒',
   '<b>payslip</b> &lt;name&gt; — month-to-date net 🔒',
   '<b>advance</b> &lt;name&gt; &lt;amount&gt; [cash|bank] — record advance',
@@ -138,9 +138,9 @@ async function handle(msg, role) {
     }
 
     case 'production': case 'prod':
-      return reply(chat, await buildProduction(parseDate(arg)));
+      return reply(chat, /^week$/i.test(arg) ? await buildProductionWeek() : await buildProduction(parseDate(arg)));
     case 'plating':
-      return reply(chat, await buildPlating(parseDate(arg)));
+      return reply(chat, /^week$/i.test(arg) ? await buildPlatingWeek() : await buildPlating(parseDate(arg)));
     case 'pay': case 'payready':
       if (role !== 'owner') return ownerOnly();
       return reply(chat, await buildPayReady());
