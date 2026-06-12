@@ -23,6 +23,26 @@ const r0 = n => Math.round(n);
   Object.assign(map, OVERRIDE);
 
   const machine = Object.fromEntries(parseSummary(path.resolve(__dirname, 'downloads', 'salarydata_2026-04.xls')).map(e => [e.code, e]));
+
+  // CREDIT_MISSED=1: owner rule — a missed-punch (single-punch) day counts as a FULL worked
+  // day (machine marked it absent). Credit those days back before computing pay.
+  if (process.env.CREDIT_MISSED === '1') {
+    const inout = XLSX.utils.sheet_to_json(XLSX.readFile(path.resolve(__dirname, 'downloads', 'inout_2026-04.xls')).Sheets.Sheet1, { header: 1, defval: '' }).slice(1);
+    const single = {};
+    for (const r of inout) {
+      const code = String(r[0] || '').trim(); if (!code) continue;
+      const inNA = !/\d/.test(String(r[2])), outNA = !/\d/.test(String(r[3]));
+      if (inNA !== outNA) single[code] = (single[code] || 0) + 1;
+    }
+    for (const code in machine) {
+      const n = Math.min(single[code] || 0, machine[code].absentDays); // can't credit more than absences
+      if (!n) continue;
+      machine[code].presentDays = Math.min(26, machine[code].presentDays + n); // 26 working days in April
+      machine[code].absentDays = Math.max(0, machine[code].absentDays - n);
+      machine[code]._credited = n;
+    }
+    console.log('missed-punch credit applied:', Object.entries(machine).filter(([, m]) => m._credited).map(([c, m]) => `${c}+${m._credited}`).join(' '));
+  }
   const shifts = {}; (await db().collection('att_salary').get()).forEach(d => { shifts[d.id] = d.data().shift || 'GEN'; });
 
   const rows = XLSX.utils.sheet_to_json(XLSX.readFile(file).Sheets[XLSX.readFile(file).SheetNames[0]], { header: 1, defval: '' });

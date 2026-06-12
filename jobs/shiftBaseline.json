@@ -7,7 +7,7 @@
   "txtchekmin": "00:02",
   "txtmaxearly": "00:30",
   "txtmaxrate": "08:00",
-  "chk2": "Absent On Single Punch",
+  "chk2": "None",
   "cboFWOff": "Saturday",
   "DropDownList1": "1 One In & Last Out"
  },
@@ -19,7 +19,7 @@
   "txtchekmin": "00:02",
   "txtmaxearly": "00:30",
   "txtmaxrate": "06:00",
-  "chk2": "Absent On Single Punch",
+  "chk2": "None",
   "cboFWOff": "Saturday",
   "DropDownList1": "1 One In & Last Out"
  },
@@ -31,7 +31,7 @@
   "txtchekmin": "00:02",
   "txtmaxearly": "00:30",
   "txtmaxrate": "05:00",
-  "chk2": "Absent On Single Punch",
+  "chk2": "None",
   "cboFWOff": "Saturday",
   "DropDownList1": "1 One In & Last Out"
  },
@@ -43,13 +43,13 @@
   "txtchekmin": "00:02",
   "txtmaxearly": "00:30",
   "txtmaxrate": "06:00",
-  "chk2": "Absent On Single Punch",
+  "chk2": "None",
   "cboFWOff": "Saturday",
   "DropDownList1": "1 One In & Last Out"
  },
  "policy_GEN": {
   "cboRequiredpunchinday": "Multipunch",
-  "cbosinglepunchonly": "Overwrite",
+  "cbosinglepunchonly": "Fix Time Out",
   "txtdurationformakingpresent": "07:30",
   "txtmaxabsentsortday": "02:00",
   "txtmaxworkinghour": "07:30",
@@ -80,7 +80,7 @@
  },
  "policy_10H": {
   "cboRequiredpunchinday": "Multipunch",
-  "cbosinglepunchonly": "Overwrite",
+  "cbosinglepunchonly": "Fix Time Out",
   "txtdurationformakingpresent": "09:30",
   "txtmaxabsentsortday": "05:00",
   "txtmaxworkinghour": "09:30",
@@ -111,7 +111,7 @@
  },
  "policy_12H": {
   "cboRequiredpunchinday": "Multipunch",
-  "cbosinglepunchonly": "Overwrite",
+  "cbosinglepunchonly": "Fix Time Out",
   "txtdurationformakingpresent": "10:30",
   "txtmaxabsentsortday": "05:45",
   "txtmaxworkinghour": "10:30",
@@ -142,7 +142,7 @@
  },
  "policy_wir": {
   "cboRequiredpunchinday": "Multipunch",
-  "cbosinglepunchonly": "Overwrite",
+  "cbosinglepunchonly": "Fix Time Out",
   "txtdurationformakingpresent": "09:30",
   "txtmaxabsentsortday": "05:00",
   "txtmaxworkinghour": "09:30",

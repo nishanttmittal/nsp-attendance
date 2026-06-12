@@ -60,7 +60,7 @@ export default function ManualPunch({ user, leftSet, onLeave }) {
       {missed.length > 0 && (
         <div className="bg-white rounded-xl shadow p-4">
           <div className="font-semibold text-gray-800">Missed punches this month ({missed.length})</div>
-          <p className="text-xs text-gray-500 mb-2">For each: <b>Full shift</b> or <b>Half day</b> fills it automatically; or <b>Manual</b> to type the time.</p>
+          <p className="text-xs text-gray-500 mb-2">The machine already counts these days as worked till shift end (full day, no OT). Use <b>Full shift</b>/<b>Manual</b> only to put the real time (so OT counts), <b>Half day</b> if they left early, or <b>Leave</b> to accept the full day.</p>
           <ul className="text-sm divide-y divide-gray-100 max-h-96 overflow-auto">
             {missed.map((m, i) => (
               <li key={m.code + m.date + i} className="py-2">
