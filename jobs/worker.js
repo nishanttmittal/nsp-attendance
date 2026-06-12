@@ -49,9 +49,13 @@ async function handle(type, p) {
   }
   if (type === 'monthly_download') {
     const scope = p.scope === 'all' ? 'all' : p.scope === 'dept' ? 'dept:' + p.value : 'emp:' + p.value;
-    const out = run('monthlyDownload.js', { MONTH: String(p.month || 0), SCOPE: scope });
+    const env = { MONTH: String(p.month || 0), SCOPE: scope };
+    if (p.from && p.to) { env.FROM = p.from; env.TO = p.to; }      // custom date range (dd/MM/yyyy)
+    if (p.report) env.REPORT = p.report;                            // which Realtime report button
+    const out = run('monthlyDownload.js', env);
     const m = out.match(/DOWNLOADED (\S+)/);
-    if (m) { await sendTelegramDocument(path.join(DL, m[1]), `📋 Monthly attendance (${scope})`); return 'sent file ' + m[1]; }
+    const range = p.from && p.to ? ` ${p.from}–${p.to}` : '';
+    if (m) { await sendTelegramDocument(path.join(DL, m[1]), `📋 Monthly attendance (${scope})${range}`); return 'sent file ' + m[1]; }
     return 'generated but no file matched';
   }
   if (type === 'payslip') {

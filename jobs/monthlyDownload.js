@@ -99,8 +99,9 @@ async function selectEmployee(page, code) {
       await page.uncheck('#MainContent_chknewwindow').catch(() => {});
     }
     const { from, to, label } = monthRange(MONTH);
-    await setDate(page, '#MainContent_txtdate', fmt(from));
-    await setDate(page, '#MainContent_txttodate', fmt(to));
+    // optional custom date range (dd/MM/yyyy) overrides the whole-month range
+    await setDate(page, '#MainContent_txtdate', process.env.FROM || fmt(from));
+    await setDate(page, '#MainContent_txttodate', process.env.TO || fmt(to));
 
     let scopeTag = 'all';
     if (SCOPE.startsWith('dept:')) { await selectDepartment(page, SCOPE.slice(5)); scopeTag = 'dept-' + SCOPE.slice(5).replace(/\s+/g, '_'); }

@@ -56,6 +56,8 @@ function parseSummary(file) {
       lateDays: Number(r[c.lateDays]) || 0,
       earlyHrs: hhmmToHours(r[c.earlyHrs]),
       earlyDays: Number(r[c.earlyDays]) || 0,
+      weeklyOff: Number(r[c.weeklyOff]) || 0,
+      holiday: Number(r[c.holiday]) || 0,
     });
   }
   return out;

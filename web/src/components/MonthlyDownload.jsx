@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { queueJob } from '../lib/data';
+import { useState, useEffect } from 'react';
+import { queueJob, loadRoster } from '../lib/data';
 
 // last 12 months
 const MONTHS = Array.from({ length: 12 }, (_, i) => {
@@ -11,12 +11,16 @@ export default function MonthlyDownload({ user }) {
   const [month, setMonth] = useState(0);
   const [scope, setScope] = useState('all');
   const [value, setValue] = useState('');
+  const [range, setRange] = useState({ from: '', to: '' });
+  const [emps, setEmps] = useState([]);
   const [status, setStatus] = useState(null);
+  useEffect(() => { loadRoster().then(setEmps); }, []);
+  const toDmy = (iso) => { if (!iso) return ''; const [y, m, d] = iso.split('-'); return `${d}/${m}/${y}`; };
 
   async function submit(e) {
     e.preventDefault();
     setStatus('queuing');
-    const payload = { month: Number(month), scope, value: value.trim() };
+    const payload = { month: Number(month), scope, value: value.trim(), from: toDmy(range.from), to: toDmy(range.to) };
     try {
       const r = await queueJob('monthly_download', payload, user.email);
       setStatus(r.mock ? 'mock' : 'queued');
@@ -51,10 +55,20 @@ export default function MonthlyDownload({ user }) {
         </Field>
       )}
       {scope === 'emp' && (
-        <Field label="Employee code">
-          <input className="w-full border rounded px-3 py-2" placeholder="e.g. 00000112" value={value} onChange={(e) => setValue(e.target.value)} />
+        <Field label="Employee">
+          <select className="w-full border rounded px-3 py-2" value={value} onChange={(e) => setValue(e.target.value)}>
+            <option value="">Select name…</option>
+            {emps.map((em) => <option key={em.code} value={em.code}>{em.name} ({em.code})</option>)}
+          </select>
         </Field>
       )}
+
+      <Field label="Date range (optional — overrides the month)">
+        <div className="grid grid-cols-2 gap-2">
+          <input className="w-full border rounded px-3 py-2" type="date" value={range.from} onChange={(e) => setRange({ ...range, from: e.target.value })} />
+          <input className="w-full border rounded px-3 py-2" type="date" value={range.to} onChange={(e) => setRange({ ...range, to: e.target.value })} />
+        </div>
+      </Field>
 
       <button disabled={status === 'queuing' || (scope !== 'all' && !value)}
         className="w-full bg-red-700 disabled:opacity-50 text-white rounded py-2 font-medium">
