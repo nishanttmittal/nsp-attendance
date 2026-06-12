@@ -17,13 +17,20 @@ const PAGES = [
   { key: 'shift_12H',  url: 'https://onlinerealsoft.com/SiftDetails.aspx?RowId=4' },
   { key: 'shift_wir',  url: 'https://onlinerealsoft.com/SiftDetails.aspx?RowId=5' },
   { key: 'policy_GEN', url: 'https://onlinerealsoft.com/EmployeePolicy.aspx?RowId=2' },
+  { key: 'policy_10H', url: 'https://onlinerealsoft.com/EmployeePolicy.aspx?RowId=3' },
+  { key: 'policy_12H', url: 'https://onlinerealsoft.com/EmployeePolicy.aspx?RowId=4' },
+  { key: 'policy_wir', url: 'https://onlinerealsoft.com/EmployeePolicy.aspx?RowId=5' },
 ];
 // fields that change how punches are turned into attendance (the dangerous ones)
 const WATCH = {
   shift: ['txtsftstarttime', 'txtsiftendtime', 'txtsiftduration', 'cboisnightshift',
     'txtchekmin', 'txtmaxearly', 'txtmaxrate', 'chk2', 'cboFWOff', 'DropDownList1'],
   policy: ['cboRequiredpunchinday', 'cbosinglepunchonly', 'txtdurationformakingpresent',
-    'txtmaxabsentsortday', 'txtmaxworkinghour', 'txtmaxworkinghourhalf', 'IgnoreOTSetting'],
+    'txtmaxabsentsortday', 'txtmaxworkinghour', 'txtmaxworkinghourhalf', 'IgnoreOTSetting',
+    'txtlatearrival', 'txtearlydeparture',
+    'txtlate1', 'cbolateded1', 'txtlate2', 'cbolateded2', 'txtlate3', 'cbolateded3', 'txtlate4', 'cbolateded4',
+    'txtEalry1', 'cboEarlyded1', 'txtEalry2', 'cboEarlyded2', 'txtEalry3', 'cboEarlyded3', 'txtEalry4', 'cboEarlyded4',
+    'chkroundclock', 'chkLateactive', 'Cbonooflate', 'DropDownList1'],
 };
 
 async function readPage(page, url, ids) {
