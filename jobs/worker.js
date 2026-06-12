@@ -6,6 +6,7 @@ const path = require('path');
 const { db } = require('./lib/firestore');
 const { sendTelegram, sendTelegramDocument } = require('./lib/notify');
 const { drainSelfPunch } = require('./selfPunch');
+const { captureLate } = require('./lateCapture');
 
 const DL = path.resolve(__dirname, 'downloads');
 
@@ -95,6 +96,8 @@ async function handle(type, p) {
   // record any self-punch taps (Radhey/Dinesh link) before processing the job queue
   try { const n = await drainSelfPunch(); if (n) console.log(`self-punch: recorded ${n} tap(s)`); }
   catch (e) { console.error('self-punch drain failed:', e.message); }
+  try { const n = await captureLate(); if (n) console.log(`late-log: captured ${n}`); }
+  catch (e) { console.error('late capture failed:', e.message); }
 
   const snap = await db().collection('att_job_requests').where('status', '==', 'pending').limit(10).get();
   if (snap.empty) { console.log('no pending jobs'); return; }

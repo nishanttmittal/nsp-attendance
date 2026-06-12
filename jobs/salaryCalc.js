@@ -38,7 +38,7 @@ function effectiveAmount(emp, toDate) {
 
 const DAY = 86400000;
 // core calc for one employee — exported for the PWA to reuse
-function computePay({ emp, att, daysInMonth, elapsedDays, fullMonth, advances, advanceBalanceIn = 0, advanceRecover = 0, fines = 0, loanInstallment = 0, monthStart, toDate }) {
+function computePay({ emp, att, daysInMonth, elapsedDays, fullMonth, advances, advanceBalanceIn = 0, advanceRecover = 0, fines = 0, loanInstallment = 0, latePenaltyDays = 0, monthStart, toDate }) {
   const eff = effectiveAmount(emp, toDate);
   const rate = eff.amount;
   const perDay = emp.type === 'daily' ? rate : rate / daysInMonth;
@@ -67,8 +67,9 @@ function computePay({ emp, att, daysInMonth, elapsedDays, fullMonth, advances, a
   // deductions: fines + loan installment, then OWNER-CHOSEN advance recovery (default 0 = pay full salary).
   // Advances are a running balance: new advances given this month + prior balance, minus what's recovered.
   // Paying a worker who still owes simply carries the balance forward; extra cash given = a new advance.
+  const latePenalty = round(perDay * Number(latePenaltyDays || 0)); // 0.25 (=25%) or 0.5 (=50%) of a day
   const earnings = base + otPay + perfectBonus;
-  const fixedDeductions = Number(fines || 0) + Number(loanInstallment || 0);
+  const fixedDeductions = Number(fines || 0) + Number(loanInstallment || 0) + latePenalty;
   const availForAdvance = Math.max(0, earnings - fixedDeductions);
   const advThisMonth = advances.reduce((s, a) => s + Number(a.amount || 0), 0);
   const advanceDue = advThisMonth + advanceBalanceIn;
@@ -79,6 +80,7 @@ function computePay({ emp, att, daysInMonth, elapsedDays, fullMonth, advances, a
     otHrs: round(att.otHrs), otHrsNet: round(netOtHrs),
     base: round(base), otPay: round(otPay), perfectBonus: round(perfectBonus),
     fines: round(Number(fines || 0)), loanInstallment: round(Number(loanInstallment || 0)),
+    latePenalty: round(latePenalty), latePenaltyDays: Number(latePenaltyDays || 0),
     advanceDue: round(advanceDue), advanceRecovered: round(advanceRecovered),
     advanceBalanceCarried: round(advanceDue - advanceRecovered),
     suggestedWeeklyOffDock: { days: penaltyDays, amount: suggestedPenalty },

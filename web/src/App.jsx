@@ -6,6 +6,7 @@ import MonthlyDownload from './components/MonthlyDownload.jsx';
 import ManualPunch from './components/ManualPunch.jsx';
 import Salary from './components/Salary.jsx';
 import SelfPunchCard from './components/SelfPunchCard.jsx';
+import LatePenalties from './components/LatePenalties.jsx';
 import Employees from './components/Employees.jsx';
 import Advance from './components/Advance.jsx';
 import Settings from './components/Settings.jsx';
@@ -13,6 +14,7 @@ import Settings from './components/Settings.jsx';
 const TABS = [
   { key: 'dashboard', label: 'Floor', feature: 'dashboard' },
   { key: 'salary', label: 'Salary', feature: 'salary' },
+  { key: 'penalties', label: 'Late', feature: 'penalties' },
   { key: 'monthly', label: 'Monthly', feature: 'monthly' },
   { key: 'manual', label: 'Punch', feature: 'manual' },
   { key: 'advance', label: 'Advance', feature: 'advance' },
@@ -63,6 +65,7 @@ export default function App() {
         {active === 'monthly' && <MonthlyDownload user={user} />}
         {active === 'manual' && canSee(user.role, 'manual') && <ManualPunch user={user} />}
         {active === 'salary' && canSee(user.role, 'salary') && <><SelfPunchCard /><Salary user={user} /></>}
+        {active === 'penalties' && canSee(user.role, 'penalties') && <LatePenalties user={user} />}
         {active === 'employees' && canSee(user.role, 'employees') && <Employees user={user} />}
         {active === 'advance' && canSee(user.role, 'advance') && <Advance user={user} />}
         {active === 'settings' && canSee(user.role, 'settings') && <Settings />}

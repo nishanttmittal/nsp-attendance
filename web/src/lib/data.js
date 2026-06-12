@@ -192,6 +192,35 @@ export async function saveEmployee(code, patch) {
   if (isConfigured && db) { await setDoc(doc(db, 'att_salary', code), patch, { merge: true }); return; }
   const store = loadSal(); store[code] = { ...(store[code] || {}), ...patch }; saveSal(store);
 }
+
+// Late-arrival penalty tasks: employees with >=4 late marks in the month (att_late_log) →
+// owner approves 25% (¼ day) / 50% (½ day) or rejects. Decision stored in months[mk].
+const LATE_THRESHOLD = 4;
+export async function loadLatePenaltyTasks(month) {
+  const mk = month || new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 7);
+  if (!isConfigured || !db) return { month: mk, pending: [], decided: [] };
+  const logSnap = await getDoc(doc(db, 'att_late_log', mk));
+  const byCode = (logSnap.exists() && logSnap.data().byCode) || {};
+  const salSnap = await getDocs(collection(db, 'att_salary'));
+  const sal = {}; salSnap.forEach(d => { sal[d.id] = d.data(); });
+  const pending = [], decided = [];
+  for (const [code, e] of Object.entries(byCode)) {
+    const lateDays = Object.entries(e.days || {}).map(([date, inT]) => ({ date, inT })).sort((a, b) => (a.date < b.date ? -1 : 1));
+    if (lateDays.length < LATE_THRESHOLD) continue;
+    const md = (sal[code]?.months && sal[code].months[mk]) || {};
+    const row = { code, name: sal[code]?.name || e.name || code, dept: e.dept || sal[code]?.dept || '', lateDays, count: lateDays.length, status: md.latePenaltyStatus, fraction: md.latePenaltyDays || 0 };
+    (md.latePenaltyStatus ? decided : pending).push(row);
+  }
+  pending.sort((a, b) => b.count - a.count); decided.sort((a, b) => b.count - a.count);
+  return { month: mk, pending, decided };
+}
+export async function saveLatePenalty(code, month, fraction, by) {
+  await saveMonth(code, month, {
+    latePenaltyDays: Number(fraction) || 0,
+    latePenaltyStatus: Number(fraction) > 0 ? 'approved' : 'rejected',
+    latePenaltyBy: by || '', latePenaltyAt: new Date().toISOString(),
+  });
+}
 export async function addAdvance(code, adv) {
   const e = await loadEmployee(code); await saveEmployee(code, { advances: [...(e.advances || []), adv] });
 }
