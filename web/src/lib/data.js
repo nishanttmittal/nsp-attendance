@@ -131,6 +131,36 @@ export async function loadEmployee(code) {
   return { ...blankEmp(code), ...(store[code] || {}), code };
 }
 
+// App-only self-punch staff (Radhey/Dinesh): their captured in/out times (att_punch) +
+// this-month totals (days present, total hours, OT beyond their duty hours).
+export async function loadSelfPunchStaff() {
+  if (!isConfigured || !db) return [];
+  const snap = await getDocs(collection(db, 'att_salary'));
+  const staff = snap.docs.map(d => ({ code: d.id, ...d.data() })).filter(e => e.selfPunch && e.active !== false);
+  const month = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 7); // IST YYYY-MM
+  const toMin = s => { const m = /^(\d{1,2}):(\d{2})/.exec(s || ''); return m ? (+m[1]) * 60 + (+m[2]) : null; };
+  const out = [];
+  for (const e of staff) {
+    const pd = await getDoc(doc(db, 'att_punch', e.code));
+    const days = (pd.exists() && pd.data().days) || {};
+    const rows = Object.entries(days).filter(([dt]) => dt.startsWith(month))
+      .sort((a, b) => (a[0] < b[0] ? 1 : -1))
+      .map(([date, t]) => {
+        const i = toMin(t.in), o = toMin(t.out);
+        const hours = (i != null && o != null && o > i) ? +((o - i) / 60).toFixed(1) : null;
+        return { date, in: t.in || '', out: t.out || '', hours };
+      });
+    const std = Number(e.standardHours) || 11;
+    out.push({
+      code: e.code, name: e.name, dept: e.dept, unit: e.unit, amount: e.amount, standardHours: std, rows,
+      present: rows.length,
+      totalHours: +rows.reduce((s, r) => s + (r.hours || 0), 0).toFixed(1),
+      ot: +rows.reduce((s, r) => s + (r.hours != null ? Math.max(0, r.hours - std) : 0), 0).toFixed(1),
+    });
+  }
+  return out;
+}
+
 export async function saveEmployee(code, patch) {
   if (isConfigured && db) { await setDoc(doc(db, 'att_salary', code), patch, { merge: true }); return; }
   const store = loadSal(); store[code] = { ...(store[code] || {}), ...patch }; saveSal(store);

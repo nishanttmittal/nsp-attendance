@@ -5,6 +5,7 @@ import Dashboard from './components/Dashboard.jsx';
 import MonthlyDownload from './components/MonthlyDownload.jsx';
 import ManualPunch from './components/ManualPunch.jsx';
 import Salary from './components/Salary.jsx';
+import SelfPunchCard from './components/SelfPunchCard.jsx';
 import Employees from './components/Employees.jsx';
 import Advance from './components/Advance.jsx';
 import Settings from './components/Settings.jsx';
@@ -61,7 +62,7 @@ export default function App() {
         {active === 'dashboard' && <Dashboard />}
         {active === 'monthly' && <MonthlyDownload user={user} />}
         {active === 'manual' && canSee(user.role, 'manual') && <ManualPunch user={user} />}
-        {active === 'salary' && canSee(user.role, 'salary') && <Salary user={user} />}
+        {active === 'salary' && canSee(user.role, 'salary') && <><SelfPunchCard /><Salary user={user} /></>}
         {active === 'employees' && canSee(user.role, 'employees') && <Employees user={user} />}
         {active === 'advance' && canSee(user.role, 'advance') && <Advance user={user} />}
         {active === 'settings' && canSee(user.role, 'settings') && <Settings />}
