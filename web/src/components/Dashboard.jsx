@@ -14,10 +14,12 @@ export default function Dashboard() {
   if (!s) return <p className="text-gray-500">Loading floor…</p>;
 
   const presentRows = s.presentRows || [];
+  const freshness = checkFreshness(s);
 
   return (
     <div className="space-y-4">
       {s._mock && <Banner>Showing sample data (live data wires in once the scraper job + Firebase are connected).</Banner>}
+      {freshness && <FreshnessBanner f={freshness} />}
 
       <div className="grid grid-cols-2 gap-3">
         <Stat label="Present now ›" value={s.counts?.totalPresent ?? s.presentTotal} accent="text-green-700"
@@ -97,9 +99,39 @@ export default function Dashboard() {
         </Card>
       )}
 
-      <p className="text-xs text-gray-400 text-center">Updated {s.at ? new Date(s.at).toLocaleString() : '—'}</p>
+      <p className="text-xs text-gray-400 text-center">
+        {s.dataDate ? `Showing ${fmtDay(s.dataDate)} · ` : ''}updated {(s.publishedAt || s.at) ? new Date(s.publishedAt || s.at).toLocaleString() : '—'}
+      </p>
     </div>
   );
+}
+
+// Returns null when fresh, else { level:'red'|'amber', text } describing the staleness.
+function checkFreshness(s) {
+  if (s._mock) return null;
+  const istToday = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
+  if (s.dataDate && s.dataDate !== istToday) {
+    return { level: 'red', text: `Showing ${fmtDay(s.dataDate)} — the biometric machine hasn’t sent today’s punches yet. Please check the device’s internet/power at the factory; the app will catch up automatically once data flows.` };
+  }
+  const stamp = s.publishedAt || s.at;
+  if (stamp) {
+    const mins = Math.round((Date.now() - new Date(stamp).getTime()) / 60000);
+    if (mins > 30) return { level: 'amber', text: `Floor data hasn’t refreshed in ${mins} min — the auto-updater may be paused. Latest figures may be behind.` };
+  }
+  return null;
+}
+
+function fmtDay(ymd) {
+  const [y, m, d] = (ymd || '').split('-');
+  const mon = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][+m] || m;
+  return `${+d} ${mon}`;
+}
+
+function FreshnessBanner({ f }) {
+  const cls = f.level === 'red'
+    ? 'text-red-800 bg-red-50 border-red-300'
+    : 'text-amber-900 bg-amber-50 border-amber-300';
+  return <div className={`text-sm rounded-lg border p-3 ${cls}`}>⚠️ {f.text}</div>;
 }
 
 function Stat({ label, value, sub, accent, onClick }) {

@@ -27,13 +27,23 @@ async function dashboardCounts(page) {
         const m = node && node.innerText.match(/\b(\d{1,4})\b/); if (m) return parseInt(m[1], 10); }
       return null;
     };
+    // the date the portal considers "current" (US MM/DD/YYYY on the dashboard)
+    const dateRaw = (document.body.innerText.match(/\b\d{1,2}\/\d{1,2}\/\d{4}\b/) || [])[0] || '';
     return {
       totalEmployees: num('Total Employees'),
       totalPresent: num('Total Present'),
       totalAbsent: num('Total Absent Employees'),
       totalLate: num('Total Late Employees'),
+      dateRaw,
     };
   });
+}
+
+// Portal date is US MM/DD/YYYY -> normalise to YYYY-MM-DD (null if unparseable).
+function normalizeUsDate(raw) {
+  const m = String(raw || '').match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (!m) return null;
+  return `${m[3]}-${m[1].padStart(2, '0')}-${m[2].padStart(2, '0')}`;
 }
 
 // code -> { name, dept } from the employee master (DailyPresentEmployee lacks Department)
@@ -100,6 +110,8 @@ async function lateList(page) {
 // Gather the full live floor state on an already-logged-in page.
 async function gatherState(page) {
   const counts = await dashboardCounts(page);
+  const dataDate = normalizeUsDate(counts.dateRaw); // portal's "current" date (YYYY-MM-DD)
+  delete counts.dateRaw;
   const master = await employeeMaster(page);
   const present = await presentList(page);
   const late = await lateList(page);
@@ -129,6 +141,7 @@ async function gatherState(page) {
 
   return {
     at: new Date().toISOString(),
+    dataDate, // the date the biometric portal is actually showing (may lag if device unsynced)
     counts,
     presentTotal: present.rows.length,
     perDept,
