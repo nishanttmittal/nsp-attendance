@@ -8,6 +8,7 @@ const { sendTelegram, sendTelegramDocument } = require('./lib/notify');
 const { drainSelfPunch } = require('./selfPunch');
 const { captureLate } = require('./lateCapture');
 const { alertLate } = require('./lateAlert');
+const { runDueTasks } = require('./scheduler');
 
 const DL = path.resolve(__dirname, 'downloads');
 
@@ -101,6 +102,10 @@ async function handle(type, p) {
   catch (e) { console.error('late capture failed:', e.message); }
   try { const n = await alertLate(); if (n) console.log(`late-alert: messaged ${n}`); }
   catch (e) { console.error('late alert failed:', e.message); }
+
+  // time-aware dispatcher: fire the daily/weekly jobs at their IST time (replaces dead cron)
+  try { const r = await runDueTasks(); if (r.length) console.log(`scheduler ran: ${r.join(', ')}`); }
+  catch (e) { console.error('scheduler failed:', e.message); }
 
   // once-a-day: scan the in-out report for missed punches (for the app's Punch tab list)
   try {
