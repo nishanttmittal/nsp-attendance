@@ -1,0 +1,51 @@
+name: Heartbeat keepalive
+# Self-perpetuating keepalive that drives the live jobs INDEPENDENTLY of GitHub's
+# (unreliable) cron scheduler. Each run fires a `heartbeat` repository_dispatch every
+# 5 min for ~30 min — which triggers publish-state, worker and command-bot — then
+# re-arms the next keepalive run. Uses a stored PAT (DISPATCH_PAT) because the built-in
+# GITHUB_TOKEN cannot trigger other workflows. Booted once via workflow_dispatch.
+on:
+  workflow_dispatch:
+  repository_dispatch:
+    types: [keepalive]
+
+concurrency:
+  group: heartbeat-keepalive
+  cancel-in-progress: false
+
+jobs:
+  beat:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Pulse the live jobs, then re-arm
+        env:
+          GH_TOKEN: ${{ secrets.DISPATCH_PAT }}
+          R: ${{ github.repository }}
+        run: |
+          ping() {
+            curl -s -o /dev/null -w "%{http_code}" -X POST \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/$R/dispatches" \
+              -d "{\"event_type\":\"$1\"}"
+          }
+          # ~30 min of heartbeats, one every 5 min (6 pulses)
+          for i in $(seq 1 6); do
+            code=$(ping heartbeat)
+            echo "pulse $i/6 -> heartbeat dispatch HTTP $code at $(date -u +%H:%M:%SZ)"
+            [ "$i" -lt 6 ] && sleep 300
+          done
+
+      - name: Re-arm next keepalive (chain continues)
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.DISPATCH_PAT }}
+          R: ${{ github.repository }}
+        run: |
+          code=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/$R/dispatches" \
+            -d '{"event_type":"keepalive"}')
+          echo "re-armed next keepalive -> HTTP $code"
