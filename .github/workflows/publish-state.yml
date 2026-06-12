@@ -22,3 +22,11 @@ jobs:
           REALTIME_USER: ${{ secrets.REALTIME_USER }}
           REALTIME_PASS: ${{ secrets.REALTIME_PASS }}
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+      - name: Welder new-challan alert
+        if: always()   # independent of floor scrape; read-only on welder data
+        working-directory: jobs
+        run: node welderChallanAlert.js
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}

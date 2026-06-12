@@ -12,3 +12,4 @@ jobs/*serviceAccount*.json
 jobs/firebase-admin.json
 jobs/lib/nativelibs/
 jobs/.nativelibs/
+jobs/nspops.local.json
