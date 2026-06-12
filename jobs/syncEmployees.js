@@ -24,10 +24,14 @@ const col = (h, ...names) => { const l = h.map(x => x.toLowerCase()); for (const
       const dept = (di >= 0 ? r[di] : '').trim().toUpperCase();
       const ref = fdb.collection('att_salary').doc(code);
       const snap = await ref.get();
-      const patch = { code, name, dept };
+      const cur = snap.exists ? snap.data() : {};
+      const patch = { code };
+      // respect owner edits: don't overwrite a name/dept the admin changed in the app
+      if (!cur.nameLocked) patch.name = name;
+      if (!cur.deptLocked) patch.dept = dept;
       if (!snap.exists) patch.shift = 'GEN';        // default only for new docs
       batch.set(ref, patch, { merge: true });
-      roster.push({ code, name, dept, shift: (snap.exists && snap.data().shift) || 'GEN' });
+      roster.push({ code, name: cur.nameLocked ? cur.name : name, dept: cur.deptLocked ? cur.dept : dept, shift: cur.shift || 'GEN' });
       if (++n >= 300) { await batch.commit(); total += n; batch = fdb.batch(); n = 0; }
     }
     if (n) { await batch.commit(); total += n; }

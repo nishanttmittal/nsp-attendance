@@ -15,6 +15,16 @@ export default function Employees({ user }) {
   const refresh = () => (isAdmin ? loadEmployees() : loadRoster()).then(setStaff);
   useEffect(() => { refresh(); }, []);
 
+  const [editing, setEditing] = useState(null);
+  const [ef, setEf] = useState({ name: '', dept: '' });
+  const startEdit = (e) => { setEditing(e.code); setEf({ name: e.name || '', dept: e.dept || DEPTS[0] }); };
+  const saveEdit = async () => {
+    if (!ef.name.trim()) return;
+    // nameLocked/deptLocked stop the machine-sync job from overwriting the owner's correction
+    await saveEmployee(editing, { name: ef.name.trim(), dept: ef.dept, nameLocked: true, deptLocked: true });
+    setEditing(null); refresh();
+  };
+
   async function resign(emp) {
     if (!confirm(`Mark ${emp.name} as resigned? They'll drop from active staff, salary and counts.`)) return;
     await resignEmployee(emp.code, user.email);
@@ -83,9 +93,27 @@ export default function Employees({ user }) {
         <div className="font-semibold text-gray-800 mb-1">Current staff ({staff.length})</div>
         <ul className="text-sm divide-y divide-gray-100">
           {staff.map((e) => (
-            <li key={e.code} className="py-2 flex items-center justify-between">
-              <span>{e.name} <span className="text-gray-400">({e.code}){e.shift ? ' · ' + e.shift : ''}</span></span>
-              {isAdmin && <button type="button" onClick={() => resign(e)} className="text-xs text-red-700 border border-red-200 rounded px-2 py-1">Resign</button>}
+            <li key={e.code} className="py-2">
+              {editing === e.code ? (
+                <div className="space-y-2">
+                  <input className="inp" value={ef.name} onChange={ev => setEf({ ...ef, name: ev.target.value })} placeholder="Name" />
+                  <select className="inp" value={ef.dept} onChange={ev => setEf({ ...ef, dept: ev.target.value })}>{DEPTS.map(d => <option key={d}>{d}</option>)}</select>
+                  <div className="flex gap-2">
+                    <button type="button" onClick={saveEdit} className="flex-1 bg-red-700 text-white rounded py-1.5 text-xs font-medium">Save</button>
+                    <button type="button" onClick={() => setEditing(null)} className="border border-gray-300 rounded py-1.5 px-3 text-xs">Cancel</button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-center justify-between">
+                  <span>{e.name} <span className="text-gray-400">({e.code}){e.dept ? ' · ' + e.dept : ''}{e.shift ? ' · ' + e.shift : ''}</span></span>
+                  {isAdmin && (
+                    <div className="flex gap-1">
+                      <button type="button" onClick={() => startEdit(e)} className="text-xs text-gray-600 border border-gray-200 rounded px-2 py-1">Edit</button>
+                      <button type="button" onClick={() => resign(e)} className="text-xs text-red-700 border border-red-200 rounded px-2 py-1">Resign</button>
+                    </div>
+                  )}
+                </div>
+              )}
             </li>
           ))}
         </ul>

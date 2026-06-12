@@ -131,8 +131,12 @@ export async function loadEmployee(code) {
   return { ...blankEmp(code), ...(store[code] || {}), code };
 }
 
-// App-only self-punch staff (Radhey/Dinesh): their captured in/out times (att_punch) +
-// this-month totals (days present, total hours, OT beyond their duty hours).
+// App-only self-punch staff (Radhey/Dinesh/Munnilal): captured in/out times (att_punch) +
+// this-month totals. Drivers: an OUT after midnight is stitched to the prior day's IN, and
+// an OUT past their cutoff (e.g. 1 AM) counts as a full day. A manual override
+// (att_salary.override[month] = {days, hours, ot}) wins over the punch data for salary.
+const nextDate = (ymd) => { const d = new Date(ymd + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + 1); return d.toISOString().slice(0, 10); };
+
 export async function loadSelfPunchStaff() {
   if (!isConfigured || !db) return [];
   const snap = await getDocs(collection(db, 'att_salary'));
@@ -143,19 +147,42 @@ export async function loadSelfPunchStaff() {
   for (const e of staff) {
     const pd = await getDoc(doc(db, 'att_punch', e.code));
     const days = (pd.exists() && pd.data().days) || {};
-    const rows = Object.entries(days).filter(([dt]) => dt.startsWith(month))
-      .sort((a, b) => (a[0] < b[0] ? 1 : -1))
-      .map(([date, t]) => {
-        const i = toMin(t.in), o = toMin(t.out);
-        const hours = (i != null && o != null && o > i) ? +((o - i) / 60).toFixed(1) : null;
-        return { date, in: t.in || '', out: t.out || '', hours };
-      });
     const std = Number(e.standardHours) || 11;
+    const cutoff = toMin(e.overnightAfter || '01:00');
+    const dates = Object.keys(days).filter(dt => dt.startsWith(month)).sort();
+    const used = new Set();
+    const rows = [];
+    for (const date of dates) {
+      if (used.has(date)) continue;
+      const t = days[date];
+      let inT = t.in || '', outT = t.out || '', overnight = false, fullDay = false;
+      if (e.isDriver && inT && !outT) {                 // driver came back after midnight?
+        const nd = nextDate(date), nx = days[nd];
+        if (nx && nx.out && !nx.in) { outT = nx.out; used.add(nd); overnight = true; }
+      }
+      const i = toMin(inT), o = toMin(outT);
+      let hours = null;
+      if (i != null && o != null) {
+        let mins = o - i; if (mins < 0 || overnight) mins = (o + 1440) - i;
+        hours = +(mins / 60).toFixed(1);
+        if (e.isDriver && overnight && o >= cutoff) fullDay = true; // out past ~1 AM = full day
+      }
+      rows.push({ date, in: inT, out: outT, hours, overnight, fullDay });
+    }
+    rows.sort((a, b) => (a.date < b.date ? 1 : -1));
+
+    const autoPresent = rows.length;
+    const autoHours = +rows.reduce((s, r) => s + (r.hours || 0), 0).toFixed(1);
+    const autoOt = +rows.reduce((s, r) => s + (r.hours != null ? Math.max(0, r.hours - std) : 0), 0).toFixed(1);
+    const ov = (e.override && e.override[month]) || null;
+    const ot = ov ? Number(ov.ot != null ? ov.ot : Math.max(0, (Number(ov.hours) || 0) - (Number(ov.days) || 0) * std)) : autoOt;
     out.push({
-      code: e.code, name: e.name, dept: e.dept, unit: e.unit, amount: e.amount, standardHours: std, rows,
-      present: rows.length,
-      totalHours: +rows.reduce((s, r) => s + (r.hours || 0), 0).toFixed(1),
-      ot: +rows.reduce((s, r) => s + (r.hours != null ? Math.max(0, r.hours - std) : 0), 0).toFixed(1),
+      code: e.code, name: e.name, dept: e.dept, unit: e.unit, amount: e.amount, standardHours: std,
+      dutyStart: e.dutyStart, dutyEnd: e.dutyEnd, isDriver: !!e.isDriver, rows, month,
+      present: ov ? Number(ov.days) : autoPresent,
+      totalHours: ov ? Number(ov.hours) : autoHours,
+      ot: +Number(ot).toFixed(1), manual: !!ov,
+      autoPresent, autoHours, autoOt,
     });
   }
   return out;
