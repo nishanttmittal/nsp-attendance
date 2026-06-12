@@ -14,6 +14,7 @@ function run(file, env) {
 
 // min = IST minutes from midnight; day = weekday 0-6 (undefined = every day)
 const TASKS = [
+  { name: 'settings-guard', min: 6 * 60 + 45, run: () => run('settingsGuard.js') },               // 06:45 alert if Realtime shift/policy settings drifted (before reprocess!)
   { name: 'reprocess', min: 7 * 60, run: () => run('dailyReprocess.js') },                       // 07:00 reprocess yesterday
   { name: 'salary-data', min: 7 * 60 + 15, run: () => run('publishSalaryData.js') },              // 07:15 publish salary attendance
   { name: 'long-absence', min: 9 * 60, run: () => run('longAbsence.js', { THRESHOLD: '4' }) },     // 09:00 long absence

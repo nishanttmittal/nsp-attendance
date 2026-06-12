@@ -1,0 +1,59 @@
+{
+ "shift_GEN": {
+  "txtsftstarttime": "09:00",
+  "txtsiftendtime": "17:30",
+  "txtsiftduration": "08:30",
+  "cboisnightshift": "No",
+  "txtchekmin": "00:02",
+  "txtmaxearly": "02:00",
+  "txtmaxrate": "10:00",
+  "chk2": "Absent On Single Punch",
+  "cboFWOff": "Saturday",
+  "DropDownList1": "1 One In & Last Out"
+ },
+ "shift_10H": {
+  "txtsftstarttime": "09:00",
+  "txtsiftendtime": "19:30",
+  "txtsiftduration": "10:30",
+  "cboisnightshift": "No",
+  "txtchekmin": "00:02",
+  "txtmaxearly": "02:00",
+  "txtmaxrate": "08:00",
+  "chk2": "Absent On Single Punch",
+  "cboFWOff": "Saturday",
+  "DropDownList1": "1 One In & Last Out"
+ },
+ "shift_12H": {
+  "txtsftstarttime": "09:00",
+  "txtsiftendtime": "21:00",
+  "txtsiftduration": "12:00",
+  "cboisnightshift": "No",
+  "txtchekmin": "00:02",
+  "txtmaxearly": "02:00",
+  "txtmaxrate": "06:00",
+  "chk2": "Absent On Single Punch",
+  "cboFWOff": "Saturday",
+  "DropDownList1": "1 One In & Last Out"
+ },
+ "shift_wir": {
+  "txtsftstarttime": "09:30",
+  "txtsiftendtime": "20:00",
+  "txtsiftduration": "10:30",
+  "cboisnightshift": "No",
+  "txtchekmin": "00:02",
+  "txtmaxearly": "02:00",
+  "txtmaxrate": "08:00",
+  "chk2": "Absent On Single Punch",
+  "cboFWOff": "Saturday",
+  "DropDownList1": "1 One In & Last Out"
+ },
+ "policy_GEN": {
+  "cboRequiredpunchinday": "Multipunch",
+  "cbosinglepunchonly": "Overwrite",
+  "txtdurationformakingpresent": "06:00",
+  "txtmaxabsentsortday": "02:00",
+  "txtmaxworkinghour": "06:00",
+  "txtmaxworkinghourhalf": "06:39",
+  "IgnoreOTSetting": "00:20"
+ }
+}
