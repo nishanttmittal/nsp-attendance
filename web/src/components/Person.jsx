@@ -18,9 +18,11 @@ export default function Person({ code, mk, user, onBack }) {
   const act = async (fn) => { setBusy(true); try { await fn(); await reload(); } finally { setBusy(false); } };
 
   if (!emp) return <p className="text-gray-500">Loading…</p>;
-  const { md, pay } = payFor(emp, attMap, mk, ctx);
-  const locked = !!md.payment;
+  const { att, md, pay } = payFor(emp, attMap, mk, ctx);
+  // freeze on tick: once approved, nothing about this month can be edited (undo tick to reopen)
+  const locked = !!md.payment || !!md.approved;
   const today = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
+  const presentPct = ctx.elapsedDays > 0 ? Math.round((pay.presentDays / ctx.elapsedDays) * 100) : 0;
 
   return (
     <div className="space-y-3">
@@ -28,7 +30,12 @@ export default function Person({ code, mk, user, onBack }) {
 
       <div className="bg-white rounded-xl shadow p-4">
         <div className="font-bold text-lg text-gray-800">{emp.name || code}</div>
-        <div className="text-xs text-gray-500 mb-2">{emp.dept || ''} · {emp.shift || ''} · {emp.type === 'daily' ? rupee(emp.wage) + '/day' : rupee(emp.amount) + '/month'}</div>
+        <div className="text-xs text-gray-500">{emp.dept || ''} · {emp.shift || ''} · {emp.type === 'daily' ? rupee(emp.wage) + '/day' : rupee(emp.amount) + '/month'}</div>
+        <div className="text-xs text-gray-500 mb-2">
+          {emp.phone ? '📞 ' + emp.phone + ' · ' : ''}{emp.joinDate ? 'joined ' + emp.joinDate + ' · ' : ''}
+          present {presentPct}% · late {att.lateDays || 0}× · OT {pay.otHrsNet}h
+        </div>
+        {md.approved && !md.payment && <p className="text-xs bg-amber-50 border border-amber-200 text-amber-800 rounded p-1.5 mb-2">🔒 Ticked — figures frozen at {rupee(md.approvedNet)}. Undo the tick in the list to edit.</p>}
         <Row k="Days" v={`present ${pay.presentDays} · absent ${pay.absentDays}`} />
         <Row k="Overtime" v={`${pay.otHrs}h → pays ${pay.otHrsNet}h`} />
         <hr className="my-1.5" />
@@ -57,11 +64,11 @@ export default function Person({ code, mk, user, onBack }) {
       )}
 
       <Ledger title="💸 Advances" items={(emp.advances || []).map((a) => ({ d: a.date, t: `${a.mode}${a.remark ? ' · ' + a.remark : ''}`, v: rupee(a.amount) }))}
-        form={{ fields: ['amount', 'mode'], submit: 'Add advance' }} busy={busy}
+        form={{ fields: ['amount', 'mode'], submit: 'Add advance' }} busy={busy || locked}
         onAdd={(f) => act(() => addAdvance(code, { date: today, mode: f.mode, amount: Number(f.amount), paidBy: user.email }))} />
 
       <Ledger title="📈 Increments" items={(emp.increments || []).map((i) => ({ d: i.effective, t: i.remark || '', v: '+' + rupee(i.amount), green: true }))}
-        form={{ fields: ['amount', 'remark'], submit: 'Add increment (this month onward)' }} busy={busy}
+        form={{ fields: ['amount', 'remark'], submit: 'Add increment (this month onward)' }} busy={busy || locked}
         onAdd={(f) => act(() => addIncrement(code, { amount: Number(f.amount), effective: mk + '-01', remark: f.remark || '' }))} />
 
       <SalaryEdit emp={emp} busy={busy} onSave={(patch) => act(() => saveEmployee(code, patch))} />
@@ -97,10 +104,13 @@ function Ledger({ title, items, form, onAdd, busy }) {
 
 function SalaryEdit({ emp, onSave, busy }) {
   const [show, setShow] = useState(false);
-  const [f, setF] = useState({ type: emp.type || 'monthly', amount: emp.type === 'daily' ? emp.wage : emp.amount, shift: emp.shift || 'GEN' });
+  const [f, setF] = useState({
+    type: emp.type || 'monthly', amount: emp.type === 'daily' ? emp.wage : emp.amount, shift: emp.shift || 'GEN',
+    phone: emp.phone || '', joinDate: emp.joinDate || '',
+  });
   return (
     <div className="bg-white rounded-xl shadow p-3">
-      <button onClick={() => setShow(!show)} className="w-full text-left text-sm font-semibold text-gray-700">⚙ Salary setting {show ? '▲' : '▼'}</button>
+      <button onClick={() => setShow(!show)} className="w-full text-left text-sm font-semibold text-gray-700">⚙ Salary &amp; profile {show ? '▲' : '▼'}</button>
       {show && (
         <div className="grid grid-cols-3 gap-2 mt-2">
           <select className="border rounded px-2 py-2 text-sm" value={f.type} onChange={(e) => setF({ ...f, type: e.target.value })}>
@@ -110,8 +120,12 @@ function SalaryEdit({ emp, onSave, busy }) {
           <select className="border rounded px-2 py-2 text-sm" value={f.shift} onChange={(e) => setF({ ...f, shift: e.target.value })}>
             {['GEN', '10H', '12H', 'wir'].map((s) => <option key={s}>{s}</option>)}
           </select>
-          <button disabled={busy} onClick={() => onSave(f.type === 'daily' ? { type: 'daily', wage: Number(f.amount), shift: f.shift } : { type: 'monthly', amount: Number(f.amount), shift: f.shift })}
-            className="col-span-3 bg-gray-800 text-white rounded py-1.5 text-xs font-medium">Save</button>
+          <input className="border rounded px-2 py-2 text-sm col-span-2" placeholder="📞 Phone" value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} />
+          <input className="border rounded px-2 py-2 text-sm" type="date" title="Joining date" value={f.joinDate} onChange={(e) => setF({ ...f, joinDate: e.target.value })} />
+          <button disabled={busy} onClick={() => onSave({
+            ...(f.type === 'daily' ? { type: 'daily', wage: Number(f.amount) } : { type: 'monthly', amount: Number(f.amount) }),
+            shift: f.shift, phone: f.phone, joinDate: f.joinDate,
+          })} className="col-span-3 bg-gray-800 text-white rounded py-1.5 text-xs font-medium">Save</button>
         </div>
       )}
     </div>

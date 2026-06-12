@@ -44,6 +44,17 @@ function OwnerSalary({ user }) {
     } finally { setBusy(''); }
   }
 
+  async function tickAll() {
+    const remaining = rows.filter((r) => !r.md.approved && r.pay.net > 0);
+    if (!remaining.length) return;
+    if (!confirm(`Tick all remaining ${remaining.length} people for ${mk}?`)) return;
+    setBusy('all');
+    try {
+      for (const r of remaining) await approveSalary(r.emp.code, mk, r.pay, user.email);
+      await reload();
+    } finally { setBusy(''); }
+  }
+
   return (
     <div className="space-y-3">
       <div className="bg-white rounded-xl shadow p-3 space-y-2">
@@ -53,8 +64,15 @@ function OwnerSalary({ user }) {
           </select>
           <button onClick={() => setShowReport(true)} className="border border-gray-300 rounded-lg px-3 text-sm font-medium">📄 Report</button>
         </div>
-        <div className="text-sm text-gray-600">
-          <b className="text-gray-800">{ticked.length}</b> of {rows.length} ticked · <b className="text-green-700">{paid.length}</b> paid ({rupee(paid.reduce((s, r) => s + Number(r.md.payment?.net || 0), 0))})
+        <div className="flex items-center gap-2">
+          <div className="flex-1 text-sm text-gray-600">
+            <b className="text-gray-800">{ticked.length}</b> of {rows.length} ticked · <b className="text-green-700">{paid.length}</b> paid ({rupee(paid.reduce((s, r) => s + Number(r.md.payment?.net || 0), 0))})
+          </div>
+          {rows.some((r) => !r.md.approved && r.pay.net > 0) && (
+            <button disabled={busy === 'all'} onClick={tickAll} className="text-xs border border-red-300 text-red-700 rounded-lg px-2.5 py-1.5 font-medium disabled:opacity-50">
+              {busy === 'all' ? 'Ticking…' : `✓ Tick all (${rows.filter((r) => !r.md.approved && r.pay.net > 0).length})`}
+            </button>
+          )}
         </div>
         {!ctx.fullMonth && <p className="text-xs text-gray-400">Running month — figures till yesterday.</p>}
       </div>

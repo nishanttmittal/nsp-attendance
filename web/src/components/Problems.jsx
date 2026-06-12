@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { loadMissedDoc, loadLateList, loadEmployees, loadRoster, decideResignPrompt, leaveMissedPunch, queueJob, istMonth } from '../lib/data';
+import { loadMissedDoc, loadLateList, loadEmployees, loadRoster, loadAllAttendance, loadPayout, decideResignPrompt, leaveMissedPunch, queueJob, istMonth } from '../lib/data';
 import { SHIFT_HOURS } from '../lib/payroll';
 
 const addHrs = (hhmm, h) => {
@@ -15,6 +15,8 @@ export default function Problems({ user }) {
   const [short, setShort] = useState([]);
   const [late, setLate] = useState([]);
   const [resigns, setResigns] = useState([]);
+  const [highOt, setHighOt] = useState([]);
+  const [unpaid, setUnpaid] = useState(0);
   const [leftSet, setLeftSet] = useState(new Set());
   const [roster, setRoster] = useState([]);
   const [busy, setBusy] = useState('');
@@ -23,11 +25,28 @@ export default function Problems({ user }) {
   async function reload() {
     const [md, lateList, ros] = await Promise.all([loadMissedDoc(mk), loadLateList(mk, 3), loadRoster()]);
     setMissed(md.entries || []); setShort(md.shortHours || []); setLate(lateList); setRoster(ros);
+    try { // ticked but not yet handed over (manager-readable payout doc)
+      const po = await loadPayout(mk);
+      setUnpaid(Object.values(po.items || {}).filter((i) => !i.paid).length);
+    } catch { /* ignore */ }
     if (isAdmin) {
       try {
         const emps = await loadEmployees(true);
         setResigns(emps.filter((e) => e.resignPrompt?.status === 'pending' && e.active !== false));
         setLeftSet(new Set(emps.flatMap((e) => ((e.missedLeave || {})[mk] || []).map((d) => e.code + '|' + d))));
+        // abnormal OT: > 4h average OT per present day (and at least 20h) — the May bug would
+        // have lit this up on day one
+        const am = await loadAllAttendance();
+        const names = Object.fromEntries(emps.map((e) => [e.code, e.name || e.code]));
+        const flags = [];
+        for (const [code, a] of Object.entries(am)) {
+          const rec = (a.months && a.months[mk]) || (a.month === mk ? a : null);
+          if (!rec || !rec.presentDays) continue;
+          const perDay = rec.otHrs / rec.presentDays;
+          if (rec.otHrs >= 20 && perDay > 4) flags.push({ code, name: names[code] || code, ot: Math.round(rec.otHrs), perDay: +perDay.toFixed(1), days: rec.presentDays });
+        }
+        flags.sort((a, b) => b.perDay - a.perDay);
+        setHighOt(flags);
       } catch { /* ignore */ }
     }
   }
@@ -48,6 +67,23 @@ export default function Problems({ user }) {
 
   return (
     <div className="space-y-3">
+      {unpaid > 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-sm text-amber-800">
+          💵 <b>{unpaid}</b> ticked but not yet paid — check the Salary page.
+        </div>
+      )}
+
+      {highOt.length > 0 && (
+        <Card title={`⚡ Unusually high OT (${highOt.length})`} sub="More than 4 hrs OT per working day — check these are real before paying.">
+          {highOt.map((h) => (
+            <div key={h.code} className="py-1.5 flex justify-between text-sm border-t border-gray-50 first:border-0">
+              <span>{h.name}</span>
+              <span className="text-red-700 font-semibold">{h.ot}h <span className="text-gray-400 font-normal">({h.perDay}h/day · {h.days}d)</span></span>
+            </div>
+          ))}
+        </Card>
+      )}
+
       {resigns.length > 0 && (
         <Card title={`🚪 Absent a full month (${resigns.length})`} sub="Remove from salary list?">
           {resigns.map((e) => (
