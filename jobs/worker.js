@@ -5,6 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const { db } = require('./lib/firestore');
 const { sendTelegram, sendTelegramDocument } = require('./lib/notify');
+const { drainSelfPunch } = require('./selfPunch');
 
 const DL = path.resolve(__dirname, 'downloads');
 
@@ -91,6 +92,10 @@ async function handle(type, p) {
 }
 
 (async () => {
+  // record any self-punch taps (Radhey/Dinesh link) before processing the job queue
+  try { const n = await drainSelfPunch(); if (n) console.log(`self-punch: recorded ${n} tap(s)`); }
+  catch (e) { console.error('self-punch drain failed:', e.message); }
+
   const snap = await db().collection('att_job_requests').where('status', '==', 'pending').limit(10).get();
   if (snap.empty) { console.log('no pending jobs'); return; }
   for (const doc of snap.docs) {
