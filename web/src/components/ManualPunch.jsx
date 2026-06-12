@@ -1,5 +1,14 @@
 import { useEffect, useState } from 'react';
 import { queueJob, loadRoster, loadMissedPunches } from '../lib/data';
+import { SHIFT_HOURS } from '../lib/payroll';
+
+// add h hours to a HH:MM time, clamped to the same day
+const addHrs = (hhmm, h) => {
+  const m = /^(\d{1,2}):(\d{2})/.exec(hhmm || ''); if (!m) return '';
+  let t = +m[1] * 60 + +m[2] + Math.round(h * 60);
+  t = Math.max(0, Math.min(23 * 60 + 59, t));
+  return `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`;
+};
 
 export default function ManualPunch({ user }) {
   const [f, setF] = useState({ emp: '', date: '', in: '', out: '', remark: '' });
@@ -19,6 +28,19 @@ export default function ManualPunch({ user }) {
     window.scrollTo({ top: 9999, behavior: 'smooth' });
   }
 
+  const shiftHrsOf = (code) => SHIFT_HOURS[(emps.find((x) => x.code === code) || {}).shift] || 8;
+
+  // one-tap fix: fraction 1 = full shift, 0.5 = half day (fills the missing punch from the known one)
+  async function fillMissed(m, fraction) {
+    const span = shiftHrsOf(m.code) * fraction;
+    const p = { emp: m.code, date: m.date, in: '', out: '', remark: (fraction === 1 ? 'full shift' : 'half day') + ` (missed ${m.which})` };
+    if (m.which === 'out') { p.in = m.otherTime; p.out = addHrs(m.otherTime, span); }
+    else { p.out = m.otherTime; p.in = addHrs(m.otherTime, -span); }
+    setStatus('queuing');
+    try { const r = await queueJob('manual_punch', p, user.email); setStatus(r.mock ? 'mock' : 'queued'); if (!r.mock) loadMissedPunches().then(setMissed); }
+    catch (e) { setStatus('error:' + e.message); }
+  }
+
   async function submit(e) {
     e.preventDefault();
     if (!f.emp || !f.date || (!f.in && !f.out)) { setStatus('need emp, date, and at least one time'); return; }
@@ -35,14 +57,19 @@ export default function ManualPunch({ user }) {
       {missed.length > 0 && (
         <div className="bg-white rounded-xl shadow p-4">
           <div className="font-semibold text-gray-800">Missed punches this month ({missed.length})</div>
-          <p className="text-xs text-gray-500 mb-2">Tap one to fill the form, then enter the missing time.</p>
-          <ul className="text-sm divide-y divide-gray-100 max-h-72 overflow-auto">
+          <p className="text-xs text-gray-500 mb-2">For each: <b>Full shift</b> or <b>Half day</b> fills it automatically; or <b>Manual</b> to type the time.</p>
+          <ul className="text-sm divide-y divide-gray-100 max-h-96 overflow-auto">
             {missed.map((m, i) => (
-              <li key={m.code + m.date + i}>
-                <button type="button" onClick={() => prefill(m)} className="w-full text-left py-2 flex items-center justify-between active:bg-gray-50">
+              <li key={m.code + m.date + i} className="py-2">
+                <div className="flex items-center justify-between">
                   <span>{m.name} <span className="text-gray-400">· {m.date}</span></span>
-                  <span className="text-xs"><span className="text-amber-700">missing {m.which.toUpperCase()}</span> <span className="text-gray-400">({m.which === 'out' ? 'in ' : 'out '}{m.otherTime})</span></span>
-                </button>
+                  <span className="text-xs text-amber-700">missing {m.which.toUpperCase()} <span className="text-gray-400">({m.which === 'out' ? 'in ' : 'out '}{m.otherTime})</span></span>
+                </div>
+                <div className="flex gap-2 mt-1.5">
+                  <button type="button" onClick={() => fillMissed(m, 1)} className="flex-1 bg-green-700 text-white rounded py-1.5 text-xs font-medium">Full shift</button>
+                  <button type="button" onClick={() => fillMissed(m, 0.5)} className="flex-1 bg-amber-600 text-white rounded py-1.5 text-xs font-medium">Half day</button>
+                  <button type="button" onClick={() => prefill(m)} className="border border-gray-300 text-gray-700 rounded py-1.5 px-3 text-xs">Manual</button>
+                </div>
               </li>
             ))}
           </ul>

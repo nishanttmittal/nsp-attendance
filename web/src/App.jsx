@@ -7,6 +7,7 @@ import ManualPunch from './components/ManualPunch.jsx';
 import Salary from './components/Salary.jsx';
 import SelfPunchCard from './components/SelfPunchCard.jsx';
 import LatePenalties from './components/LatePenalties.jsx';
+import AbsenceDocks from './components/AbsenceDocks.jsx';
 import Employees from './components/Employees.jsx';
 import Advance from './components/Advance.jsx';
 import Settings from './components/Settings.jsx';
@@ -65,7 +66,7 @@ export default function App() {
         {active === 'monthly' && <MonthlyDownload user={user} />}
         {active === 'manual' && canSee(user.role, 'manual') && <ManualPunch user={user} />}
         {active === 'salary' && canSee(user.role, 'salary') && <><SelfPunchCard /><Salary user={user} /></>}
-        {active === 'penalties' && canSee(user.role, 'penalties') && <LatePenalties user={user} />}
+        {active === 'penalties' && canSee(user.role, 'penalties') && <div className="space-y-4"><LatePenalties user={user} /><AbsenceDocks user={user} /></div>}
         {active === 'employees' && canSee(user.role, 'employees') && <Employees user={user} />}
         {active === 'advance' && canSee(user.role, 'advance') && <Advance user={user} />}
         {active === 'settings' && canSee(user.role, 'settings') && <Settings />}

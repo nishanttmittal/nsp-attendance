@@ -229,6 +229,34 @@ export async function loadMissedPunches(month) {
   const snap = await getDoc(doc(db, 'att_missed_punch', mk));
   return (snap.exists() && snap.data().entries) || [];
 }
+// Absence dock approval tasks: every 3 real absences → 1 Saturday cut, each approved/rejected
+// per person. Approved count → weeklyOffDockDays (the engine deduction).
+export async function loadAbsenceDockTasks(month) {
+  const mk = month || new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 7);
+  if (!isConfigured || !db) return { month: mk, staff: [] };
+  const [attSnap, salSnap] = await Promise.all([getDocs(collection(db, 'att_attendance')), getDocs(collection(db, 'att_salary'))]);
+  const sal = {}; salSnap.forEach(d => { sal[d.id] = d.data(); });
+  const staff = [];
+  attSnap.forEach(d => {
+    const absent = Number(d.data().absentDays) || 0;
+    const docks = Math.floor(absent / 3);
+    const s = sal[d.id];
+    if (docks < 1 || !s || !(s.amount || s.wage)) return;
+    const dec = (s.months?.[mk]?.absenceDocks) || {};
+    const items = Array.from({ length: docks }, (_, i) => ({ index: i, label: `${(i + 1) * 3} absences → cut 1 Saturday`, status: dec[i]?.status || 'pending' }));
+    staff.push({ code: d.id, name: s.name || d.id, dept: s.dept || '', absent, items, approved: items.filter(it => it.status === 'approved').length });
+  });
+  staff.sort((a, b) => b.absent - a.absent);
+  return { month: mk, staff };
+}
+export async function saveAbsenceDock(code, month, index, approved) {
+  const emp = await loadEmployee(code);
+  const dec = { ...((emp.months?.[month]?.absenceDocks) || {}) };
+  dec[index] = approved === null ? { status: 'pending' } : { status: approved ? 'approved' : 'rejected', at: new Date().toISOString() };
+  const approvedCount = Object.values(dec).filter(d => d.status === 'approved').length;
+  await saveMonth(code, month, { absenceDocks: dec, weeklyOffDockDays: approvedCount });
+}
+
 // Decide one penalty item (key = 'base' or a 'YYYY-MM-DD'). fraction 0.25/0.5, 0=reject, null=reopen.
 export async function saveLatePenalty(code, month, key, fraction, by) {
   const emp = await loadEmployee(code);
