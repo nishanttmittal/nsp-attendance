@@ -19,7 +19,7 @@ export function effectiveAmount(emp, toDate) {
 }
 
 // One employee's pay for the period. att = {presentDays,absentDays,otHrs,lateHrs,earlyHrs}.
-export function computePay({ emp, att, daysInMonth, elapsedDays, fullMonth, advancesThisMonth = 0, advanceBalanceIn = 0, advanceRecover = 0, fines = 0, loanInstallment = 0, latePenaltyDays = 0, weeklyOffDockDays = 0, monthStart, toDate }) {
+export function computePay({ emp, att, daysInMonth, elapsedDays, fullMonth, advancesThisMonth = 0, advanceBalanceIn = 0, advanceRecover = 0, fines = 0, loanInstallment = 0, bonus = 0, latePenaltyDays = 0, weeklyOffDockDays = 0, monthStart, toDate }) {
   const eff = effectiveAmount(emp, toDate);
   const rate = eff.amount;
   const perDay = emp.type === 'daily' ? rate : rate / daysInMonth;
@@ -50,7 +50,7 @@ export function computePay({ emp, att, daysInMonth, elapsedDays, fullMonth, adva
   // weekly-off dock: every 3 absences = 1 Saturday cut (owner-set; 0 if Realtime already did it)
   const weeklyOffDock = round(perDay * Number(weeklyOffDockDays || 0));
   const suggestedDockDays = Math.floor((att.absentDays || 0) / 3);
-  const earnings = base + otPay + perfectBonus;
+  const earnings = base + otPay + perfectBonus + Number(bonus || 0);
   const fixed = Number(fines || 0) + Number(loanInstallment || 0) + latePenalty + weeklyOffDock;
   const avail = Math.max(0, earnings - fixed);
   const advanceDue = Number(advancesThisMonth || 0) + Number(advanceBalanceIn || 0);
@@ -60,7 +60,7 @@ export function computePay({ emp, att, daysInMonth, elapsedDays, fullMonth, adva
     type: emp.type, effectiveRate: rate, effectiveRemark: eff.remark,
     payableDays: effElapsed, presentDays: att.presentDays || 0, absentDays: att.absentDays || 0,
     otHrs: round(att.otHrs || 0), otHrsNet: round(netOtHrs),
-    base: round(base), otPay: round(otPay), perfectBonus: round(perfectBonus),
+    base: round(base), otPay: round(otPay), perfectBonus: round(perfectBonus), bonus: round(Number(bonus || 0)),
     fines: round(Number(fines || 0)), loanInstallment: round(Number(loanInstallment || 0)),
     latePenalty: round(latePenalty), latePenaltyDays: Number(latePenaltyDays || 0),
     weeklyOffDock: round(weeklyOffDock), weeklyOffDockDays: Number(weeklyOffDockDays || 0), suggestedDockDays,

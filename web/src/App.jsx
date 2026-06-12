@@ -81,7 +81,12 @@ export default function App() {
       )}
 
       <main className="flex-1 p-4 max-w-3xl w-full mx-auto">
-        {tab === 'settings' && canSee(user.role, 'settings') ? <Settings /> : (
+        {tab === 'settings' && canSee(user.role, 'settings') ? (
+          <div className="space-y-3">
+            <button onClick={() => setTab('floor')} className="text-sm text-gray-600">← Back to app</button>
+            <Settings />
+          </div>
+        ) : (
           <>
             {active === 'floor' && <Dashboard />}
             {active === 'salary' && canSee(user.role, 'salary') && <Salary user={user} />}

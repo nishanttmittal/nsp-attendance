@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { loadEmployee, loadAllAttendance, saveEmployee, saveMonth, addAdvance, addIncrement, resignEmployee, queueJob } from '../lib/data';
+import { loadEmployee, loadAllAttendance, saveEmployee, saveMonth, addAdvance, addIncrement, resignEmployee, checkActionPassword, queueJob } from '../lib/data';
 import { monthCtx, payFor, rupee } from '../lib/paycalc';
 import { payslipOnePdf, sharePdf } from '../lib/salaryPdf';
 
@@ -42,14 +42,23 @@ export default function Person({ code, mk, user, onBack }) {
         <Row k="Base pay" v={rupee(pay.base)} />
         <Row k="+ Overtime" v={rupee(pay.otPay)} />
         {pay.perfectBonus > 0 && <Row k="+ Full-attendance bonus" v={rupee(pay.perfectBonus)} />}
+        {pay.bonus > 0 && <Row k="+ Bonus" v={rupee(pay.bonus)} />}
         {pay.fines > 0 && <Row k="− Fine" v={rupee(pay.fines)} />}
         {pay.loanInstallment > 0 && <Row k="− Loan" v={rupee(pay.loanInstallment)} />}
         {pay.advanceRecovered > 0 && <Row k="− Advance" v={rupee(pay.advanceRecovered)} />}
         <div className="flex justify-between mt-1 pt-1.5 border-t font-bold"><span>This month ({mk})</span><span className="text-red-700">{rupee(locked ? md.payment.net : pay.net)}</span></div>
         {locked && <p className="text-xs text-green-700 mt-1">✓ Paid {md.payment.date} ({md.payment.mode})</p>}
         {pay.advanceBalanceCarried > 0 && <p className="text-xs text-amber-700 mt-1">Still owes {rupee(pay.advanceBalanceCarried)} advance — carries forward.</p>}
-        <div className="grid grid-cols-2 gap-2 mt-3">
-          <button onClick={() => sharePdf(payslipOnePdf(emp, pay, mk), `payslip-${code}-${mk}.pdf`)} className="border border-gray-300 rounded-lg py-2 text-sm font-medium">📄 Payslip</button>
+        <div className="grid grid-cols-3 gap-2 mt-3">
+          <button onClick={() => sharePdf(payslipOnePdf(emp, pay, mk), `payslip-${code}-${mk}.pdf`)} className="border border-gray-300 rounded-lg py-2 text-sm font-medium">📄 PDF</button>
+          <button onClick={() => {
+            const L = [`*NSP — Salary ${mk}*`, `${emp.name || code}`, `Days: ${pay.presentDays} present / ${pay.absentDays} absent`, `OT: ${pay.otHrsNet}h`,
+              `Base ₹${pay.base}` + (pay.otPay ? ` + OT ₹${pay.otPay}` : '') + (pay.perfectBonus ? ` + bonus ₹${pay.perfectBonus}` : '') + (pay.bonus ? ` + bonus ₹${pay.bonus}` : ''),
+              ...(pay.fines ? [`Fine −₹${pay.fines}`] : []), ...(pay.loanInstallment ? [`Loan −₹${pay.loanInstallment}`] : []), ...(pay.advanceRecovered ? [`Advance −₹${pay.advanceRecovered}`] : []),
+              `*NET: ₹${(locked && md.payment ? md.payment.net : pay.net).toLocaleString('en-IN')}*`];
+            const phone = (emp.phone || '').replace(/\D/g, '');
+            window.open(`https://wa.me/${phone ? (phone.length === 10 ? '91' + phone : phone) : ''}?text=${encodeURIComponent(L.join('\n'))}`);
+          }} className="border border-green-300 text-green-700 rounded-lg py-2 text-sm font-medium">🟢 WhatsApp</button>
           <button onClick={async () => { await queueJob('payslip', { code, month: mk }, user.email); alert('Sent to Telegram.'); }} className="border border-gray-300 rounded-lg py-2 text-sm font-medium">✈️ Telegram</button>
         </div>
       </div>
@@ -57,32 +66,42 @@ export default function Person({ code, mk, user, onBack }) {
       {!locked && (
         <div className="bg-white rounded-xl shadow p-3 space-y-1">
           <div className="text-sm font-semibold text-gray-700">Adjust this month</div>
+          <NumRow label="Bonus ₹" val={md.bonus} disabled={busy} onSave={(v) => act(() => saveMonth(code, mk, { bonus: v }))} />
           <NumRow label="Fine ₹" val={md.fine} disabled={busy} onSave={(v) => act(() => saveMonth(code, mk, { fine: v }))} />
           <NumRow label="Loan cut ₹" val={md.loanInstallment} disabled={busy} onSave={(v) => act(() => saveMonth(code, mk, { loanInstallment: v }))} />
           <NumRow label={`Advance cut ₹ (owes ${rupee(pay.advanceDue)})`} val={md.advanceRecover ?? pay.advanceDue} disabled={busy} onSave={(v) => act(() => saveMonth(code, mk, { advanceRecover: v }))} />
         </div>
       )}
 
-      <Ledger title="💸 Advances" items={(emp.advances || []).map((a) => ({ d: a.date, t: `${a.mode}${a.remark ? ' · ' + a.remark : ''}`, v: rupee(a.amount) }))}
-        form={{ fields: ['amount', 'mode'], submit: 'Add advance' }} busy={busy || locked}
-        onAdd={(f) => act(() => addAdvance(code, { date: today, mode: f.mode, amount: Number(f.amount), paidBy: user.email }))} />
+      <Ledger title="💸 Advances" withMode items={(emp.advances || []).map((a) => ({ d: a.date, t: `${a.mode}${a.remark ? ' · ' + a.remark : ''}${a.paidBy ? ' · by ' + String(a.paidBy).split('@')[0] : ''}`, v: rupee(a.amount) }))}
+        submit="Add advance" busy={busy || locked} defDate={today}
+        onAdd={(f) => act(() => addAdvance(code, { date: f.date, mode: f.mode, amount: Number(f.amount), remark: f.remark || '', paidBy: user.email }))} />
 
       <Ledger title="📈 Increments" items={(emp.increments || []).map((i) => ({ d: i.effective, t: i.remark || '', v: '+' + rupee(i.amount), green: true }))}
-        form={{ fields: ['amount', 'remark'], submit: 'Add increment (this month onward)' }} busy={busy || locked}
-        onAdd={(f) => act(() => addIncrement(code, { amount: Number(f.amount), effective: mk + '-01', remark: f.remark || '' }))} />
+        submit="Add increment (from that date onward)" busy={busy || locked} defDate={mk + '-01'}
+        onAdd={(f) => act(() => addIncrement(code, { amount: Number(f.amount), effective: f.date, remark: f.remark || '' }))} />
+
+      <PaymentsHistory emp={emp} />
 
       <SalaryEdit emp={emp} busy={busy} onSave={(patch) => act(() => saveEmployee(code, patch))} />
 
       {emp.active !== false ? (
-        <button disabled={busy} onClick={() => { if (confirm(`Resign ${emp.name}? (also remove on the machine)`)) act(() => resignEmployee(code, user.email)); }}
-          className="w-full border border-red-200 text-red-700 rounded-lg py-2 text-sm">Resign / remove {emp.name}</button>
+        <button disabled={busy} onClick={async () => {
+          const pw = prompt(`Resign ${emp.name}?\nEnter the action password to confirm:`);
+          if (pw == null) return;
+          const ok = await checkActionPassword(pw);
+          if (ok === 'unset') { if (!confirm('No action password set yet (set one in ⚙ Settings). Resign anyway?')) return; }
+          else if (!ok) { alert('Wrong password.'); return; }
+          act(() => resignEmployee(code, user.email));
+        }} className="w-full border border-red-200 text-red-700 rounded-lg py-2 text-sm">Resign / remove {emp.name}</button>
       ) : <p className="text-center text-xs text-gray-400">Resigned {emp.resignedAt || ''}</p>}
     </div>
   );
 }
 
-function Ledger({ title, items, form, onAdd, busy }) {
-  const [f, setF] = useState({ amount: '', mode: 'cash', remark: '' });
+// log + entry form: every advance/increment goes in with date, amount, (mode) and remark
+function Ledger({ title, items, withMode, submit, onAdd, busy, defDate }) {
+  const [f, setF] = useState({ amount: '', mode: 'cash', remark: '', date: defDate });
   return (
     <div className="bg-white rounded-xl shadow p-3">
       <div className="text-sm font-semibold text-gray-700 mb-1">{title} ({items.length})</div>
@@ -91,13 +110,35 @@ function Ledger({ title, items, form, onAdd, busy }) {
         {[...items].reverse().map((x, i) => <li key={i} className="py-1 flex justify-between"><span>{x.d}{x.t ? ' · ' + x.t : ''}</span><b className={x.green ? 'text-green-700' : ''}>{x.v}</b></li>)}
       </ul>
       <div className="grid grid-cols-2 gap-1.5 mt-2">
+        <input className="border rounded px-2 py-1.5 text-sm" type="date" value={f.date} onChange={(e) => setF({ ...f, date: e.target.value })} />
         <input className="border rounded px-2 py-1.5 text-sm" type="number" placeholder="Amount ₹" value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} />
-        {form.fields.includes('mode')
-          ? <select className="border rounded px-2 py-1.5 text-sm" value={f.mode} onChange={(e) => setF({ ...f, mode: e.target.value })}><option value="cash">Cash</option><option value="account">Bank</option></select>
-          : <input className="border rounded px-2 py-1.5 text-sm" placeholder="Remark" value={f.remark} onChange={(e) => setF({ ...f, remark: e.target.value })} />}
-        <button disabled={busy || !Number(f.amount)} onClick={() => { onAdd(f); setF({ amount: '', mode: 'cash', remark: '' }); }}
-          className="col-span-2 bg-gray-800 text-white rounded py-1.5 text-xs font-medium disabled:opacity-40">{form.submit}</button>
+        {withMode && <select className="border rounded px-2 py-1.5 text-sm" value={f.mode} onChange={(e) => setF({ ...f, mode: e.target.value })}><option value="cash">Cash</option><option value="account">Bank</option></select>}
+        <input className={`border rounded px-2 py-1.5 text-sm ${withMode ? '' : 'col-span-2'}`} placeholder="Remark (optional)" value={f.remark} onChange={(e) => setF({ ...f, remark: e.target.value })} />
+        <button disabled={busy || !Number(f.amount) || !f.date} onClick={() => { onAdd(f); setF({ amount: '', mode: 'cash', remark: '', date: defDate }); }}
+          className="col-span-2 bg-gray-800 text-white rounded py-1.5 text-xs font-medium disabled:opacity-40">{submit}</button>
       </div>
+    </div>
+  );
+}
+
+// read-only log of every salary payment made to this person
+function PaymentsHistory({ emp }) {
+  const rows = Object.entries(emp.months || {})
+    .filter(([, m]) => m && m.payment)
+    .map(([mk, m]) => ({ mk, ...m.payment }))
+    .sort((a, b) => (a.mk < b.mk ? 1 : -1));
+  if (!rows.length) return null;
+  return (
+    <div className="bg-white rounded-xl shadow p-3">
+      <div className="text-sm font-semibold text-gray-700 mb-1">🧾 Salary payments ({rows.length})</div>
+      <ul className="text-xs divide-y divide-gray-100 max-h-40 overflow-auto">
+        {rows.map((p) => (
+          <li key={p.mk} className="py-1 flex justify-between">
+            <span>{p.mk} · paid {p.date} · {p.mode}{p.bank != null ? ` (bank ${rupee(p.bank)} + cash ${rupee(p.cash)})` : ''}{p.by ? ' · by ' + String(p.by).split('@')[0] : ''}</span>
+            <b>{rupee(p.net)}</b>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

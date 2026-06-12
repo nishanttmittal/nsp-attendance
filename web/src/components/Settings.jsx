@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { exportAllData, restoreAllData, listManagers, addManager, removeManager } from '../lib/data';
+import { exportAllData, restoreAllData, listManagers, addManager, removeManager, setActionPassword, checkActionPassword } from '../lib/data';
 
 export default function Settings() {
   const [busy, setBusy] = useState('');
@@ -35,6 +35,7 @@ export default function Settings() {
   return (
     <div className="space-y-4">
       <ManagersCard />
+      <PasswordCard />
       <Card title="Backup &amp; Restore">
         <p className="text-sm text-gray-500 mb-3">Your salary, advances, increments, loans and fines. An automatic backup also runs on a schedule.</p>
         <button onClick={backup} disabled={busy === 'backup'}
@@ -88,6 +89,34 @@ function ManagersCard() {
         <input className="border rounded px-3 py-2 text-sm" placeholder="Telegram chat id (optional)" value={f.chat} onChange={e => setF({ ...f, chat: e.target.value })} />
         <button onClick={add} className="bg-gray-800 text-white rounded py-2 text-sm font-medium">Add manager</button>
       </div>
+    </div>
+  );
+}
+
+// password that guards dangerous actions (resign/remove, unlocking paid months)
+function PasswordCard() {
+  const [f, setF] = useState({ old: '', pw: '', pw2: '' });
+  const [msg, setMsg] = useState(null);
+  async function save() {
+    if (!f.pw || f.pw.length < 4) return setMsg({ ok: false, t: 'Password must be at least 4 characters.' });
+    if (f.pw !== f.pw2) return setMsg({ ok: false, t: 'The two passwords don’t match.' });
+    const cur = await checkActionPassword(f.old);
+    if (cur !== 'unset' && cur !== true) return setMsg({ ok: false, t: 'Current password is wrong.' });
+    await setActionPassword(f.pw);
+    setF({ old: '', pw: '', pw2: '' });
+    setMsg({ ok: true, t: '✓ Action password saved.' });
+  }
+  return (
+    <div className="bg-white rounded-xl shadow p-4">
+      <div className="font-semibold text-gray-800 mb-1">Action password</div>
+      <p className="text-xs text-gray-500 mb-2">Asked before removing/resigning a worker (and other dangerous actions).</p>
+      <div className="grid grid-cols-1 gap-2">
+        <input className="border rounded px-3 py-2 text-sm" type="password" placeholder="Current password (leave empty if none yet)" value={f.old} onChange={(e) => setF({ ...f, old: e.target.value })} />
+        <input className="border rounded px-3 py-2 text-sm" type="password" placeholder="New password" value={f.pw} onChange={(e) => setF({ ...f, pw: e.target.value })} />
+        <input className="border rounded px-3 py-2 text-sm" type="password" placeholder="New password again" value={f.pw2} onChange={(e) => setF({ ...f, pw2: e.target.value })} />
+        <button onClick={save} className="bg-gray-800 text-white rounded py-2 text-sm font-medium">Save password</button>
+      </div>
+      {msg && <p className={`text-sm mt-2 rounded p-2 border ${msg.ok ? 'text-green-800 bg-green-50 border-green-200' : 'text-red-700 bg-red-50 border-red-200'}`}>{msg.t}</p>}
     </div>
   );
 }

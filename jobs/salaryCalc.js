@@ -38,7 +38,7 @@ function effectiveAmount(emp, toDate) {
 
 const DAY = 86400000;
 // core calc for one employee — exported for the PWA to reuse
-function computePay({ emp, att, daysInMonth, elapsedDays, fullMonth, advances, advanceBalanceIn = 0, advanceRecover = 0, fines = 0, loanInstallment = 0, latePenaltyDays = 0, weeklyOffDockDays = 0, monthStart, toDate }) {
+function computePay({ emp, att, daysInMonth, elapsedDays, fullMonth, advances, advanceBalanceIn = 0, advanceRecover = 0, fines = 0, loanInstallment = 0, bonus = 0, latePenaltyDays = 0, weeklyOffDockDays = 0, monthStart, toDate }) {
   const eff = effectiveAmount(emp, toDate);
   const rate = eff.amount;
   const perDay = emp.type === 'daily' ? rate : rate / daysInMonth;
@@ -69,7 +69,7 @@ function computePay({ emp, att, daysInMonth, elapsedDays, fullMonth, advances, a
   // Paying a worker who still owes simply carries the balance forward; extra cash given = a new advance.
   const latePenalty = round(perDay * Number(latePenaltyDays || 0)); // 0.25 (=25%) or 0.5 (=50%) of a day
   const weeklyOffDock = round(perDay * Number(weeklyOffDockDays || 0)); // 3 absences = 1 Saturday cut
-  const earnings = base + otPay + perfectBonus;
+  const earnings = base + otPay + perfectBonus + Number(bonus || 0);
   const fixedDeductions = Number(fines || 0) + Number(loanInstallment || 0) + latePenalty + weeklyOffDock;
   const availForAdvance = Math.max(0, earnings - fixedDeductions);
   const advThisMonth = advances.reduce((s, a) => s + Number(a.amount || 0), 0);
@@ -79,7 +79,7 @@ function computePay({ emp, att, daysInMonth, elapsedDays, fullMonth, advances, a
     type: emp.type, effectiveRate: rate, effectiveRemark: eff.remark,
     presentDays: att.presentDays, absentDays: att.absentDays, payableDays: effElapsed,
     otHrs: round(att.otHrs), otHrsNet: round(netOtHrs),
-    base: round(base), otPay: round(otPay), perfectBonus: round(perfectBonus),
+    base: round(base), otPay: round(otPay), perfectBonus: round(perfectBonus), bonus: round(Number(bonus || 0)),
     fines: round(Number(fines || 0)), loanInstallment: round(Number(loanInstallment || 0)),
     latePenalty: round(latePenalty), latePenaltyDays: Number(latePenaltyDays || 0),
     weeklyOffDock: round(weeklyOffDock), weeklyOffDockDays: Number(weeklyOffDockDays || 0),

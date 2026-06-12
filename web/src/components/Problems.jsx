@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { loadMissedDoc, loadLateList, loadEmployees, loadRoster, loadAllAttendance, loadPayout, decideResignPrompt, leaveMissedPunch, queueJob, istMonth } from '../lib/data';
 import { SHIFT_HOURS } from '../lib/payroll';
+import NamePick from './NamePick.jsx';
 
 const addHrs = (hhmm, h) => {
   const m = /^(\d{1,2}):(\d{2})/.exec(hhmm || ''); if (!m) return '';
@@ -161,12 +162,14 @@ function LateRow({ l }) {
 
 function AddPunch({ roster, user }) {
   const [show, setShow] = useState(false);
-  const [f, setF] = useState({ emp: '', date: '', in: '', out: '' });
+  const [f, setF] = useState({ code: null, name: '', date: '', in: '', out: '' });
   const [st, setSt] = useState('');
   async function go() {
-    if (!f.emp || !f.date || (!f.in && !f.out)) { setSt('Fill name, date and a time.'); return; }
+    if (!f.code) { setSt('Type the name — it will suggest from the list.'); return; }
+    if (!/^\d{2}\/\d{2}\/\d{4}$/.test(f.date)) { setSt('Date must be dd/mm/yyyy, e.g. 09/06/2026.'); return; }
+    if (!f.in && !f.out) { setSt('Fill at least one time (HH:MM).'); return; }
     setSt('saving');
-    try { await queueJob('manual_punch', { ...f, remark: 'manual' }, user.email); setSt('done'); setF({ emp: '', date: '', in: '', out: '' }); }
+    try { await queueJob('manual_punch', { emp: f.code, date: f.date, in: f.in, out: f.out, remark: 'manual' }, user.email); setSt('done'); setF({ code: null, name: '', date: '', in: '', out: '' }); }
     catch { setSt('Failed — try again.'); }
   }
   return (
@@ -174,14 +177,12 @@ function AddPunch({ roster, user }) {
       <button onClick={() => setShow(!show)} className="w-full text-left text-sm font-semibold text-gray-600">＋ Add a punch manually {show ? '▲' : '▼'}</button>
       {show && (
         <div className="grid grid-cols-2 gap-2 mt-2">
-          <select className="border rounded px-2 py-2 text-sm col-span-2" value={f.emp} onChange={(e) => setF({ ...f, emp: e.target.value })}>
-            <option value="">Who…</option>
-            {roster.map((r) => <option key={r.code} value={r.code}>{r.name}</option>)}
-          </select>
+          <NamePick roster={roster} value={f.name} onChange={(code, name) => setF({ ...f, code, name })} className="col-span-2" />
+          {f.name && !f.code && <p className="col-span-2 text-xs text-amber-700">Keep typing — more than one name matches.</p>}
           <input className="border rounded px-2 py-2 text-sm" placeholder="dd/mm/yyyy" value={f.date} onChange={(e) => setF({ ...f, date: e.target.value })} />
           <div className="grid grid-cols-2 gap-1">
-            <input className="border rounded px-2 py-2 text-sm" placeholder="IN" value={f.in} onChange={(e) => setF({ ...f, in: e.target.value })} />
-            <input className="border rounded px-2 py-2 text-sm" placeholder="OUT" value={f.out} onChange={(e) => setF({ ...f, out: e.target.value })} />
+            <input className="border rounded px-2 py-2 text-sm" placeholder="IN 09:00" value={f.in} onChange={(e) => setF({ ...f, in: e.target.value })} />
+            <input className="border rounded px-2 py-2 text-sm" placeholder="OUT 19:30" value={f.out} onChange={(e) => setF({ ...f, out: e.target.value })} />
           </div>
           <button onClick={go} disabled={st === 'saving'} className="col-span-2 bg-gray-800 text-white rounded-lg py-2 text-sm font-medium disabled:opacity-50">Add punch</button>
           {st === 'done' && <p className="col-span-2 text-xs text-green-700">✓ Added — day reprocesses automatically.</p>}

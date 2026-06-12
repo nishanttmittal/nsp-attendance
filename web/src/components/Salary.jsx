@@ -3,6 +3,8 @@ import { loadEmployees, loadAllAttendance, saveEmployee, loadPayout, queueMarkPa
 import { monthOptions, monthCtx, payFor, rupee } from '../lib/paycalc';
 import Person from './Person.jsx';
 import SelfPunchCard from './SelfPunchCard.jsx';
+import NamePick from './NamePick.jsx';
+import { payslipAllPdf, sharePdf, advanceSplit } from '../lib/salaryPdf';
 
 // SALARY — owner ticks person by person; manager sees ticked list and marks PAID.
 export default function Salary({ user }) {
@@ -84,9 +86,10 @@ function OwnerSalary({ user }) {
         {visible.map((r) => <OwnerRow key={r.emp.code} r={r} busy={busy === r.emp.code} onName={() => setOpenCode(r.emp.code)} onTick={() => tick(r)} />)}
       </div>
 
+      <AdvanceCard user={user} />
       {mk === istMonth() && <SelfPunchCard />}
       {noSalary.length > 0 && <NoSalaryList list={noSalary} onSaved={reload} />}
-      {showReport && <ReportModal user={user} onClose={() => setShowReport(false)} />}
+      {showReport && <ReportModal user={user} mk={mk} rows={rows} onClose={() => setShowReport(false)} />}
     </div>
   );
 }
@@ -167,37 +170,41 @@ function ManagerSalary({ user }) {
   );
 }
 
-// quick advance entry (both owner-on-Person-page and manager-here can record)
+// quick advance entry (manager + owner): date, amount, mode, remark; blocked once that
+// month's salary is already paid for the person.
 export function AdvanceCard({ user }) {
+  const today = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
   const [roster, setRoster] = useState([]);
-  const [f, setF] = useState({ code: '', amount: '', mode: 'cash' });
+  const [f, setF] = useState({ code: null, name: '', amount: '', mode: 'cash', date: today, remark: '' });
   const [st, setSt] = useState('');
   useEffect(() => { loadRoster().then(setRoster); }, []);
   async function go() {
-    if (!f.code || !Number(f.amount)) return;
+    if (!f.code) { setSt('Pick a person (type the name).'); return; }
+    if (!Number(f.amount) || !f.date) { setSt('Fill date and amount.'); return; }
     setSt('saving');
-    const today = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
     try {
-      await queueAdvance(f.code, { date: today, mode: f.mode, amount: Number(f.amount), paidBy: user.email }, user.email);
-      setSt('done'); setF({ code: '', amount: '', mode: 'cash' });
-    } catch (e) { setSt('error'); }
+      const po = await loadPayout(f.date.slice(0, 7));
+      if (po.items?.[f.code]?.paid) { setSt(`Salary for ${f.date.slice(0, 7)} is already PAID — advance not allowed for that month.`); return; }
+      await queueAdvance(f.code, { date: f.date, mode: f.mode, amount: Number(f.amount), remark: f.remark || '', paidBy: user.email }, user.email);
+      setSt('done'); setF({ code: null, name: '', amount: '', mode: 'cash', date: today, remark: '' });
+    } catch (e) { setSt('Could not save — try again.'); }
   }
   return (
     <div className="bg-white rounded-xl shadow p-3 space-y-2">
       <div className="font-semibold text-gray-800 text-sm">💸 Give advance</div>
       <div className="grid grid-cols-2 gap-2">
-        <select className="border rounded px-2 py-2 text-sm col-span-2" value={f.code} onChange={(e) => setF({ ...f, code: e.target.value })}>
-          <option value="">Who…</option>
-          {roster.map((r) => <option key={r.code} value={r.code}>{r.name}</option>)}
-        </select>
+        <NamePick roster={roster} value={f.name} onChange={(code, name) => setF({ ...f, code, name })} className="col-span-2" />
+        <input className="border rounded px-2 py-2 text-sm" type="date" value={f.date} onChange={(e) => setF({ ...f, date: e.target.value })} />
         <input className="border rounded px-2 py-2 text-sm" type="number" placeholder="Amount ₹" value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} />
         <select className="border rounded px-2 py-2 text-sm" value={f.mode} onChange={(e) => setF({ ...f, mode: e.target.value })}>
           <option value="cash">Cash</option><option value="account">Bank</option>
         </select>
+        <input className="border rounded px-2 py-2 text-sm" placeholder="Remark (optional)" value={f.remark} onChange={(e) => setF({ ...f, remark: e.target.value })} />
         <button onClick={go} disabled={st === 'saving'} className="col-span-2 bg-red-700 text-white rounded-lg py-2 text-sm font-medium disabled:opacity-50">Record advance</button>
       </div>
+      {f.name && !f.code && <p className="text-xs text-amber-700">Keep typing — more than one name matches.</p>}
       {st === 'done' && <p className="text-xs text-green-700">✓ Recorded — owner gets a Telegram alert.</p>}
-      {st === 'error' && <p className="text-xs text-red-600">Could not save — try again.</p>}
+      {st && !['saving', 'done'].includes(st) && <p className="text-xs text-red-600">{st}</p>}
     </div>
   );
 }
@@ -207,38 +214,49 @@ const REPORTS = [
   { v: 'perfbtn', label: 'Performance Report' },
   { v: 'Button10', label: 'Monthly Summary (Excel)' },
   { v: 'Button15', label: 'Daily In-Out times' },
+  { v: 'Button6', label: 'Missed Punches' },
   { v: 'Button8', label: 'OT Summary' },
   { v: 'Button13', label: 'Late Arrival' },
   { v: 'Button4', label: 'Absent Report' },
 ];
-function ReportModal({ user, onClose }) {
-  const [f, setF] = useState({ report: 'perfbtn', month: 0, code: '' });
+function ReportModal({ user, mk, rows, onClose }) {
+  const [f, setF] = useState({ report: 'perfbtn', month: 0, code: null, name: '' });
   const [roster, setRoster] = useState([]);
   const [st, setSt] = useState('');
   useEffect(() => { loadRoster().then(setRoster); }, []);
   async function send() {
     setSt('sending');
-    const payload = { month: Number(f.month), report: f.report, scope: f.code ? 'emp' : 'all', value: f.code };
+    const payload = { month: Number(f.month), report: f.report, scope: f.code ? 'emp' : 'all', value: f.code || '' };
     try { await queueJob('monthly_download', payload, user.email); setSt('sent'); }
     catch { setSt('error'); }
+  }
+  // salary register PDF, built on the phone → share sheet (WhatsApp / anywhere)
+  async function register() {
+    const list = (rows || []).map((r) => ({
+      name: r.emp.name || r.emp.code, days: r.pay.presentDays, ot: r.pay.otHrsNet,
+      advBank: advanceSplit(r.advs).bank, advCash: advanceSplit(r.advs).cash,
+      net: r.md.payment ? r.md.payment.net : (r.md.approved ? r.md.approvedNet : r.pay.net),
+      carried: r.pay.advanceBalanceCarried,
+    }));
+    await sharePdf(payslipAllPdf(list, mk), `salary-register-${mk}.pdf`);
   }
   return (
     <div className="fixed inset-0 bg-black/40 z-20 grid place-items-center p-4" onClick={onClose}>
       <div className="bg-white rounded-2xl p-4 w-full max-w-sm space-y-3" onClick={(e) => e.stopPropagation()}>
-        <div className="font-semibold text-gray-800">📄 Report → Telegram</div>
+        <div className="font-semibold text-gray-800">📄 Reports</div>
         <select className="w-full border rounded px-3 py-2" value={f.report} onChange={(e) => setF({ ...f, report: e.target.value })}>
           {REPORTS.map((r) => <option key={r.v} value={r.v}>{r.label}</option>)}
         </select>
         <select className="w-full border rounded px-3 py-2" value={f.month} onChange={(e) => setF({ ...f, month: e.target.value })}>
           {monthOptions(3).map((m, i) => <option key={m.mk} value={i}>{m.label}</option>)}
         </select>
-        <select className="w-full border rounded px-3 py-2" value={f.code} onChange={(e) => setF({ ...f, code: e.target.value })}>
-          <option value="">Everyone</option>
-          {roster.map((r) => <option key={r.code} value={r.code}>{r.name}</option>)}
-        </select>
-        {st === 'sent' ? <p className="text-sm text-green-700">✓ On its way to Telegram (1–2 min).</p> : (
-          <button onClick={send} disabled={st === 'sending'} className="w-full bg-red-700 text-white rounded-lg py-2.5 font-medium disabled:opacity-50">Send to Telegram</button>
+        <NamePick roster={roster} value={f.name} onChange={(code, name) => setF({ ...f, code, name })}
+          placeholder="Type a name… (empty = everyone)" className="w-full" />
+        {f.name && !f.code && <p className="text-xs text-amber-700">Keep typing — more than one name matches.</p>}
+        {st === 'sent' ? <p className="text-sm text-green-700">✓ On its way to Telegram (1–2 min). Forward it to WhatsApp from there.</p> : (
+          <button onClick={send} disabled={st === 'sending'} className="w-full bg-red-700 text-white rounded-lg py-2.5 font-medium disabled:opacity-50">✈️ Send to Telegram</button>
         )}
+        <button onClick={register} className="w-full border border-green-300 text-green-700 rounded-lg py-2.5 font-medium">🟢 Salary register PDF — share / WhatsApp</button>
         {st === 'error' && <p className="text-xs text-red-600">Failed — try again.</p>}
       </div>
     </div>

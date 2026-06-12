@@ -80,7 +80,25 @@ export async function loadRoster() {
 export async function listManagers() {
   if (!isConfigured || !db) return [];
   const snap = await getDocs(collection(db, 'att_users'));
-  return snap.docs.map(d => ({ email: d.id, ...d.data() }));
+  return snap.docs.filter(d => d.id !== '_config').map(d => ({ email: d.id, ...d.data() }));
+}
+
+// ---- Action password (guards resign/unlock). SHA-256 hash in att_users/_config. ----
+async function sha256(s) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
+  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+export async function setActionPassword(pw) {
+  if (!isConfigured || !db) return;
+  await setDoc(doc(db, 'att_users', '_config'), { actionPwHash: await sha256(pw) }, { merge: true });
+}
+// returns true/false, or 'unset' when no password has been set yet
+export async function checkActionPassword(pw) {
+  if (!isConfigured || !db) return true;
+  const s = await getDoc(doc(db, 'att_users', '_config'));
+  const hash = s.exists() ? s.data().actionPwHash : null;
+  if (!hash) return 'unset';
+  return (await sha256(pw)) === hash;
 }
 export async function addManager(email, telegramChatId, role = 'manager') {
   if (!isConfigured || !db) return;

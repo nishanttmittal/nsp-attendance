@@ -31,6 +31,7 @@ export function payslipOnePdf(emp, pay, monthLabel) {
     ['Base', rs(pay.base)],
     ['Overtime', rs(pay.otPay)],
     ['Attendance bonus', rs(pay.perfectBonus)],
+    ['Bonus', rs(pay.bonus)],
     ['Fine', '- ' + rs(pay.fines)],
     ['Loan installment', '- ' + rs(pay.loanInstallment)],
     ['Advance recovered', '- ' + rs(pay.advanceRecovered)],
