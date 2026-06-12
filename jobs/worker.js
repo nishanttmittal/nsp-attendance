@@ -38,6 +38,23 @@ async function handle(type, p) {
     await sendTelegram(`🔄 Reprocessed attendance ${p.from} → ${p.to}.`);
     return 'reprocessed ' + p.from + '..' + p.to;
   }
+  if (type === 'mark_paid') {    // manager marks an approved salary as handed over
+    const ref = db().collection('att_salary').doc(p.code);
+    const snap = await ref.get();
+    if (!snap.exists) throw new Error('no employee ' + p.code);
+    const e = snap.data();
+    const md = (e.months || {})[p.month] || {};
+    if (!md.approved) throw new Error('not approved yet');
+    const months = { ...(e.months || {}) };
+    months[p.month] = { ...md, locked: true, payment: { date: new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10), mode: p.mode || 'cash', net: md.approvedNet || 0, by: p._by || 'manager' } };
+    // roll unrecovered advance into next month
+    const [y, m] = p.month.split('-').map(Number);
+    const next = m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`;
+    months[next] = { ...(months[next] || {}), advanceBalanceIn: Number(md.approvedCarry || 0) };
+    await ref.set({ months }, { merge: true });
+    await sendTelegram(`💵 Paid: <b>${e.name || p.code}</b> ₹${Number(md.approvedNet || 0).toLocaleString('en-IN')} (${p.mode}) · ${p.month}`);
+    return 'marked paid';
+  }
   if (type === 'add_advance') {  // manager-created; applied with admin SDK (bypasses rules)
     const ref = db().collection('att_salary').doc(p.code);
     const snap = await ref.get();
@@ -113,6 +130,23 @@ async function handle(type, p) {
   try { const r = await runDueTasks(); if (r.length) console.log(`scheduler ran: ${r.join(', ')}`); }
   catch (e) { console.error('scheduler failed:', e.message); }
 
+  // mirror approved salaries into the manager-readable payout docs (att_meta/payout_YYYY-MM)
+  try {
+    const ist = new Date(Date.now() + 5.5 * 3600 * 1000);
+    const cur = ist.toISOString().slice(0, 7);
+    const prev = new Date(Date.UTC(ist.getUTCFullYear(), ist.getUTCMonth() - 1, 1)).toISOString().slice(0, 7);
+    const sal = await db().collection('att_salary').get();
+    for (const mk of [prev, cur]) {
+      const items = {};
+      sal.forEach(d => {
+        const md = (d.data().months || {})[mk];
+        if (!md || !md.approved) return;
+        items[d.id] = { name: d.data().name || d.id, dept: d.data().dept || '', net: Number(md.approvedNet || 0), paid: md.payment ? { mode: md.payment.mode, date: md.payment.date } : null };
+      });
+      await db().collection('att_meta').doc('payout_' + mk).set({ month: mk, items, updatedAt: new Date().toISOString() });
+    }
+  } catch (e) { console.error('payout sync failed:', e.message); }
+
   // once-a-day: scan the in-out report for missed punches (for the app's Punch tab list)
   try {
     const sref = db().collection('att_alert_state').doc('missed_scan');
@@ -128,10 +162,10 @@ async function handle(type, p) {
   const snap = await db().collection('att_job_requests').where('status', '==', 'pending').limit(10).get();
   if (snap.empty) { console.log('no pending jobs'); return; }
   for (const doc of snap.docs) {
-    const { type, payload } = doc.data();
+    const { type, payload, requestedBy } = doc.data();
     await doc.ref.update({ status: 'running', startedAt: new Date().toISOString() });
     try {
-      const result = await handle(type, payload || {});
+      const result = await handle(type, { ...(payload || {}), _by: requestedBy || '' });
       await doc.ref.update({ status: 'done', result, finishedAt: new Date().toISOString() });
       console.log(`[done] ${type}: ${result}`);
     } catch (e) {

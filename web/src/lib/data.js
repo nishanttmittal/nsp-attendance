@@ -261,6 +261,31 @@ export async function loadLateList(month, minDays = 3) {
   out.sort((a, b) => b.count - a.count);
   return out;
 }
+// ---- Salary approval flow (owner ticks → manager pays) ----
+// Tick: freeze this month's numbers on the employee doc (worker mirrors them into the
+// manager-readable payout doc att_meta/payout_{mk} on its next cycle).
+export async function approveSalary(code, month, pay, by) {
+  await saveMonth(code, month, {
+    approved: { by, at: new Date().toISOString() },
+    approvedNet: pay.net,
+    advanceRecover: pay.advanceRecovered,
+    approvedCarry: pay.advanceBalanceCarried,
+  });
+}
+export async function unapproveSalary(code, month) {
+  await saveMonth(code, month, { approved: null, approvedNet: null, approvedCarry: null });
+}
+// Manager-readable payout list (worker keeps it in sync with att_salary).
+export async function loadPayout(month) {
+  if (!isConfigured || !db) return { items: {} };
+  const s = await getDoc(doc(db, 'att_meta', 'payout_' + month));
+  return s.exists() ? s.data() : { items: {} };
+}
+// Manager marks a person paid — applied by the worker with admin rights.
+export async function queueMarkPaid(code, month, mode, by) {
+  return queueJob('mark_paid', { code, month, mode }, by);
+}
+
 // Resign prompts (set by publishMonthly when someone is absent a full month).
 export async function decideResignPrompt(code, decision, by) {
   const e = await loadEmployee(code);

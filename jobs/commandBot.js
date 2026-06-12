@@ -72,6 +72,7 @@ const HELP = [
   '<b>pay</b> — welder pay-ready (last 7 days) 🔒',
   '<b>payslip</b> &lt;name&gt; — month-to-date net 🔒',
   '<b>advance</b> &lt;name&gt; &lt;amount&gt; [cash|bank] — record advance',
+  '<b>report</b> [may|june|…] [performance|summary|inout] — file to Telegram 🔒',
   '🔒 = owner only',
 ].join('\n');
 
@@ -152,6 +153,28 @@ async function handle(msg, role) {
       if (!m.length) return reply(chat, `No employee matched “${esc(arg)}”.`);
       if (m.length > 1) return reply(chat, `Which one?\n${m.slice(0, 8).map(e => '• ' + esc(e.name) + ' (' + e.code + ')').join('\n')}`);
       return reply(chat, await buildPayslipText(m[0].code));
+    }
+
+    case 'report': {
+      if (role !== 'owner') return ownerOnly();
+      // "report may performance" → queue a monthly_download job; the worker sends the file here.
+      const MONTH_NAMES = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];
+      const words = arg.toLowerCase().split(/\s+/).filter(Boolean);
+      const now = new Date(Date.now() + 5.5 * 3600 * 1000);
+      let offset = 0;
+      const mi = words.findIndex(w => MONTH_NAMES.some(m => m.startsWith(w) && w.length >= 3));
+      if (mi >= 0) {
+        const target = MONTH_NAMES.findIndex(m => m.startsWith(words[mi]));
+        offset = (now.getUTCMonth() - target + 12) % 12;
+        words.splice(mi, 1);
+      }
+      const kind = words[0] || 'performance';
+      const report = /sum/.test(kind) ? 'Button10' : /in.?out|punch/.test(kind) ? 'Button15' : /ot/.test(kind) ? 'Button8' : /late/.test(kind) ? 'Button13' : 'perfbtn';
+      await db().collection('att_job_requests').add({
+        type: 'monthly_download', payload: { month: offset, scope: 'all', value: '', report },
+        requestedBy: 'bot/owner', status: 'pending', createdAt: new Date().toISOString(),
+      });
+      return reply(chat, `📄 Generating the report — it lands here in a few minutes.`);
     }
 
     case 'advance': {

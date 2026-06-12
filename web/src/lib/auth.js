@@ -12,10 +12,10 @@ export const ADMIN_EMAILS = [
   'nspenterprises24@gmail.com',
 ];
 
-// Manager-visible features (owner-defined): Floor dashboard, Attention (punch fixes), staff, add advance.
-// Pay, reports, settings stay admin-only.
-export const MANAGER_FEATURES = ['dashboard', 'attention', 'employees', 'advance'];
-export const ALL_FEATURES = ['dashboard', 'pay', 'reports', 'attention', 'employees', 'advance', 'resign', 'settings', 'admin'];
+// Manager sees: Floor, Salary (approved payout list + mark paid + give advance), Problems.
+// Settings (and the owner approval side of Salary) stay admin-only.
+export const MANAGER_FEATURES = ['dashboard', 'salary', 'problems'];
+export const ALL_FEATURES = ['dashboard', 'salary', 'problems', 'settings', 'admin'];
 
 export function canSee(role, feature) {
   if (role === 'admin') return true;
