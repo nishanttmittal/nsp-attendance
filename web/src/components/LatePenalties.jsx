@@ -1,16 +1,16 @@
 import { useEffect, useState } from 'react';
 import { loadLatePenaltyTasks, saveLatePenalty } from '../lib/data';
 
-// Approval tasks for the late-arrival rule: 4+ late marks in the month → owner approves
-// 25% (¼ day) / 50% (½ day) or rejects. Decided items move to the log below.
+// Late-arrival penalties. For each employee with 4+ late marks: the first 4 are one task, and
+// EVERY extra late day (5th, 6th, …) is its own task — each approved 25% / 50% or rejected.
 export default function LatePenalties({ user }) {
   const [data, setData] = useState(null);
   const [busy, setBusy] = useState('');
-  const refresh = () => loadLatePenaltyTasks().then(setData).catch(() => setData({ pending: [], decided: [] }));
+  const refresh = () => loadLatePenaltyTasks().then(setData).catch(() => setData({ staff: [] }));
   useEffect(() => { refresh(); }, []);
 
-  async function decide(code, fraction) {
-    setBusy(code); await saveLatePenalty(code, data.month, fraction, user.email); await refresh(); setBusy('');
+  async function decide(code, key, fraction) {
+    setBusy(code + key); await saveLatePenalty(code, data.month, key, fraction, user.email); await refresh(); setBusy('');
   }
 
   if (!data) return <p className="text-gray-500">Loading…</p>;
@@ -20,54 +20,51 @@ export default function LatePenalties({ user }) {
     <div className="space-y-4">
       <div className="bg-white rounded-xl shadow p-4">
         <div className="font-semibold text-gray-800">Late-arrival penalties · {monthName}</div>
-        <p className="text-xs text-gray-500 mt-1">Anyone with <b>4+ late marks</b> (in &gt;15 min after grace). Approve a deduction or reject — it then applies in Salary.</p>
+        <p className="text-xs text-gray-500 mt-1">4+ late marks (in &gt;15 min after grace). Decide the first 4, then <b>each extra late day separately</b>. Approved cuts apply in Salary.</p>
       </div>
 
-      {data.pending.length === 0
-        ? <div className="bg-white rounded-xl shadow p-4 text-sm text-gray-500">No pending late penalties. 🎉</div>
-        : data.pending.map((t) => (
-          <div key={t.code} className="bg-white rounded-xl shadow p-4">
-            <div className="flex items-center justify-between">
+      {data.staff.length === 0
+        ? <div className="bg-white rounded-xl shadow p-4 text-sm text-gray-500">No one has 4+ late marks this month. 🎉</div>
+        : data.staff.map((s) => (
+          <div key={s.code} className="bg-white rounded-xl shadow p-4">
+            <div className="flex items-center justify-between mb-2">
               <div>
-                <div className="font-medium text-gray-800">{t.name}</div>
-                <div className="text-xs text-gray-500">{t.dept} · {t.code}</div>
+                <div className="font-medium text-gray-800">{s.name}</div>
+                <div className="text-xs text-gray-500">{s.dept} · {s.code} · {s.count} late</div>
               </div>
-              <div className="text-sm font-semibold text-amber-700">{t.count} late</div>
+              {s.totalDays > 0 && <div className="text-sm font-semibold text-red-700">−{s.totalDays} day{s.totalDays === 1 ? '' : 's'}</div>}
             </div>
-            <ul className="text-xs text-gray-600 mt-2 grid grid-cols-2 gap-x-3 gap-y-0.5">
-              {t.lateDays.map((d) => <li key={d.date}>{fmt(d.date)} · in {d.inT || '—'}</li>)}
+            <ul className="divide-y divide-gray-100">
+              {s.items.map((it) => (
+                <li key={it.key} className="py-2">
+                  <div className="flex items-center justify-between">
+                    <div className="text-sm text-gray-700">
+                      {it.label}
+                      <span className="text-gray-400"> · {it.key === 'base' ? it.dates.map(fmt).join(', ') : fmt(it.dates[0]) + (it.inT ? ' · in ' + it.inT : '')}</span>
+                    </div>
+                  </div>
+                  {it.status === 'pending' ? (
+                    <div className="flex gap-2 mt-2">
+                      <Btn disabled={busy === s.code + it.key} onClick={() => decide(s.code, it.key, 0.25)} cls="bg-amber-600">25%</Btn>
+                      <Btn disabled={busy === s.code + it.key} onClick={() => decide(s.code, it.key, 0.5)} cls="bg-red-700">50%</Btn>
+                      <Btn disabled={busy === s.code + it.key} onClick={() => decide(s.code, it.key, 0)} cls="bg-gray-200 !text-gray-700">Reject</Btn>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2 mt-1 text-sm">
+                      <span className={it.fraction > 0 ? 'text-red-700 font-medium' : 'text-gray-500'}>{it.fraction > 0 ? `−${it.fraction * 100}%` : 'rejected'}</span>
+                      <button onClick={() => decide(s.code, it.key, null)} disabled={busy === s.code + it.key} className="text-xs text-gray-500 underline">undo</button>
+                    </div>
+                  )}
+                </li>
+              ))}
             </ul>
-            <div className="flex gap-2 mt-3">
-              <button disabled={busy === t.code} onClick={() => decide(t.code, 0.25)} className="flex-1 bg-amber-600 text-white rounded-lg py-2 text-sm font-medium disabled:opacity-50">Deduct 25%</button>
-              <button disabled={busy === t.code} onClick={() => decide(t.code, 0.5)} className="flex-1 bg-red-700 text-white rounded-lg py-2 text-sm font-medium disabled:opacity-50">Deduct 50%</button>
-              <button disabled={busy === t.code} onClick={() => decide(t.code, 0)} className="border border-gray-300 text-gray-700 rounded-lg py-2 px-3 text-sm">Reject</button>
-            </div>
           </div>
         ))}
-
-      {data.decided.length > 0 && (
-        <div className="bg-white rounded-xl shadow p-4">
-          <div className="font-semibold text-gray-800 mb-2">Decided (log)</div>
-          <ul className="text-sm divide-y divide-gray-100">
-            {data.decided.map((t) => (
-              <li key={t.code} className="py-2 flex items-center justify-between">
-                <span>{t.name} <span className="text-gray-400">· {t.count} late</span></span>
-                <span className="flex items-center gap-2">
-                  <span className={t.fraction > 0 ? 'text-red-700 font-medium' : 'text-gray-500'}>
-                    {t.fraction > 0 ? `−${t.fraction * 100}%` : 'rejected'}
-                  </span>
-                  <button onClick={() => decide(t.code, 0)} disabled={busy === t.code} className="text-xs text-gray-500 underline">undo</button>
-                </span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
     </div>
   );
 }
 
-function fmt(ymd) {
-  const [, m, d] = ymd.split('-');
-  return `${+d}/${+m}`;
+function Btn({ onClick, disabled, cls, children }) {
+  return <button onClick={onClick} disabled={disabled} className={`flex-1 ${cls} text-white rounded-lg py-1.5 text-sm font-medium disabled:opacity-50`}>{children}</button>;
 }
+function fmt(ymd) { const [, m, d] = ymd.split('-'); return `${+d}/${+m}`; }

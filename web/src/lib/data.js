@@ -196,23 +196,31 @@ export async function saveEmployee(code, patch) {
 // Late-arrival penalty tasks: employees with >=4 late marks in the month (att_late_log) →
 // owner approves 25% (¼ day) / 50% (½ day) or rejects. Decision stored in months[mk].
 const LATE_THRESHOLD = 4;
+const _penDecision = d => ({ status: d?.status || 'pending', fraction: Number(d?.fraction) || 0 });
+
+// Per employee with >=4 late marks: one task for the first 4 ("base"), then ONE SEPARATE task
+// per extra late day (5th, 6th, …) — each approved 25%/50% or rejected independently.
 export async function loadLatePenaltyTasks(month) {
   const mk = month || new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 7);
-  if (!isConfigured || !db) return { month: mk, pending: [], decided: [] };
+  if (!isConfigured || !db) return { month: mk, staff: [] };
   const logSnap = await getDoc(doc(db, 'att_late_log', mk));
   const byCode = (logSnap.exists() && logSnap.data().byCode) || {};
   const salSnap = await getDocs(collection(db, 'att_salary'));
   const sal = {}; salSnap.forEach(d => { sal[d.id] = d.data(); });
-  const pending = [], decided = [];
+  const staff = [];
   for (const [code, e] of Object.entries(byCode)) {
     const lateDays = Object.entries(e.days || {}).map(([date, inT]) => ({ date, inT })).sort((a, b) => (a.date < b.date ? -1 : 1));
     if (lateDays.length < LATE_THRESHOLD) continue;
-    const md = (sal[code]?.months && sal[code].months[mk]) || {};
-    const row = { code, name: sal[code]?.name || e.name || code, dept: e.dept || sal[code]?.dept || '', lateDays, count: lateDays.length, status: md.latePenaltyStatus, fraction: md.latePenaltyDays || 0 };
-    (md.latePenaltyStatus ? decided : pending).push(row);
+    const pen = (sal[code]?.months?.[mk]?.latePenalties) || {};
+    const items = [
+      { key: 'base', label: 'First 4 late marks', dates: lateDays.slice(0, 4).map(d => d.date), inT: '', ..._penDecision(pen.base) },
+      ...lateDays.slice(4).map((d, i) => ({ key: d.date, label: `Late day #${i + 5}`, dates: [d.date], inT: d.inT, ..._penDecision(pen[d.date]) })),
+    ];
+    const totalDays = items.reduce((s, it) => s + (it.status === 'approved' ? it.fraction : 0), 0);
+    staff.push({ code, name: sal[code]?.name || e.name || code, dept: e.dept || sal[code]?.dept || '', count: lateDays.length, items, totalDays });
   }
-  pending.sort((a, b) => b.count - a.count); decided.sort((a, b) => b.count - a.count);
-  return { month: mk, pending, decided };
+  staff.sort((a, b) => b.count - a.count);
+  return { month: mk, staff };
 }
 // Missed punches this month (att_missed_punch, from the in-out report scan) — for the Punch tab.
 export async function loadMissedPunches(month) {
@@ -221,12 +229,15 @@ export async function loadMissedPunches(month) {
   const snap = await getDoc(doc(db, 'att_missed_punch', mk));
   return (snap.exists() && snap.data().entries) || [];
 }
-export async function saveLatePenalty(code, month, fraction, by) {
-  await saveMonth(code, month, {
-    latePenaltyDays: Number(fraction) || 0,
-    latePenaltyStatus: Number(fraction) > 0 ? 'approved' : 'rejected',
-    latePenaltyBy: by || '', latePenaltyAt: new Date().toISOString(),
-  });
+// Decide one penalty item (key = 'base' or a 'YYYY-MM-DD'). fraction 0.25/0.5, 0=reject, null=reopen.
+export async function saveLatePenalty(code, month, key, fraction, by) {
+  const emp = await loadEmployee(code);
+  const pen = { ...((emp.months?.[month]?.latePenalties) || {}) };
+  pen[key] = fraction === null
+    ? { status: 'pending', fraction: 0 }
+    : { fraction: Number(fraction) || 0, status: Number(fraction) > 0 ? 'approved' : 'rejected', by: by || '', at: new Date().toISOString() };
+  const total = Object.values(pen).reduce((s, d) => s + (d.status === 'approved' ? Number(d.fraction) || 0 : 0), 0);
+  await saveMonth(code, month, { latePenalties: pen, latePenaltyDays: total });
 }
 export async function addAdvance(code, adv) {
   const e = await loadEmployee(code); await saveEmployee(code, { advances: [...(e.advances || []), adv] });
