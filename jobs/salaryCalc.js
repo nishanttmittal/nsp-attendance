@@ -60,7 +60,8 @@ function computePay({ emp, att, daysInMonth, elapsedDays, fullMonth, advances, a
   const hourlyRate = perDay / shiftHrs;
   const otPay = netOtHrs * hourlyRate;
   // perfect attendance bonus (complete month, zero absence; lateness does not disqualify)
-  const perfectBonus = (fullMonth && att.absentDays === 0 && att.presentDays > 0) ? perDay : 0;
+  // full-month, zero-absence bonus — NOT for mid-month joiners/leavers (prorated window)
+  const perfectBonus = (fullMonth && att.absentDays === 0 && att.presentDays > 0 && effElapsed === daysInMonth) ? perDay : 0;
   // excess-absence weekly-off dock: every 3 absent days → 1 off — SUGGESTED, confirm before applying
   const penaltyDays = Math.floor(att.absentDays / 3);
   const suggestedPenalty = round(perDay * penaltyDays);

@@ -42,7 +42,8 @@ export function computePay({ emp, att, daysInMonth, elapsedDays, fullMonth, adva
   const hourlyRate = perDay / (SHIFT_HOURS[emp.shift] || 8);
   const otPay = netOtHrs * hourlyRate;
 
-  const perfectBonus = (fullMonth && (att.absentDays || 0) === 0 && (att.presentDays || 0) > 0) ? perDay : 0;
+  // full-month, zero-absence bonus — NOT for mid-month joiners/leavers (prorated window)
+  const perfectBonus = (fullMonth && (att.absentDays || 0) === 0 && (att.presentDays || 0) > 0 && effElapsed === daysInMonth) ? perDay : 0;
   const penaltyDays = Math.floor((att.absentDays || 0) / 3);
 
   // late-arrival penalty: approved 25% (¼ day) or 50% (½ day) of a day's pay
