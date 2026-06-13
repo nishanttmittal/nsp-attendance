@@ -1,0 +1,78 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>NSP Attendance — Salary App Flow</title>
+<style>
+* { box-sizing: border-box; }
+body { font-family: 'Segoe UI', Arial, sans-serif; color: #222; margin: 0; padding: 30px 38px; font-size: 12.5px; line-height: 1.5; }
+h1 { font-size: 23px; margin: 0 0 2px; color: #c0392b; }
+.sub { color: #666; font-size: 11px; margin-bottom: 16px; }
+h2 { font-size: 14px; margin: 18px 0 8px; padding: 6px 10px; background: #c0392b; color: #fff; border-radius: 4px; }
+table { border-collapse: collapse; width: 100%; margin: 6px 0 4px; }
+th, td { border: 1px solid #ddd; padding: 5px 8px; text-align: left; vertical-align: top; }
+th { background: #f4f4f4; }
+ul { margin: 6px 0; padding-left: 20px; }
+li { margin: 3px 0; }
+.flow { background: #fafafa; border: 1px solid #e5e5e5; border-radius: 6px; padding: 10px 14px; font-family: Consolas, monospace; font-size: 11px; white-space: pre; line-height: 1.55; }
+.note { background: #fff8e1; border-left: 4px solid #f1c40f; padding: 8px 12px; margin: 8px 0; border-radius: 3px; }
+.foot { margin-top: 22px; padding-top: 8px; border-top: 1px solid #ddd; color: #888; font-size: 10px; }
+.green { color: #1e8449; font-weight: 600; }
+</style></head>
+<body>
+<h1>NSP Attendance — Salary App Flow</h1>
+<div class="sub">nishanttmittal.github.io/nsp-attendance &nbsp;•&nbsp; June 2026 &nbsp;•&nbsp; Owner = full app · Manager = Floor, pay list, Problems</div>
+
+<h2>1. Automatic — runs by itself</h2>
+<table>
+<tr><th style="width:120px">Time (IST)</th><th>What happens</th></tr>
+<tr><td>All day</td><td>Workers punch on the biometric machine. The machine applies the rules: full / half day, late cuts, weekly-off (4 present days in the week), <b>missed punch = full day till shift end</b>.</td></tr>
+<tr><td>6:45 AM</td><td><b>Settings guard</b> — if anyone changes machine rules, owner gets a Telegram alert BEFORE the day is processed.</td></tr>
+<tr><td>10:00 · 17:40 · 21:00</td><td><b>Processing</b> — yesterday + today recalculated, fresh data pulled into the app, missed punches &amp; short days rescanned.</td></tr>
+<tr><td>Morning</td><td>Telegram: daily summary + yesterday's missed punches.</td></tr>
+<tr><td>17:40</td><td>Telegram: dinner headcount.</td></tr>
+<tr><td>Every ~5 min</td><td>Floor refreshes; manager's pay list syncs; queued actions (punch fix, advance, mark-paid) get applied.</td></tr>
+</table>
+
+<h2>2. Owner's daily routine (1 minute)</h2>
+<ul>
+<li>Telegram tells you if something needs attention.</li>
+<li><b>Problems</b> tab (red count): missed punch → <i>OK full day / Half day / real time</i> · <b>⚡ unusually high OT</b> → check before salary · <b>absent a full month</b> → Resign (password) / Keep · late 3+ &amp; short-day lists are view-only (machine already cuts pay).</li>
+<li><b>Floor</b>: who's in, department strength, dinner count.</li>
+<li>Anytime: <b>Give advance</b> (you or manager) — date, amount, cash/bank, remark → logged in the person's ledger + Telegram alert.</li>
+</ul>
+
+<h2>3. Salary day (month end)</h2>
+<div class="flow">OWNER  (Salary tab)                       MANAGER  (his own login)
+──────────────────────────────            ────────────────────────────
+Pick month (e.g. May 2026)
+Every person = one line:
+  raju · 26d · OT 12h · adv −2,000 · ₹18,500
+Doubt? → tap the name → full breakup,
+  bonus / fine / advance-cut, payslip
+✓ Tick one by one — or "Tick all"
+  (tick FREEZES the figures)        ──►   Sees ONLY ticked people + amounts
+                                          Hands out the money
+                                          Taps  💵 Cash  /  🏦 Bank
+Watches live: "41 ticked · 38 paid" ◄──   (each payment → Telegram to owner)
+Unrecovered advance rolls into next month automatically</div>
+
+<h2>4. Anytime tools</h2>
+<ul>
+<li><b>Reports</b> (📄 button or Telegram bot "report may performance"): Performance, Monthly Summary, In-Out, Missed Punches, OT, Late, Absent — any month, everyone / one typed name → file lands on Telegram.</li>
+<li><b>Payslip</b>: any person, any day (till yesterday) — PDF, Telegram, or 🟢 WhatsApp direct to the worker's number.</li>
+<li><b>Salary register PDF</b> → phone share sheet → WhatsApp.</li>
+<li><b>Person page</b> (tap any name): rate, phone, joining date, present % · late × · OT, advance ledger, increment history, every salary payment ever made, resign (password-protected).</li>
+<li><b>⚙ Settings</b>: managers, action password, backup / restore.</li>
+</ul>
+
+<h2>5. Safety net</h2>
+<ul>
+<li>Salary formula verified against April payroll <span class="green">to the rupee (45/45 staff)</span>.</li>
+<li>Missed punch never costs a worker a day; phantom-OT alarm; rules-change alarm at 6:45 AM.</li>
+<li>Tick freezes figures — what you approve is exactly what gets paid.</li>
+<li>Every advance, increment and payment is logged with date, remark and who did it.</li>
+<li>Cloud data + scheduled auto-backup + one-tap manual backup.</li>
+</ul>
+
+<div class="note"><b>Salary rules in one line:</b> Base = salary ÷ days-in-month × (days − absent) · OT paid at salary ÷ days ÷ shift-hours (net of late/early) · full month with zero absence = +1 day · deductions: fine → loan → full outstanding advance (editable) · net never below ₹0, balance carries forward.</div>
+
+<div class="foot">NSP Enterprises · generated 13 June 2026 · machine rules live on Realtime Biometrics, app at nishanttmittal.github.io/nsp-attendance</div>
+</body></html>
