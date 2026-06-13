@@ -1,0 +1,93 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===== Self-punch (login-free link for app-only staff e.g. Radhey/Dinesh) =====
+    // att_punch: public read of name + times only (NO salary). Written only by the worker (Admin SDK).
+    match /att_punch/{code} {
+      allow read: if true;
+      allow write: if false;
+    }
+    // att_self_punch: anyone with the link may CREATE a tap; the worker validates the token
+    // server-side before recording it. No client read/update/delete.
+    match /att_self_punch/{id} {
+      allow create: if request.resource.data.keys().hasAll(['code','token','dir','date','localTime'])
+                    && request.resource.data.dir in ['in','out']
+                    && request.resource.data.code is string
+                    && request.resource.data.token is string;
+      allow read, update, delete: if false;
+    }
+
+    // ===== NSP Attendance (att_*) =====
+    function isAttAdmin() { return request.auth != null && request.auth.token.email == 'nspenterprises24@gmail.com'; }
+        match /att_meta/{d} { allow read: if request.auth != null; allow write: if false; }
+match /att_daily_stats/{d} { allow read: if request.auth != null; allow write: if false; }
+    match /att_job_requests/{d} { allow create: if request.auth != null; allow read, update: if isAttAdmin(); }
+    match /att_users/{u} { allow read: if request.auth != null; allow write: if isAttAdmin(); }
+    match /att_attendance/{d} { allow read: if isAttAdmin(); allow write: if false; }
+    match /att_salary/{d} { allow read, write: if isAttAdmin(); }
+    match /att_advances/{d} { allow read, write: if isAttAdmin(); }
+    match /att_increments/{d} { allow read, write: if isAttAdmin(); }
+    match /att_loans/{d} { allow read, write: if isAttAdmin(); }
+    match /att_fines/{d} { allow read, write: if isAttAdmin(); }
+    match /att_month_locks/{d} { allow read, write: if isAttAdmin(); }
+    // scan outputs (names/dates only, no salary) — signed-in read so owner + manager see the Problems tab; jobs write via Admin SDK
+    match /att_missed_punch/{d} { allow read: if request.auth != null; allow write: if false; }
+    match /att_late_log/{d} { allow read: if request.auth != null; allow write: if false; }
+
+
+    // ---- shared helpers ----
+    function signedIn() { return request.auth != null; }
+    function tEmail() { return request.auth != null ? request.auth.token.get('email', '') : ''; }
+    function bootstrapOwner() { return tEmail() in ['nspenterprises24@gmail.com']; }
+
+    // ---- welder role helpers ----
+    function wPath() { return /databases/$(database)/documents/apps/welder/users/$(tEmail()); }
+    function wExists() { return tEmail() != '' && exists(wPath()); }
+    function wData() { return get(wPath()).data; }
+    function wOwner() { return signedIn() && (bootstrapOwner() || (wExists() && wData().role == 'owner' && wData().active == true)); }
+    function wManager() { return signedIn() && (wOwner() || (wExists() && wData().role == 'manager' && wData().active == true)); }
+
+    // ---- plating admin helper ----
+    function pPath() { return /databases/$(database)/documents/apps/platingjobwork/users/$(tEmail()); }
+    function pExists() { return tEmail() != '' && exists(pPath()); }
+    function pOwner() { return signedIn() && (bootstrapOwner() || (pExists() && get(pPath()).data.role == 'owner' && get(pPath()).data.active == true)); }
+
+    // ---- Plating Job Work (role-based on users only) ----
+    match /apps/platingjobwork/challans/{id} { allow read, write: if signedIn(); }
+    match /apps/platingjobwork/logs/{id}     { allow read, write: if signedIn(); }
+    match /apps/platingjobwork/meta/{id}     { allow read, write: if signedIn(); }
+    match /apps/platingjobwork/incoming/{id} { allow read, write: if signedIn(); }
+    match /apps/platingjobwork/users/{id}    { allow read: if signedIn(); allow write: if pOwner(); }
+
+    // ---- Fitting (LIVE — unchanged) ----
+    match /apps/fitting/{collection}/{docId} { allow read, write: if signedIn(); }
+    match /apps/fitting { allow read, write: if signedIn(); }
+
+    // ---- Orders (unchanged) ----
+    match /apps/orders/{collection}/{docId} { allow read, write: if signedIn(); }
+    match /apps/orders { allow read, write: if signedIn(); }
+
+    // ---- Welder Contractor (role-based) ----
+    match /apps/welder/dispatches/{id}      { allow read, write: if signedIn(); }
+    match /apps/welder/products/{id}        { allow read, write: if signedIn(); }
+    match /apps/welder/welders/{id}         { allow read, write: if signedIn(); }
+    match /apps/welder/parties/{id}         { allow read, write: if signedIn(); }
+    match /apps/welder/plating_outbox/{id}  { allow read, write: if signedIn(); }
+    match /apps/welder/components/{id}      { allow read, write: if signedIn(); }
+    match /apps/welder/receipts/{id}        { allow read, write: if signedIn(); }
+    match /apps/welder/adjustments/{id}     { allow read: if signedIn(); allow write: if wOwner(); }
+    match /apps/welder/logs/{id}            { allow read, write: if signedIn(); }
+    match /apps/welder/meta/{id}            { allow read, write: if signedIn(); }
+    match /apps/welder/rates/{id}    { allow read: if signedIn(); allow write: if wOwner(); }
+    match /apps/welder/ledger/{id}   { allow read: if signedIn(); allow write: if wOwner(); }
+    match /apps/welder/payments/{id} {
+      allow read:           if signedIn();
+      allow create:         if wManager();
+      allow update, delete: if wOwner();
+    }
+    match /apps/welder/users/{id}    { allow read: if signedIn(); allow write: if wOwner(); }
+
+    // Lock everything else.
+    match /{document=**} { allow read, write: if false; }
+  }
+}

@@ -257,9 +257,15 @@ export async function loadMissedDoc(month) {
   const d = snap.exists() ? snap.data() : {};
   return { entries: d.entries || [], shortHours: d.shortHours || [] };
 }
-// Ask the worker to (re)scan a chosen month's missed punches from Realtime → att_missed_punch/{month}.
+// Ask the worker to (re)scan a chosen month's missed punches + short days + late marks
+// from Realtime → att_missed_punch/{month} (+ att_late_log/{month}).
 export async function queueScanMissed(month, by) {
   return queueJob('scan_missed', { month }, by);
+}
+// Ask the worker to REPROCESS attendance on Realtime for a date range (dd/MM/yyyy, all employees).
+// Recalculation only — pulls corrected present/OT/late from the existing punches; deletes nothing.
+export async function queueReprocess(from, to, by) {
+  return queueJob('reprocess_period', { from, to }, by);
 }
 // "Leave as is" decision for a missed punch — stored on att_salary so the daily rescan
 // (which overwrites the scan doc) can't lose it.

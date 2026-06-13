@@ -34,9 +34,15 @@ async function scanMissed(offset = 0) {
 
     // short-hours: worked span (minus 30-min lunch) clearly below the shift's net hours
     const SHIFT_HOURS = { GEN: 8, '10H': 10, '12H': 12, wir: 10 };
+    // shift start (minutes from midnight) + 15-min grace — a morning IN after this = a late mark
+    const SHIFT_START = { GEN: 540, '10H': 540, '12H': 540, wir: 570 }; // 09:00 / 09:00 / 09:00 / 09:30
+    const GRACE = 15;
     const toMin = s => { const m = /^(\d{1,2}):(\d{2})/.exec(String(s).trim()); return m ? +m[1] * 60 + +m[2] : null; };
+    // report date "15-05-2026" -> "2026-05-15" (same key format the daily late-capture uses, so they merge cleanly)
+    const toYMD = s => { const m = /(\d{2})-(\d{2})-(\d{4})/.exec(String(s)); return m ? `${m[3]}-${m[2]}-${m[1]}` : ''; };
+    const isSaturday = ymd => ymd && new Date(ymd + 'T00:00:00').getDay() === 6; // weekly off — not a late day
 
-    const entries = [], shortHours = [];
+    const entries = [], shortHours = [], lateByCode = {};
     for (const r of rows) {
       const code = String(r[0] || '').trim(); if (!code) continue;
       const inNA = isNA(r[2]), outNA = isNA(r[3]);
@@ -57,15 +63,27 @@ async function scanMissed(offset = 0) {
       if (inNA) continue;                              // both NA → absent, nothing to report
       const i = toMin(r[2]), o = toMin(r[3]);
       if (i == null || o == null) continue;
+      const shift = (sal[code] || {}).shift;
+      const ymd = toYMD(r[1]);
+      // LATE MARK: morning IN later than shift-start + 15-min grace, on a non-Saturday working day
+      const startGrace = (SHIFT_START[shift] || 540) + GRACE;
+      if (ymd && !isSaturday(ymd) && i > startGrace) {
+        const e = lateByCode[code] || (lateByCode[code] = { name: nameOf(code), dept: (sal[code] || {}).dept || '', days: {} });
+        e.days[ymd] = String(r[2]).trim();             // date -> in-time (idempotent: same day overwrites)
+      }
       let mins = o - i; if (mins < 0) mins += 1440;    // overnight (guards)
       const hours = +(mins / 60 - 0.5).toFixed(1);     // minus lunch
-      const need = SHIFT_HOURS[(sal[code] || {}).shift] || 8;
+      const need = SHIFT_HOURS[shift] || 8;
       if (hours < need - 0.25) {
         shortHours.push({ code, name: nameOf(code), date: toDDMMYYYY(r[1]), in: String(r[2]).trim(), out: String(r[3]).trim(), hours, need });
       }
     }
     shortHours.sort((a, b) => (a.date < b.date ? 1 : -1));
     await db().collection('att_missed_punch').doc(label).set({ month: label, entries, shortHours, updatedAt: new Date().toISOString() });
+    // merge late marks into att_late_log/{month} — additive (per-date keys), same shape as the daily capture
+    if (Object.keys(lateByCode).length) {
+      await db().collection('att_late_log').doc(label).set({ month: label, byCode: lateByCode, updatedAt: new Date().toISOString() }, { merge: true });
+    }
     return entries.length;
   } finally { await browser.close(); }
 }

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { loadMissedDoc, loadLateList, loadEmployees, loadRoster, loadAllAttendance, loadPayout, decideResignPrompt, leaveMissedPunch, queueScanMissed, queueJob, istMonth } from '../lib/data';
+import { loadMissedDoc, loadLateList, loadEmployees, loadRoster, loadAllAttendance, loadPayout, decideResignPrompt, leaveMissedPunch, queueScanMissed, queueReprocess, queueJob, istMonth } from '../lib/data';
 import { monthOptions } from '../lib/paycalc';
 import { SHIFT_HOURS } from '../lib/payroll';
 import NamePick from './NamePick.jsx';
@@ -29,8 +29,8 @@ export default function Problems({ user }) {
 
   // current-month concerns (late / resign / high-OT / unpaid)
   async function reload() {
-    const [lateList, ros] = await Promise.all([loadLateList(mk, 3), loadRoster()]);
-    setLate(lateList); setRoster(ros);
+    const ros = await loadRoster();
+    setRoster(ros);
     try {
       const po = await loadPayout(mk);
       setUnpaid(Object.values(po.items || {}).filter((i) => !i.paid).length);
@@ -57,6 +57,7 @@ export default function Problems({ user }) {
   async function reloadMissed() {
     const md = await loadMissedDoc(mMonth);
     setMissed(md.entries || []); setShort(md.shortHours || []);
+    try { setLate(await loadLateList(mMonth, 3)); } catch { /* ignore */ }
     try {
       const emps = await loadEmployees(true);
       setLeftSet(new Set(emps.flatMap((e) => ((e.missedLeave || {})[mMonth] || []).map((d) => e.code + '|' + d))));
@@ -114,7 +115,7 @@ export default function Problems({ user }) {
         </Card>
       )}
 
-      {/* MISSED PUNCHES — pick a month, see name+date+which punch, choose & confirm the fix */}
+      {/* MONTH PICKER + RESCAN — governs all three lists below: missed punches, late marks, short days */}
       <div className="bg-white rounded-xl shadow p-3">
         <div className="flex items-center gap-2 mb-2">
           <div className="font-semibold text-gray-800 text-sm flex-1">⏱ Missed punches</div>
@@ -123,7 +124,8 @@ export default function Problems({ user }) {
           </select>
           <button disabled={busy === 'scan'} onClick={rescan} className="border border-gray-300 rounded-lg px-2.5 py-1 text-xs disabled:opacity-50">🔍 Rescan</button>
         </div>
-        {scanSt === 'queued' && <p className="text-xs text-blue-700 mb-1">Rescanning {monthLabel} from the machine… refresh in a few minutes.</p>}
+        <p className="text-[11px] text-gray-400 mb-1">Month + Rescan apply to all three lists below — missed punches, late marks & short days.</p>
+        {scanSt === 'queued' && <p className="text-xs text-blue-700 mb-1">Rescanning {monthLabel} (missed punches · late marks · short days) from the machine… refresh in a few minutes.</p>}
         {scanSt === 'failed' && <p className="text-xs text-red-600 mb-1">Couldn't queue rescan — try again.</p>}
         <p className="text-xs text-gray-400 mb-1">Each one asks you to confirm — fill the missing punch with shift time, mark overtime, or half-day if he left early.</p>
         {visMissed.length === 0 && <p className="text-sm text-gray-400 py-1">No pending missed punches in {monthLabel} 🎉</p>}
@@ -134,8 +136,8 @@ export default function Problems({ user }) {
         ))}
       </div>
 
-      <Card title={`⏰ Late 3+ days (${late.length})`} sub="Pay cuts happen by the machine rules automatically — this is just for your eye.">
-        {late.length === 0 && <p className="text-sm text-gray-400 py-1">No one yet 🎉</p>}
+      <Card title={`⏰ Late 3+ days (${late.length})`} sub={`Pay cuts happen by the machine rules automatically — this is just for your eye · ${monthLabel}.`}>
+        {late.length === 0 && <p className="text-sm text-gray-400 py-1">No one with 3+ late days in {monthLabel} 🎉</p>}
         {late.map((l) => <LateRow key={l.code} l={l} />)}
       </Card>
 
@@ -151,7 +153,48 @@ export default function Problems({ user }) {
         </div>
       </Card>
 
+      {isAdmin && <ReprocessCard user={user} defaultMonth={mMonth} />}
+
       <AddPunch roster={roster} user={user} />
+    </div>
+  );
+}
+
+// REPROCESS ATTENDANCE for a date range — recalculates present/OT/late on the machine from the
+// existing punches (e.g. after a settings fix or bulk correction). Deletes nothing. Admin only.
+function ReprocessCard({ user, defaultMonth }) {
+  const monthStart = (defaultMonth || '') + '-01';
+  const lastDay = defaultMonth ? new Date(+defaultMonth.slice(0, 4), +defaultMonth.slice(5, 7), 0).toISOString().slice(0, 10) : '';
+  const [from, setFrom] = useState(monthStart);
+  const [to, setTo] = useState(lastDay);
+  const [st, setSt] = useState('');
+  const toDMY = (ymd) => { const m = /(\d{4})-(\d{2})-(\d{2})/.exec(ymd || ''); return m ? `${m[3]}/${m[2]}/${m[1]}` : ''; };
+
+  async function run() {
+    const f = toDMY(from), t = toDMY(to);
+    if (!f || !t) { setSt('bad'); return; }
+    if (from > to) { setSt('order'); return; }
+    if (!confirm(`Reprocess attendance for ALL staff from ${f} to ${t}?\n\nThis recalculates present days, OT and late from the existing punches on the machine. It does not delete anything.`)) return;
+    setSt('busy');
+    try { await queueReprocess(f, t, user.email); setSt('queued'); }
+    catch { setSt('failed'); }
+  }
+
+  return (
+    <div className="bg-white rounded-xl shadow p-3">
+      <div className="font-semibold text-gray-800 text-sm mb-1">🔄 Reprocess attendance</div>
+      <p className="text-[11px] text-gray-400 mb-2">Recalculate present / OT / late for a period from the existing punches (after a rule fix or bulk correction). Nothing is deleted.</p>
+      <div className="flex items-center gap-2">
+        <label className="text-xs text-gray-500">From</label>
+        <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="border rounded-lg px-2 py-1 text-xs" />
+        <label className="text-xs text-gray-500">To</label>
+        <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="border rounded-lg px-2 py-1 text-xs" />
+        <button disabled={st === 'busy'} onClick={run} className="ml-auto bg-blue-700 text-white rounded-lg px-3 py-1.5 text-xs font-medium disabled:opacity-50">Reprocess</button>
+      </div>
+      {st === 'queued' && <p className="text-xs text-blue-700 mt-2">Queued — the machine is recalculating. Rescan the month above in a few minutes to see corrected figures.</p>}
+      {st === 'order' && <p className="text-xs text-red-600 mt-2">"From" date must be on or before "To".</p>}
+      {st === 'bad' && <p className="text-xs text-red-600 mt-2">Pick both dates.</p>}
+      {st === 'failed' && <p className="text-xs text-red-600 mt-2">Couldn't queue — try again.</p>}
     </div>
   );
 }
