@@ -162,14 +162,14 @@ function LateRow({ l }) {
 
 function AddPunch({ roster, user }) {
   const [show, setShow] = useState(false);
-  const [f, setF] = useState({ code: null, name: '', date: '', in: '', out: '' });
+  const [f, setF] = useState({ code: null, name: '', date: '', in: '', out: '', reason: '' });
   const [st, setSt] = useState('');
   async function go() {
     if (!f.code) { setSt('Type the name — it will suggest from the list.'); return; }
     if (!/^\d{2}\/\d{2}\/\d{4}$/.test(f.date)) { setSt('Date must be dd/mm/yyyy, e.g. 09/06/2026.'); return; }
     if (!f.in && !f.out) { setSt('Fill at least one time (HH:MM).'); return; }
     setSt('saving');
-    try { await queueJob('manual_punch', { emp: f.code, date: f.date, in: f.in, out: f.out, remark: 'manual' }, user.email); setSt('done'); setF({ code: null, name: '', date: '', in: '', out: '' }); }
+    try { await queueJob('manual_punch', { emp: f.code, date: f.date, in: f.in, out: f.out, remark: 'manual', reason: f.reason || 'manual correction' }, user.email); setSt('done'); setF({ code: null, name: '', date: '', in: '', out: '', reason: '' }); }
     catch { setSt('Failed — try again.'); }
   }
   return (
@@ -184,6 +184,7 @@ function AddPunch({ roster, user }) {
             <input className="border rounded px-2 py-2 text-sm" placeholder="IN 09:00" value={f.in} onChange={(e) => setF({ ...f, in: e.target.value })} />
             <input className="border rounded px-2 py-2 text-sm" placeholder="OUT 19:30" value={f.out} onChange={(e) => setF({ ...f, out: e.target.value })} />
           </div>
+          <input className="border rounded px-2 py-2 text-sm col-span-2" placeholder="Reason (e.g. machine breakdown, worker was present)" value={f.reason} onChange={(e) => setF({ ...f, reason: e.target.value })} />
           <button onClick={go} disabled={st === 'saving'} className="col-span-2 bg-gray-800 text-white rounded-lg py-2 text-sm font-medium disabled:opacity-50">Add punch</button>
           {st === 'done' && <p className="col-span-2 text-xs text-green-700">✓ Added — day reprocesses automatically.</p>}
           {st && !['saving', 'done'].includes(st) && <p className="col-span-2 text-xs text-amber-700">{st}</p>}

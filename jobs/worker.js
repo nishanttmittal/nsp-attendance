@@ -21,8 +21,20 @@ function run(file, env) {
 async function handle(type, p) {
   if (type === 'manual_punch') {
     run('manualPunch.js', { EMP: p.emp, DATE: p.date, IN: p.in || '', OUT: p.out || '', REMARK: p.remark || 'app', DRY: 'false' });
-    await sendTelegram(`✏️ Manual punch added for ${p.emp} on ${p.date} (in ${p.in || '—'}/out ${p.out || '—'}).`);
-    return 'punch inserted + day reprocessed';
+    // attendance-correction log on the employee record (dispute trail: who/when/what/why)
+    try {
+      const ref = db().collection('att_salary').doc(p.emp);
+      const snap = await ref.get();
+      const corrections = (snap.exists && snap.data().corrections) || [];
+      corrections.push({ date: p.date, in: p.in || '', out: p.out || '', reason: p.reason || p.remark || 'manual', by: p._by || 'app', at: new Date().toISOString() });
+      await ref.set({ corrections }, { merge: true });
+    } catch (e) { console.error('correction log failed:', e.message); }
+    await sendTelegram(`✏️ Punch correction: ${p.emp} on ${p.date} (in ${p.in || '—'}/out ${p.out || '—'})${p.reason ? ' — ' + p.reason : ''}.`);
+    return 'punch inserted + day reprocessed + logged';
+  }
+  if (type === 'backup') {
+    run('backup.js', { REASON: p.reason || 'on demand' });
+    return 'backup sent';
   }
   if (type === 'onboard_employee') {
     run('onboardEmployee.js', { NAME: p.name, CARDNO: p.cardno, DEPT: p.dept, SHIFT: p.shift, GENDER: p.gender, DRY: 'false' });
@@ -140,8 +152,8 @@ async function handle(type, p) {
       const items = {};
       sal.forEach(d => {
         const md = (d.data().months || {})[mk];
-        if (!md || !md.approved) return;
-        items[d.id] = { name: d.data().name || d.id, dept: d.data().dept || '', net: Number(md.approvedNet || 0), paid: md.payment ? { mode: md.payment.mode, date: md.payment.date } : null };
+        if (!md || !md.approved || md.hold) return;  // held salaries never reach the manager's pay list
+        items[d.id] = { name: d.data().name || d.id, nickname: d.data().nickname || '', dept: d.data().dept || '', net: Number(md.approvedNet || 0), paid: md.payment ? { mode: md.payment.mode, date: md.payment.date } : null };
       });
       await db().collection('att_meta').doc('payout_' + mk).set({ month: mk, items, updatedAt: new Date().toISOString() });
     }

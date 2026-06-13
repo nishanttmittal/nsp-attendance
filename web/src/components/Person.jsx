@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { loadEmployee, loadAllAttendance, saveEmployee, saveMonth, addAdvance, addIncrement, resignEmployee, checkActionPassword, queueJob } from '../lib/data';
+import { loadEmployee, loadAllAttendance, saveEmployee, saveMonth, addAdvance, addIncrement, resignEmployee, settleAndResign, checkActionPassword, queueJob } from '../lib/data';
 import { monthCtx, payFor, rupee } from '../lib/paycalc';
 import { payslipOnePdf, sharePdf } from '../lib/salaryPdf';
 
@@ -29,7 +29,7 @@ export default function Person({ code, mk, user, onBack }) {
       <button onClick={onBack} className="text-sm text-gray-600">← Back to list</button>
 
       <div className="bg-white rounded-xl shadow p-4">
-        <div className="font-bold text-lg text-gray-800">{emp.name || code}</div>
+        <div className="font-bold text-lg text-gray-800">{emp.name || code}{emp.nickname ? <span className="text-gray-400 font-normal text-base"> ({emp.nickname})</span> : null}</div>
         <div className="text-xs text-gray-500">{emp.dept || ''} · {emp.shift || ''} · {emp.type === 'daily' ? rupee(emp.wage) + '/day' : rupee(emp.amount) + '/month'}</div>
         <div className="text-xs text-gray-500 mb-2">
           {emp.phone ? '📞 ' + emp.phone + ' · ' : ''}{emp.joinDate ? 'joined ' + emp.joinDate + ' · ' : ''}
@@ -83,18 +83,35 @@ export default function Person({ code, mk, user, onBack }) {
 
       <PaymentsHistory emp={emp} />
 
+      <CorrectionsLog emp={emp} />
+
       <SalaryEdit emp={emp} busy={busy} onSave={(patch) => act(() => saveEmployee(code, patch))} />
 
       {emp.active !== false ? (
-        <button disabled={busy} onClick={async () => {
-          const pw = prompt(`Resign ${emp.name}?\nEnter the action password to confirm:`);
+        <button disabled={busy || locked} onClick={async () => {
+          const last = prompt(`Final settlement for ${emp.name}.\nLast working day (YYYY-MM-DD):`, today);
+          if (!last || !/^\d{4}-\d{2}-\d{2}$/.test(last)) { if (last != null) alert('Enter the date as YYYY-MM-DD.'); return; }
+          // recompute pay capped at the last working day (prorates a mid-month exit)
+          const sp = payFor({ ...emp, exitDate: last }, attMap, mk, ctx).pay;
+          const net = sp.net;
+          if (!confirm(`Final settlement for ${emp.name}:\n\n` +
+            `Days: ${sp.presentDays} present / ${sp.absentDays} absent\n` +
+            `Base ₹${sp.base} + OT ₹${sp.otPay}` + (sp.perfectBonus ? ` + bonus ₹${sp.perfectBonus}` : '') + (sp.bonus ? ` + bonus ₹${sp.bonus}` : '') + '\n' +
+            (sp.advanceRecovered ? `− Advance ₹${sp.advanceRecovered}\n` : '') +
+            `\nFINAL PAYABLE: ₹${net.toLocaleString('en-IN')}\n\n` +
+            `This pays & locks ${mk}, removes the worker (last day ${last}). Continue?`)) return;
+          const pw = prompt('Enter the action password to confirm:');
           if (pw == null) return;
           const ok = await checkActionPassword(pw);
-          if (ok === 'unset') { if (!confirm('No action password set yet (set one in ⚙ Settings). Resign anyway?')) return; }
+          if (ok === 'unset') { if (!confirm('No action password set yet (set one in ⚙ Settings). Settle & resign anyway?')) return; }
           else if (!ok) { alert('Wrong password.'); return; }
-          act(() => resignEmployee(code, user.email));
-        }} className="w-full border border-red-200 text-red-700 rounded-lg py-2 text-sm">Resign / remove {emp.name}</button>
-      ) : <p className="text-center text-xs text-gray-400">Resigned {emp.resignedAt || ''}</p>}
+          act(() => settleAndResign(code, mk, sp, last, user.email));
+        }} className="w-full border border-red-200 text-red-700 rounded-lg py-2 text-sm disabled:opacity-40">Final settlement &amp; resign {emp.name}</button>
+      ) : (
+        <div className="text-center text-xs text-gray-400">
+          Resigned {emp.resignedAt || emp.exitDate || ''}{md.payment?.settlement ? ` · final settled ${rupee(md.payment.net)}` : ''}
+        </div>
+      )}
     </div>
   );
 }
@@ -143,11 +160,30 @@ function PaymentsHistory({ emp }) {
   );
 }
 
+// permanent log of attendance corrections (written by the worker on each manual punch)
+function CorrectionsLog({ emp }) {
+  const rows = [...(emp.corrections || [])].reverse();
+  if (!rows.length) return null;
+  return (
+    <div className="bg-white rounded-xl shadow p-3">
+      <div className="text-sm font-semibold text-gray-700 mb-1">📝 Attendance corrections ({rows.length})</div>
+      <ul className="text-xs divide-y divide-gray-100 max-h-44 overflow-auto">
+        {rows.map((c, i) => (
+          <li key={i} className="py-1">
+            <div className="flex justify-between"><span className="font-medium">{c.date}</span><span className="text-gray-500">{c.in ? 'in ' + c.in : ''}{c.in && c.out ? ' · ' : ''}{c.out ? 'out ' + c.out : ''}</span></div>
+            <div className="text-gray-500">{c.reason || ''}{c.by ? ' · by ' + String(c.by).split('@')[0] : ''}{c.at ? ' · ' + c.at.slice(0, 16).replace('T', ' ') : ''}</div>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function SalaryEdit({ emp, onSave, busy }) {
   const [show, setShow] = useState(false);
   const [f, setF] = useState({
     type: emp.type || 'monthly', amount: emp.type === 'daily' ? emp.wage : emp.amount, shift: emp.shift || 'GEN',
-    phone: emp.phone || '', joinDate: emp.joinDate || '',
+    phone: emp.phone || '', joinDate: emp.joinDate || '', nickname: emp.nickname || '',
   });
   return (
     <div className="bg-white rounded-xl shadow p-3">
@@ -161,11 +197,12 @@ function SalaryEdit({ emp, onSave, busy }) {
           <select className="border rounded px-2 py-2 text-sm" value={f.shift} onChange={(e) => setF({ ...f, shift: e.target.value })}>
             {['GEN', '10H', '12H', 'wir'].map((s) => <option key={s}>{s}</option>)}
           </select>
+          <input className="border rounded px-2 py-2 text-sm col-span-3" placeholder="Nickname (e.g. Raju Chrome line)" value={f.nickname} onChange={(e) => setF({ ...f, nickname: e.target.value })} />
           <input className="border rounded px-2 py-2 text-sm col-span-2" placeholder="📞 Phone" value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} />
           <input className="border rounded px-2 py-2 text-sm" type="date" title="Joining date" value={f.joinDate} onChange={(e) => setF({ ...f, joinDate: e.target.value })} />
           <button disabled={busy} onClick={() => onSave({
             ...(f.type === 'daily' ? { type: 'daily', wage: Number(f.amount) } : { type: 'monthly', amount: Number(f.amount) }),
-            shift: f.shift, phone: f.phone, joinDate: f.joinDate,
+            shift: f.shift, phone: f.phone, joinDate: f.joinDate, nickname: f.nickname,
           })} className="col-span-3 bg-gray-800 text-white rounded py-1.5 text-xs font-medium">Save</button>
         </div>
       )}

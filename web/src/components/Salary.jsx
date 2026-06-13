@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { loadEmployees, loadAllAttendance, saveEmployee, loadPayout, queueMarkPaid, queueAdvance, loadRoster, approveSalary, unapproveSalary, istMonth, queueJob } from '../lib/data';
+import { loadEmployees, loadAllAttendance, saveEmployee, loadPayout, queueMarkPaid, queueAdvance, loadRoster, approveSalary, unapproveSalary, holdSalary, releaseSalary, ensureApprovalBackup, istMonth, queueJob } from '../lib/data';
 import { monthOptions, monthCtx, payFor, rupee } from '../lib/paycalc';
 import Person from './Person.jsx';
 import SelfPunchCard from './SelfPunchCard.jsx';
@@ -34,6 +34,7 @@ function OwnerSalary({ user }) {
   const rows = emps.filter((e) => e.amount || e.wage).map((e) => ({ emp: e, ...payFor(e, attMap, mk, ctx) }));
   const ticked = rows.filter((r) => r.md.approved);
   const paid = ticked.filter((r) => r.md.payment);
+  const held = rows.filter((r) => r.md.hold);
   const visible = rows.filter((r) => !q || (r.emp.name || '').toLowerCase().includes(q.toLowerCase()));
   const noSalary = emps.filter((e) => !(e.amount || e.wage));
 
@@ -41,17 +42,31 @@ function OwnerSalary({ user }) {
     setBusy(r.emp.code);
     try {
       if (r.md.approved) await unapproveSalary(r.emp.code, mk);
-      else await approveSalary(r.emp.code, mk, r.pay, user.email);
+      else { await ensureApprovalBackup(mk, user.email); await approveSalary(r.emp.code, mk, r.pay, user.email); }
       await reload();
     } finally { setBusy(''); }
   }
 
+  async function hold(r) {
+    const reason = prompt(`Hold ${r.emp.name}'s salary for ${mk}.\nReason (required):`);
+    if (!reason || !reason.trim()) return;
+    setBusy(r.emp.code);
+    try { await holdSalary(r.emp.code, mk, reason.trim(), user.email); await reload(); }
+    finally { setBusy(''); }
+  }
+  async function release(r) {
+    setBusy(r.emp.code);
+    try { await releaseSalary(r.emp.code, mk, user.email); await reload(); }
+    finally { setBusy(''); }
+  }
+
   async function tickAll() {
-    const remaining = rows.filter((r) => !r.md.approved && r.pay.net > 0);
+    const remaining = rows.filter((r) => !r.md.approved && !r.md.hold && r.pay.net > 0);
     if (!remaining.length) return;
-    if (!confirm(`Tick all remaining ${remaining.length} people for ${mk}?`)) return;
+    if (!confirm(`Tick all remaining ${remaining.length} people for ${mk}? (held salaries are skipped)`)) return;
     setBusy('all');
     try {
+      await ensureApprovalBackup(mk, user.email);
       for (const r of remaining) await approveSalary(r.emp.code, mk, r.pay, user.email);
       await reload();
     } finally { setBusy(''); }
@@ -68,11 +83,11 @@ function OwnerSalary({ user }) {
         </div>
         <div className="flex items-center gap-2">
           <div className="flex-1 text-sm text-gray-600">
-            <b className="text-gray-800">{ticked.length}</b> of {rows.length} ticked · <b className="text-green-700">{paid.length}</b> paid ({rupee(paid.reduce((s, r) => s + Number(r.md.payment?.net || 0), 0))})
+            <b className="text-gray-800">{ticked.length}</b> of {rows.length} ticked · <b className="text-green-700">{paid.length}</b> paid ({rupee(paid.reduce((s, r) => s + Number(r.md.payment?.net || 0), 0))}){held.length > 0 ? <> · <b className="text-red-600">{held.length}</b> hold</> : null}
           </div>
-          {rows.some((r) => !r.md.approved && r.pay.net > 0) && (
+          {rows.some((r) => !r.md.approved && !r.md.hold && r.pay.net > 0) && (
             <button disabled={busy === 'all'} onClick={tickAll} className="text-xs border border-red-300 text-red-700 rounded-lg px-2.5 py-1.5 font-medium disabled:opacity-50">
-              {busy === 'all' ? 'Ticking…' : `✓ Tick all (${rows.filter((r) => !r.md.approved && r.pay.net > 0).length})`}
+              {busy === 'all' ? 'Ticking…' : `✓ Tick all (${rows.filter((r) => !r.md.approved && !r.md.hold && r.pay.net > 0).length})`}
             </button>
           )}
         </div>
@@ -83,7 +98,7 @@ function OwnerSalary({ user }) {
 
       <div className="bg-white rounded-xl shadow divide-y divide-gray-100">
         {visible.length === 0 && <p className="p-4 text-sm text-gray-400">No one matches.</p>}
-        {visible.map((r) => <OwnerRow key={r.emp.code} r={r} busy={busy === r.emp.code} onName={() => setOpenCode(r.emp.code)} onTick={() => tick(r)} />)}
+        {visible.map((r) => <OwnerRow key={r.emp.code} r={r} busy={busy === r.emp.code} onName={() => setOpenCode(r.emp.code)} onTick={() => tick(r)} onHold={() => hold(r)} onRelease={() => release(r)} />)}
       </div>
 
       <AdvanceCard user={user} />
@@ -94,26 +109,33 @@ function OwnerSalary({ user }) {
   );
 }
 
-function OwnerRow({ r, busy, onName, onTick }) {
+function OwnerRow({ r, busy, onName, onTick, onHold, onRelease }) {
   const { emp, md, pay } = r;
-  const isPaid = !!md.payment, isTicked = !!md.approved;
+  const isPaid = !!md.payment, isTicked = !!md.approved, isHeld = !!md.hold;
   const sub = [
     `${pay.presentDays}d`,
     pay.otHrsNet > 0 ? `OT ${pay.otHrsNet}h` : null,
     pay.advanceRecovered > 0 ? `adv −${rupee(pay.advanceRecovered)}` : null,
   ].filter(Boolean).join(' · ');
   return (
-    <div className="flex items-center p-3 gap-2">
-      <button onClick={onName} className="flex-1 text-left">
-        <div className="font-medium text-gray-800">{emp.name || emp.code}</div>
-        <div className="text-xs text-gray-500">{sub}</div>
-      </button>
-      <div className="text-right">
-        <div className="font-bold text-red-700">{rupee(isPaid ? md.payment.net : (isTicked ? md.approvedNet : pay.net))}</div>
-        {isPaid ? <span className="text-[11px] text-green-700 font-medium">✓ PAID ({md.payment.mode})</span>
-          : isTicked ? <button disabled={busy} onClick={onTick} className="text-[11px] text-amber-700 underline">ticked · undo</button>
-          : <button disabled={busy} onClick={onTick} className="text-xs bg-red-700 text-white rounded-lg px-3 py-1.5 font-medium disabled:opacity-50">✓ Tick</button>}
+    <div className={`p-3 ${isHeld ? 'bg-red-50' : ''}`}>
+      <div className="flex items-center gap-2">
+        <button onClick={onName} className="flex-1 text-left">
+          <div className="font-medium text-gray-800">{emp.name || emp.code}{emp.nickname ? <span className="text-gray-400 font-normal"> ({emp.nickname})</span> : null}</div>
+          <div className="text-xs text-gray-500">{sub}</div>
+        </button>
+        <div className="text-right">
+          <div className="font-bold text-red-700">{rupee(isPaid ? md.payment.net : (isTicked ? md.approvedNet : pay.net))}</div>
+          {isHeld ? <button disabled={busy} onClick={onRelease} className="text-[11px] text-red-600 underline">🚫 hold · release</button>
+            : isPaid ? <span className="text-[11px] text-green-700 font-medium">✓ PAID ({md.payment.mode})</span>
+            : isTicked ? <button disabled={busy} onClick={onTick} className="text-[11px] text-amber-700 underline">ticked · undo</button>
+            : <div className="flex gap-1 justify-end">
+                <button disabled={busy} onClick={onTick} className="text-xs bg-red-700 text-white rounded-lg px-3 py-1.5 font-medium disabled:opacity-50">✓ Tick</button>
+                <button disabled={busy} onClick={onHold} title="Hold salary" className="text-xs border border-gray-300 text-gray-500 rounded-lg px-2 py-1.5 disabled:opacity-50">🚫</button>
+              </div>}
+        </div>
       </div>
+      {isHeld && <div className="text-[11px] text-red-700 mt-1">🚫 Hold: {md.hold.reason}</div>}
     </div>
   );
 }
@@ -151,7 +173,7 @@ function ManagerSalary({ user }) {
           return (
             <div key={i.code} className="flex items-center p-3 gap-2">
               <div className="flex-1">
-                <div className="font-medium text-gray-800">{i.name}</div>
+                <div className="font-medium text-gray-800">{i.name}{i.nickname ? <span className="text-gray-400 font-normal"> ({i.nickname})</span> : null}</div>
                 <div className="text-xs text-gray-500">{i.dept}</div>
               </div>
               <div className="font-bold text-red-700 mr-1">{rupee(i.net)}</div>

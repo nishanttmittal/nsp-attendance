@@ -293,6 +293,34 @@ export async function approveSalary(code, month, pay, by) {
 export async function unapproveSalary(code, month) {
   await saveMonth(code, month, { approved: null, approvedNet: null, approvedCarry: null });
 }
+// Salary Hold: stop a person's pay on purpose, with a mandatory reason. A held month
+// can't be ticked/approved until released.
+export async function holdSalary(code, month, reason, by) {
+  await saveMonth(code, month, { hold: { reason, by, at: new Date().toISOString() }, approved: null, approvedNet: null });
+}
+export async function releaseSalary(code, month, by) {
+  await saveMonth(code, month, { hold: null, holdReleasedBy: by, holdReleasedAt: new Date().toISOString() });
+}
+// Pre-approval safety backup (once per month, deduped in att_meta) + the daily one.
+export async function ensureApprovalBackup(month, by) {
+  if (!isConfigured || !db) return;
+  const ref = doc(db, 'att_meta', 'backup_' + month);
+  const s = await getDoc(ref);
+  if (s.exists() && s.data().done) return;
+  await setDoc(ref, { done: true, by, at: new Date().toISOString() }, { merge: true });
+  await queueJob('backup', { reason: 'before approving ' + month }, by);
+}
+// Final settlement for a resigning worker: pay till the last day + OT + bonus − advances,
+// recorded as the month's final payment, employee marked inactive (exit date set).
+export async function settleAndResign(code, month, pay, lastDay, by) {
+  await saveMonth(code, month, {
+    approved: { by, at: new Date().toISOString() }, approvedNet: pay.net, approvedCarry: pay.advanceBalanceCarried,
+    advanceRecover: pay.advanceRecovered, locked: true,
+    payment: { date: lastDay, mode: 'settlement', net: pay.net, by, settlement: true },
+  });
+  await saveEmployee(code, { active: false, exitDate: lastDay, resignedAt: lastDay });
+  return queueJob('resign_employee', { code }, by);
+}
 // Manager-readable payout list (worker keeps it in sync with att_salary).
 export async function loadPayout(month) {
   if (!isConfigured || !db) return { items: {} };

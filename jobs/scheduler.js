@@ -27,7 +27,7 @@ const TASKS = [
   { name: 'plating-summary', min: 20 * 60 + 5, run: () => run('platingSummary.js') },              // 20:05 plating summary
   { name: 'evening-miss', min: 21 * 60 + 30, run: () => run('missedPunch.js', { MODE: 'evening' }) }, // 21:30 no-OUT today
   { name: 'welder-pay', min: 19 * 60, day: 6, run: () => run('welderContractorPay.js') },          // Sat 19:00 pay-ready
-  { name: 'backup', min: 7 * 60 + 30, day: 0, run: () => run('backup.js') },                        // Sun 07:30 backup
+  { name: 'backup', min: 7 * 60 + 30, run: () => run('backup.js', { REASON: 'daily' }) },             // 07:30 daily backup
   { name: 'sync-employees', min: 8 * 60, day: 0, run: () => run('syncEmployees.js') },              // Sun 08:00 employee sync
 ];
 
