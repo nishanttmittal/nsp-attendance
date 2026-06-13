@@ -146,6 +146,7 @@ function ManagerSalary({ user }) {
   const [payout, setPayout] = useState(null);
   const [done, setDone] = useState({});       // optimistic: code -> mode
   const [busy, setBusy] = useState('');
+  const [confirm, setConfirm] = useState(null); // { item, mode, remark } before paying
 
   useEffect(() => { setPayout(null); loadPayout(mk).then(setPayout); }, [mk]);
   if (payout === null) return <p className="text-gray-500">Loading…</p>;
@@ -154,9 +155,9 @@ function ManagerSalary({ user }) {
     .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
   const pending = items.filter((i) => !i.paid && !done[i.code]);
 
-  async function pay(i, mode) {
+  async function pay(i, mode, remark) {
     setBusy(i.code);
-    try { await queueMarkPaid(i.code, mk, mode, user.email); setDone({ ...done, [i.code]: mode }); }
+    try { await queueMarkPaid(i.code, mk, mode, user.email, remark); setDone({ ...done, [i.code]: mode }); setConfirm(null); }
     finally { setBusy(''); }
   }
 
@@ -179,8 +180,8 @@ function ManagerSalary({ user }) {
               <div className="font-bold text-red-700 mr-1">{rupee(i.net)}</div>
               {paidMode ? <span className="text-xs text-green-700 font-medium">✓ {paidMode}</span> : (
                 <div className="flex gap-1">
-                  <button disabled={busy === i.code} onClick={() => pay(i, 'cash')} className="bg-green-700 text-white text-xs rounded-lg px-2.5 py-2 font-medium disabled:opacity-50">💵 Cash</button>
-                  <button disabled={busy === i.code} onClick={() => pay(i, 'bank')} className="bg-gray-800 text-white text-xs rounded-lg px-2.5 py-2 font-medium disabled:opacity-50">🏦 Bank</button>
+                  <button disabled={busy === i.code} onClick={() => setConfirm({ item: i, mode: 'cash', remark: '' })} className="bg-green-700 text-white text-xs rounded-lg px-2.5 py-2 font-medium disabled:opacity-50">💵 Cash</button>
+                  <button disabled={busy === i.code} onClick={() => setConfirm({ item: i, mode: 'bank', remark: '' })} className="bg-gray-800 text-white text-xs rounded-lg px-2.5 py-2 font-medium disabled:opacity-50">🏦 Bank</button>
                 </div>
               )}
             </div>
@@ -188,6 +189,26 @@ function ManagerSalary({ user }) {
         })}
       </div>
       <AdvanceCard user={user} />
+      {confirm && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-end sm:items-center justify-center p-4" onClick={() => busy ? null : setConfirm(null)}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-5 space-y-4" onClick={(e) => e.stopPropagation()}>
+            <div className="text-center">
+              <div className="text-3xl mb-1">{confirm.mode === 'cash' ? '💵' : '🏦'}</div>
+              <p className="text-gray-600 text-sm">Pay salary by {confirm.mode === 'cash' ? 'Cash' : 'Bank'}?</p>
+              <p className="font-bold text-gray-800 text-lg mt-1">{confirm.item.name}</p>
+              <p className="font-bold text-red-700 text-2xl">{rupee(confirm.item.net)}</p>
+              <p className="text-xs text-gray-400">{monthOptions(3).find((m) => m.mk === mk)?.label || mk}</p>
+            </div>
+            <input value={confirm.remark} onChange={(e) => setConfirm({ ...confirm, remark: e.target.value })} placeholder="Remark (optional)"
+              className="w-full border rounded-lg px-3 py-2 text-sm" />
+            <div className="flex gap-2">
+              <button disabled={!!busy} onClick={() => setConfirm(null)} className="flex-1 border rounded-xl py-3 font-medium text-gray-600 disabled:opacity-50">Cancel</button>
+              <button disabled={!!busy} onClick={() => pay(confirm.item, confirm.mode, confirm.remark.trim())}
+                className="flex-1 bg-green-700 text-white rounded-xl py-3 font-semibold disabled:opacity-50">{busy ? 'Paying…' : 'Confirm Paid'}</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -328,8 +328,8 @@ export async function loadPayout(month) {
   return s.exists() ? s.data() : { items: {} };
 }
 // Manager marks a person paid — applied by the worker with admin rights.
-export async function queueMarkPaid(code, month, mode, by) {
-  return queueJob('mark_paid', { code, month, mode }, by);
+export async function queueMarkPaid(code, month, mode, by, remark) {
+  return queueJob('mark_paid', { code, month, mode, remark: remark || '' }, by);
 }
 
 // Resign prompts (set by publishMonthly when someone is absent a full month).
