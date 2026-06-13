@@ -257,6 +257,10 @@ export async function loadMissedDoc(month) {
   const d = snap.exists() ? snap.data() : {};
   return { entries: d.entries || [], shortHours: d.shortHours || [] };
 }
+// Ask the worker to (re)scan a chosen month's missed punches from Realtime → att_missed_punch/{month}.
+export async function queueScanMissed(month, by) {
+  return queueJob('scan_missed', { month }, by);
+}
 // "Leave as is" decision for a missed punch — stored on att_salary so the daily rescan
 // (which overwrites the scan doc) can't lose it.
 export async function leaveMissedPunch(code, month, date) {

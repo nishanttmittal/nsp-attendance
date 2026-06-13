@@ -14,8 +14,8 @@ const fmt = d => `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()
 const isNA = s => !/\d/.test(String(s));
 const toDDMMYYYY = s => { const m = /(\d{2})-(\d{2})-(\d{4})/.exec(String(s)); return m ? `${m[1]}/${m[2]}/${m[3]}` : String(s).trim(); };
 
-async function scanMissed() {
-  const { first, to, label } = range(0); // current month, 1st .. yesterday
+async function scanMissed(offset = 0) {
+  const { first, to, label } = range(offset); // offset 0 = current month (1st..yesterday); >0 = whole past month
   const { browser, page } = await session();
   try {
     await page.goto('https://onlinerealsoft.com/NewMonthly.aspx', { waitUntil: 'domcontentloaded' });
@@ -41,10 +41,16 @@ async function scanMissed() {
       const code = String(r[0] || '').trim(); if (!code) continue;
       const inNA = isNA(r[2]), outNA = isNA(r[3]);
       if (inNA !== outNA) {                            // exactly one punch → missed punch
+        // the report dumps a lone punch into the First-In column regardless, so decide which
+        // punch is MISSING by the present punch's TIME: an evening punch (>= 14:00) means the
+        // morning IN was missed; a morning punch means the OUT was missed.
+        const lone = String(inNA ? r[3] : r[2]).trim();
+        const lm = toMin(lone);
+        const missingIn = lm != null && lm >= 14 * 60;
         entries.push({
           code, name: nameOf(code), date: toDDMMYYYY(r[1]),
-          which: inNA ? 'in' : 'out',                    // which punch is missing
-          otherTime: String(inNA ? r[3] : r[2]).trim(),  // the punch that IS present
+          which: missingIn ? 'in' : 'out',               // which punch is missing
+          otherTime: lone,                               // the punch that IS present
         });
         continue;
       }
@@ -66,6 +72,6 @@ async function scanMissed() {
 
 module.exports = { scanMissed };
 
-if (require.main === module) scanMissed()
+if (require.main === module) scanMissed(parseInt(process.env.OFFSET || '0', 10))
   .then(n => console.log('missed punches scanned', n))
   .catch(e => { console.error(e); process.exit(1); });

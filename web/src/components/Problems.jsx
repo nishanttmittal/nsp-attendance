@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
-import { loadMissedDoc, loadLateList, loadEmployees, loadRoster, loadAllAttendance, loadPayout, decideResignPrompt, leaveMissedPunch, queueJob, istMonth } from '../lib/data';
+import { loadMissedDoc, loadLateList, loadEmployees, loadRoster, loadAllAttendance, loadPayout, decideResignPrompt, leaveMissedPunch, queueScanMissed, queueJob, istMonth } from '../lib/data';
+import { monthOptions } from '../lib/paycalc';
 import { SHIFT_HOURS } from '../lib/payroll';
 import NamePick from './NamePick.jsx';
 
+const SHIFT_START = '09:00';                  // factory standard morning start (owner-confirmed)
 const addHrs = (hhmm, h) => {
   const m = /^(\d{1,2}):(\d{2})/.exec(hhmm || ''); if (!m) return '';
   let t = Math.max(0, Math.min(23 * 60 + 59, +m[1] * 60 + +m[2] + Math.round(h * 60)));
@@ -12,6 +14,7 @@ const addHrs = (hhmm, h) => {
 // PROBLEMS — the bot tells you on Telegram each morning; here you fix things in two taps.
 export default function Problems({ user }) {
   const mk = istMonth();
+  const [mMonth, setMMonth] = useState(mk);   // month being reviewed for missed/short punches
   const [missed, setMissed] = useState([]);
   const [short, setShort] = useState([]);
   const [late, setLate] = useState([]);
@@ -21,12 +24,14 @@ export default function Problems({ user }) {
   const [leftSet, setLeftSet] = useState(new Set());
   const [roster, setRoster] = useState([]);
   const [busy, setBusy] = useState('');
+  const [scanSt, setScanSt] = useState('');
   const isAdmin = user.role === 'admin';
 
+  // current-month concerns (late / resign / high-OT / unpaid)
   async function reload() {
-    const [md, lateList, ros] = await Promise.all([loadMissedDoc(mk), loadLateList(mk, 3), loadRoster()]);
-    setMissed(md.entries || []); setShort(md.shortHours || []); setLate(lateList); setRoster(ros);
-    try { // ticked but not yet handed over (manager-readable payout doc)
+    const [lateList, ros] = await Promise.all([loadLateList(mk, 3), loadRoster()]);
+    setLate(lateList); setRoster(ros);
+    try {
       const po = await loadPayout(mk);
       setUnpaid(Object.values(po.items || {}).filter((i) => !i.paid).length);
     } catch { /* ignore */ }
@@ -34,9 +39,6 @@ export default function Problems({ user }) {
       try {
         const emps = await loadEmployees(true);
         setResigns(emps.filter((e) => e.resignPrompt?.status === 'pending' && e.active !== false));
-        setLeftSet(new Set(emps.flatMap((e) => ((e.missedLeave || {})[mk] || []).map((d) => e.code + '|' + d))));
-        // abnormal OT: > 4h average OT per present day (and at least 20h) — the May bug would
-        // have lit this up on day one
         const am = await loadAllAttendance();
         const names = Object.fromEntries(emps.map((e) => [e.code, e.name || e.code]));
         const flags = [];
@@ -51,20 +53,33 @@ export default function Problems({ user }) {
       } catch { /* ignore */ }
     }
   }
+  // missed / short punches for the SELECTED month
+  async function reloadMissed() {
+    const md = await loadMissedDoc(mMonth);
+    setMissed(md.entries || []); setShort(md.shortHours || []);
+    try {
+      const emps = await loadEmployees(true);
+      setLeftSet(new Set(emps.flatMap((e) => ((e.missedLeave || {})[mMonth] || []).map((d) => e.code + '|' + d))));
+    } catch { /* ignore */ }
+  }
   useEffect(() => { reload(); }, []);
-  const act = async (key, fn) => { setBusy(key); try { await fn(); await reload(); } finally { setBusy(''); } };
+  useEffect(() => { reloadMissed(); }, [mMonth]);
+  const act = async (key, fn) => { setBusy(key); try { await fn(); await reloadMissed(); } finally { setBusy(''); } };
 
   const shiftHrsOf = (code) => SHIFT_HOURS[(roster.find((x) => x.code === code) || {}).shift] || 8;
   const visMissed = missed.filter((m) => !leftSet.has(m.code + '|' + m.date));
 
-  // half-day fill / set-real-time → manual punch job (day reprocesses automatically)
-  function fillPunch(m, fraction, manualTime) {
-    const p = { emp: m.code, date: m.date, in: '', out: '', remark: fraction ? 'half day (missed punch)' : 'real time (missed punch)' };
-    const span = shiftHrsOf(m.code) * (fraction || 1);
-    if (m.which === 'out') { p.in = m.otherTime; p.out = manualTime || addHrs(m.otherTime, span); }
-    else { p.out = m.otherTime; p.in = manualTime || addHrs(m.otherTime, -span); }
-    return queueJob('manual_punch', p, user.email);
+  // apply a chosen correction → manual punch job (the day reprocesses automatically)
+  function applyPunch(m, { in: inT, out: outT, remark }) {
+    return queueJob('manual_punch', { emp: m.code, date: m.date, in: inT || '', out: outT || '', remark, reason: remark }, user.email);
   }
+  async function rescan() {
+    setScanSt('scanning'); setBusy('scan');
+    try { await queueScanMissed(mMonth, user.email); setScanSt('queued'); }
+    catch { setScanSt('failed'); } finally { setBusy(''); }
+  }
+
+  const monthLabel = monthOptions(6).find((o) => o.mk === mMonth)?.label || mMonth;
 
   return (
     <div className="space-y-3">
@@ -99,20 +114,32 @@ export default function Problems({ user }) {
         </Card>
       )}
 
-      <Card title={`⏱ Missed punches (${visMissed.length})`} sub="Already counted as full day till shift end. Fix only if the truth was different.">
-        {visMissed.length === 0 && <p className="text-sm text-gray-400 py-1">None pending 🎉</p>}
-        {visMissed.map((m) => <MissedRow key={m.code + m.date} m={m} busy={busy === m.code + m.date} isAdmin={isAdmin}
-          onLeave={isAdmin ? () => act(m.code + m.date, () => leaveMissedPunch(m.code, mk, m.date)) : undefined}
-          onHalf={() => act(m.code + m.date, () => fillPunch(m, 0.5))}
-          onTime={(t) => act(m.code + m.date, () => fillPunch(m, 0, t))} />)}
-      </Card>
+      {/* MISSED PUNCHES — pick a month, see name+date+which punch, choose & confirm the fix */}
+      <div className="bg-white rounded-xl shadow p-3">
+        <div className="flex items-center gap-2 mb-2">
+          <div className="font-semibold text-gray-800 text-sm flex-1">⏱ Missed punches</div>
+          <select value={mMonth} onChange={(e) => setMMonth(e.target.value)} className="border rounded-lg px-2 py-1 text-xs bg-white">
+            {monthOptions(6).map((o) => <option key={o.mk} value={o.mk}>{o.label}</option>)}
+          </select>
+          <button disabled={busy === 'scan'} onClick={rescan} className="border border-gray-300 rounded-lg px-2.5 py-1 text-xs disabled:opacity-50">🔍 Rescan</button>
+        </div>
+        {scanSt === 'queued' && <p className="text-xs text-blue-700 mb-1">Rescanning {monthLabel} from the machine… refresh in a few minutes.</p>}
+        {scanSt === 'failed' && <p className="text-xs text-red-600 mb-1">Couldn't queue rescan — try again.</p>}
+        <p className="text-xs text-gray-400 mb-1">Each one asks you to confirm — fill the missing punch with shift time, mark overtime, or half-day if he left early.</p>
+        {visMissed.length === 0 && <p className="text-sm text-gray-400 py-1">No pending missed punches in {monthLabel} 🎉</p>}
+        {visMissed.map((m) => (
+          <MissedRow key={m.code + m.date} m={m} shiftHrs={shiftHrsOf(m.code)} busy={busy === m.code + m.date} isAdmin={isAdmin}
+            onApply={(payload) => act(m.code + m.date, () => applyPunch(m, payload))}
+            onLeave={isAdmin ? () => act(m.code + m.date, () => leaveMissedPunch(m.code, mMonth, m.date)) : undefined} />
+        ))}
+      </div>
 
       <Card title={`⏰ Late 3+ days (${late.length})`} sub="Pay cuts happen by the machine rules automatically — this is just for your eye.">
         {late.length === 0 && <p className="text-sm text-gray-400 py-1">No one yet 🎉</p>}
         {late.map((l) => <LateRow key={l.code} l={l} />)}
       </Card>
 
-      <Card title={`🕐 Short days (${short.length})`} sub="Punched both times but worked less than the shift.">
+      <Card title={`🕐 Short days (${short.length})`} sub={`Punched both times but worked less than the shift — ${monthLabel}.`}>
         {short.length === 0 && <p className="text-sm text-gray-400 py-1">None this month</p>}
         <div className="max-h-64 overflow-auto">
           {short.map((s, i) => (
@@ -129,20 +156,66 @@ export default function Problems({ user }) {
   );
 }
 
-function MissedRow({ m, busy, onLeave, onHalf, onTime }) {
-  const [t, setT] = useState('');
+// One missed-punch row: shows who/when/which punch is missing, then ASKS you to choose and
+// CONFIRM — full day (shift time), worked overtime (type real time), left early (half day),
+// or leave as is. Nothing is applied until you confirm.
+function MissedRow({ m, shiftHrs, busy, isAdmin, onApply, onLeave }) {
+  const [choice, setChoice] = useState('');   // '', 'full', 'ot', 'half'
+  const [ot, setOt] = useState('');
+  const missingOut = m.which === 'out';        // came in, forgot to punch out
+  const existing = `${missingOut ? 'in' : 'out'} ${m.otherTime}`;
+
+  // resulting punch pair for each choice
+  const full = missingOut ? { in: m.otherTime, out: addHrs(m.otherTime, shiftHrs) } : { in: SHIFT_START, out: m.otherTime };
+  const half = missingOut ? { in: m.otherTime, out: addHrs(m.otherTime, shiftHrs * 0.5) } : { in: addHrs(m.otherTime, -shiftHrs * 0.5), out: m.otherTime };
+  const otPair = missingOut ? { in: m.otherTime, out: ot } : { in: ot, out: m.otherTime };
+
+  const reset = () => { setChoice(''); setOt(''); };
+  const confirm = (pair, remark) => { onApply({ ...pair, remark }); reset(); };
+
   return (
     <div className="py-2 border-t border-gray-50 first:border-0">
       <div className="flex justify-between text-sm">
-        <span>{m.name} <span className="text-gray-400 text-xs">{m.date}</span></span>
-        <span className="text-xs text-amber-700">no {m.which.toUpperCase()} ({m.which === 'out' ? 'in' : 'out'} {m.otherTime})</span>
+        <span className="font-medium text-gray-800">{m.name} <span className="text-gray-400 text-xs font-normal">{m.date}</span></span>
+        <span className="text-xs text-amber-700">no {m.which.toUpperCase()} <span className="text-gray-400">({existing})</span></span>
       </div>
-      <div className="flex gap-1.5 mt-1.5">
-        {onLeave && <button disabled={busy} onClick={onLeave} className="flex-1 bg-green-700 text-white rounded-lg py-1.5 text-xs font-medium">OK, full day</button>}
-        <button disabled={busy} onClick={onHalf} className="flex-1 bg-amber-600 text-white rounded-lg py-1.5 text-xs font-medium">Half day</button>
-        <input className="border rounded-lg px-2 w-20 text-xs" placeholder="HH:MM" value={t} onChange={(e) => setT(e.target.value)} />
-        <button disabled={busy || !/^\d{1,2}:\d{2}$/.test(t)} onClick={() => onTime(t)} className="border border-gray-300 rounded-lg px-2.5 text-xs disabled:opacity-40">Set</button>
-      </div>
+
+      {!choice && (
+        <div className="flex flex-wrap gap-1.5 mt-1.5">
+          <button disabled={busy} onClick={() => setChoice('full')} className="bg-green-700 text-white rounded-lg px-3 py-1.5 text-xs font-medium disabled:opacity-50">Full day</button>
+          {missingOut && <button disabled={busy} onClick={() => setChoice('ot')} className="bg-blue-700 text-white rounded-lg px-3 py-1.5 text-xs font-medium disabled:opacity-50">Worked overtime</button>}
+          <button disabled={busy} onClick={() => setChoice('half')} className="bg-amber-600 text-white rounded-lg px-3 py-1.5 text-xs font-medium disabled:opacity-50">Left early (½ day)</button>
+          {missingOut && onLeave && <button disabled={busy} onClick={onLeave} className="border border-gray-300 rounded-lg px-3 py-1.5 text-xs disabled:opacity-50">Leave as is</button>}
+        </div>
+      )}
+
+      {choice === 'full' && (
+        <Confirm busy={busy} text={`Pay full day — set IN ${full.in} · OUT ${full.out}?`} onCancel={reset} onOk={() => confirm(full, 'full day (missed punch)')} />
+      )}
+      {choice === 'half' && (
+        <Confirm busy={busy} text={`Half day — set IN ${half.in} · OUT ${half.out}?`} onCancel={reset} onOk={() => confirm(half, 'half day — left early (missed punch)')} />
+      )}
+      {choice === 'ot' && (
+        <div className="mt-1.5 bg-blue-50 rounded-lg p-2">
+          <p className="text-xs text-gray-600 mb-1">He stayed late — enter the real OUT time:</p>
+          <div className="flex gap-1.5 items-center">
+            <span className="text-xs text-gray-500">IN {m.otherTime} · OUT</span>
+            <input className="border rounded-lg px-2 py-1 w-20 text-xs" placeholder="HH:MM" value={ot} onChange={(e) => setOt(e.target.value)} />
+            <button disabled={busy || !/^\d{1,2}:\d{2}$/.test(ot)} onClick={() => confirm(otPair, 'worked overtime (missed punch)')} className="bg-blue-700 text-white rounded-lg px-3 py-1 text-xs font-medium disabled:opacity-40">Confirm</button>
+            <button disabled={busy} onClick={reset} className="text-xs text-gray-500 px-1">Cancel</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Confirm({ text, onOk, onCancel, busy }) {
+  return (
+    <div className="mt-1.5 bg-gray-50 rounded-lg p-2 flex items-center gap-2">
+      <span className="flex-1 text-xs text-gray-700">{text}</span>
+      <button disabled={busy} onClick={onOk} className="bg-green-700 text-white rounded-lg px-3 py-1 text-xs font-medium disabled:opacity-50">Confirm</button>
+      <button disabled={busy} onClick={onCancel} className="text-xs text-gray-500 px-1">Cancel</button>
     </div>
   );
 }

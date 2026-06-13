@@ -50,6 +50,17 @@ async function handle(type, p) {
     await sendTelegram(`🔄 Reprocessed attendance ${p.from} → ${p.to}.`);
     return 'reprocessed ' + p.from + '..' + p.to;
   }
+  if (type === 'scan_missed') {     // rescan a chosen month's missed punches for the app's Problems tab
+    const { scanMissed } = require('./missedPunchScan');
+    const ist = new Date(Date.now() + 5.5 * 3600 * 1000);
+    const curMk = `${ist.getUTCFullYear()}-${String(ist.getUTCMonth() + 1).padStart(2, '0')}`;
+    const [cy, cm] = curMk.split('-').map(Number);
+    const [my, mm] = String(p.month || curMk).split('-').map(Number);
+    const offset = (cy * 12 + cm) - (my * 12 + mm);     // 0 = current month, 1 = last month, …
+    const n = await scanMissed(Math.max(0, offset));
+    await sendTelegram(`🔍 Rescanned ${p.month || curMk}: ${n} missed punch(es) found — see the Problems tab.`);
+    return `scanned ${p.month}: ${n}`;
+  }
   if (type === 'mark_paid') {    // manager marks an approved salary as handed over
     const ref = db().collection('att_salary').doc(p.code);
     const snap = await ref.get();
