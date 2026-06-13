@@ -37,6 +37,12 @@ export default function Person({ code, mk, user, onBack }) {
         </div>
         {md.approved && !md.payment && <p className="text-xs bg-amber-50 border border-amber-200 text-amber-800 rounded p-1.5 mb-2">🔒 Ticked — figures frozen at {rupee(md.approvedNet)}. Undo the tick in the list to edit.</p>}
         <Row k="Days" v={`present ${pay.presentDays} · absent ${pay.absentDays}`} />
+        {(() => {
+          const sat = (att.weeklyOff || 0) + (att.weeklyOffPresent || 0);
+          if (!sat && !att.weeklyOffPresent) return null;
+          return <Row k="Weekly off (paid)" v={`${sat} Sat${att.weeklyOffPresent ? ` · worked ${att.weeklyOffPresent} → +OT` : ''}`} />;
+        })()}
+        {emp.type !== 'daily' && <Row k="Paid days" v={`${Math.max(0, (pay.payableDays || 0) - (pay.absentDays || 0))} of ${ctx.daysInMonth} (weekly-offs included)`} />}
         <Row k="Overtime" v={`${pay.otHrs}h → pays ${pay.otHrsNet}h`} />
         <hr className="my-1.5" />
         <Row k="Base pay" v={rupee(pay.base)} />
@@ -52,7 +58,8 @@ export default function Person({ code, mk, user, onBack }) {
         <div className="grid grid-cols-3 gap-2 mt-3">
           <button onClick={() => sharePdf(payslipOnePdf(emp, pay, mk), `payslip-${code}-${mk}.pdf`)} className="border border-gray-300 rounded-lg py-2 text-sm font-medium">📄 PDF</button>
           <button onClick={() => {
-            const L = [`*NSP — Salary ${mk}*`, `${emp.name || code}`, `Days: ${pay.presentDays} present / ${pay.absentDays} absent`, `OT: ${pay.otHrsNet}h`,
+            const sat = (att.weeklyOff || 0) + (att.weeklyOffPresent || 0);
+            const L = [`*NSP — Salary ${mk}*`, `${emp.name || code}`, `Days: ${pay.presentDays} present / ${pay.absentDays} absent` + (sat ? ` / ${sat} weekly-off (paid)` : ''), `OT: ${pay.otHrsNet}h`,
               `Base ₹${pay.base}` + (pay.otPay ? ` + OT ₹${pay.otPay}` : '') + (pay.perfectBonus ? ` + bonus ₹${pay.perfectBonus}` : '') + (pay.bonus ? ` + bonus ₹${pay.bonus}` : ''),
               ...(pay.fines ? [`Fine −₹${pay.fines}`] : []), ...(pay.loanInstallment ? [`Loan −₹${pay.loanInstallment}`] : []), ...(pay.advanceRecovered ? [`Advance −₹${pay.advanceRecovered}`] : []),
               `*NET: ₹${(locked && md.payment ? md.payment.net : pay.net).toLocaleString('en-IN')}*`];

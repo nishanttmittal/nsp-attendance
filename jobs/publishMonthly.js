@@ -40,7 +40,7 @@ async function downloadMonth(page, offset) {
         const rec = {
           presentDays: e.presentDays, absentDays: e.absentDays, otHrs: e.otHrs, otDays: e.otDays,
           lateHrs: e.lateHrs, lateDays: e.lateDays, earlyHrs: e.earlyHrs, workHrs: e.workHrs,
-          weeklyOff: e.weeklyOff, holiday: e.holiday, fullMonth, daysInMonth,
+          weeklyOff: e.weeklyOff, weeklyOffPresent: e.weeklyOffPresent || 0, holiday: e.holiday, fullMonth, daysInMonth,
         };
         const payload = { months: { [label]: rec }, updatedAt: new Date().toISOString() };
         if (offset === 0) Object.assign(payload, { month: label, ...rec }); // top-level = current month (back-compat)

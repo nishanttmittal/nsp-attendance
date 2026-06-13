@@ -39,7 +39,7 @@ function parseSummary(file) {
     absent: col('absent days'), work: col('total work'), ot: col('ot hours'), otDays: col('ot days'),
     lateHrs: col('late coming hrs'), lateDays: col('late coming days'),
     earlyHrs: col('earlier going hrs', 'early going hrs'), earlyDays: col('early going days', 'earlier going days'),
-    weeklyOff: col('weekly off'), holiday: col('holiday'),
+    weeklyOff: col('weekly off'), weeklyOffPresent: col('weekly off present'), holiday: col('holiday'),
   };
   const out = [];
   for (const r of rows.slice(hi + 1)) {
@@ -57,6 +57,7 @@ function parseSummary(file) {
       earlyHrs: hhmmToHours(r[c.earlyHrs]),
       earlyDays: Number(r[c.earlyDays]) || 0,
       weeklyOff: Number(r[c.weeklyOff]) || 0,
+      weeklyOffPresent: Number(r[c.weeklyOffPresent]) || 0,
       holiday: Number(r[c.holiday]) || 0,
     });
   }
