@@ -129,7 +129,7 @@ async function handle(type, p) {
   return 'unknown job type';
 }
 
-(async () => {
+async function main() {
   // record any self-punch taps (Radhey/Dinesh link) before processing the job queue
   try { const n = await drainSelfPunch(); if (n) console.log(`self-punch: recorded ${n} tap(s)`); }
   catch (e) { console.error('self-punch drain failed:', e.message); }
@@ -186,4 +186,9 @@ async function handle(type, p) {
       console.log(`[error] ${type}: ${e.message}`);
     }
   }
-})();
+}
+
+// only run the queue loop when executed directly (node worker.js / GitHub Actions);
+// when required by a test we just expose handle() so it can be driven in isolation.
+if (require.main === module) main();
+module.exports = { handle, main };
