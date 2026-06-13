@@ -111,19 +111,25 @@ function OwnerSalary({ user }) {
 
 function OwnerRow({ r, busy, onName, onTick, onHold, onRelease }) {
   const { emp, md, pay } = r;
+  const [showDays, setShowDays] = useState(false);
   const isPaid = !!md.payment, isTicked = !!md.approved, isHeld = !!md.hold;
-  const sub = [
-    `${pay.presentDays}d`,
+  const sub2 = [
     pay.otHrsNet > 0 ? `OT ${pay.otHrsNet}h` : null,
     pay.advanceRecovered > 0 ? `adv −${rupee(pay.advanceRecovered)}` : null,
   ].filter(Boolean).join(' · ');
   return (
     <div className={`p-3 ${isHeld ? 'bg-red-50' : ''}`}>
       <div className="flex items-center gap-2">
-        <button onClick={onName} className="flex-1 text-left">
-          <div className="font-medium text-gray-800">{emp.name || emp.code}{emp.nickname ? <span className="text-gray-400 font-normal"> ({emp.nickname})</span> : null}</div>
-          <div className="text-xs text-gray-500">{sub}</div>
-        </button>
+        <div className="flex-1">
+          <button onClick={onName} className="text-left block">
+            <span className="font-medium text-gray-800">{emp.name || emp.code}{emp.nickname ? <span className="text-gray-400 font-normal"> ({emp.nickname})</span> : null}</span>
+          </button>
+          <div className="text-xs text-gray-500">
+            <button onClick={() => setShowDays((s) => !s)} className="text-blue-700 underline decoration-dotted underline-offset-2">{pay.paidDays}d paid {showDays ? '▾' : '▸'}</button>
+            {sub2 ? ` · ${sub2}` : ''}
+          </div>
+          {showDays && <DaysBreakdown pay={pay} />}
+        </div>
         <div className="text-right">
           <div className="font-bold text-red-700">{rupee(isPaid ? md.payment.net : (isTicked ? md.approvedNet : pay.net))}</div>
           {isHeld ? <button disabled={busy} onClick={onRelease} className="text-[11px] text-red-600 underline">🚫 hold · release</button>
@@ -136,6 +142,31 @@ function OwnerRow({ r, busy, onName, onTick, onHold, onRelease }) {
         </div>
       </div>
       {isHeld && <div className="text-[11px] text-red-700 mt-1">🚫 Hold: {md.hold.reason}</div>}
+    </div>
+  );
+}
+
+// Tap "paid days" to see what makes it up: present + weekly-off + weekly-off-worked + holiday.
+// For daily wagers, weekly-offs and holidays are shown but marked unpaid (only worked days pay).
+function DaysBreakdown({ pay }) {
+  const daily = pay.type === 'daily';
+  const lines = [
+    ['Present', pay.presentDays, true],
+    ['Weekly-off (Sat)', pay.weeklyOff, !daily],
+    ['Weekly-off worked', pay.weeklyOffPresent, true],
+    ['Holiday', pay.holiday, !daily],
+  ];
+  return (
+    <div className="mt-1 bg-gray-50 rounded-lg p-2 text-[11px] text-gray-600 space-y-0.5">
+      {lines.map(([label, val, paid]) => (
+        <div key={label} className="flex justify-between">
+          <span>{label}</span>
+          <span className={paid ? 'text-gray-800 font-medium' : 'text-gray-400'}>{val || 0}d{paid ? '' : ' · unpaid'}</span>
+        </div>
+      ))}
+      {pay.absentDays > 0 && <div className="flex justify-between"><span>Absent</span><span className="text-red-500">−{pay.absentDays}d</span></div>}
+      <div className="flex justify-between border-t border-gray-200 pt-0.5 mt-0.5 font-semibold text-gray-800"><span>Paid days</span><span>{pay.paidDays}d</span></div>
+      {daily && <div className="text-gray-400 pt-0.5 leading-snug">Daily wage: only worked days are paid — weekly-offs &amp; holidays are not paid.</div>}
     </div>
   );
 }
