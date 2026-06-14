@@ -15,7 +15,7 @@ function colIndex(header, ...names) {
 }
 
 async function dashboardCounts(page) {
-  await page.goto('https://onlinerealsoft.com/Welcome.aspx', { waitUntil: 'domcontentloaded' });
+  await page.goto('https://onlinerealsoft.com/Home.aspx', { waitUntil: 'domcontentloaded' });   // V26: was Welcome.aspx
   await page.waitForTimeout(1200);
   return page.evaluate(() => {
     const num = (label) => {
@@ -48,7 +48,7 @@ function normalizeUsDate(raw) {
 
 // code -> { name, dept } from the employee master (DailyPresentEmployee lacks Department)
 async function employeeMaster(page) {
-  await page.goto('https://onlinerealsoft.com/EmployeeList.aspx', { waitUntil: 'domcontentloaded' });
+  await page.goto('https://onlinerealsoft.com/ERP_EmployeeList.aspx', { waitUntil: 'domcontentloaded' });   // V26: was EmployeeList.aspx
   await page.waitForTimeout(1800);
   const grid = await readGrid(page);
   const map = {};
@@ -64,7 +64,7 @@ async function employeeMaster(page) {
 }
 
 async function presentList(page) {
-  await page.goto('https://onlinerealsoft.com/DailyPresentEmployee.aspx', { waitUntil: 'domcontentloaded' });
+  await page.goto('https://onlinerealsoft.com/ERP_DailyPresent.aspx', { waitUntil: 'domcontentloaded' });   // V26: was DailyPresentEmployee.aspx
   await page.waitForTimeout(1500);
   const grid = await readGrid(page);
   if (grid.length < 2) return { rows: [], header: [] };
@@ -82,7 +82,7 @@ async function presentList(page) {
 }
 
 async function absentList(page) {
-  await page.goto('https://onlinerealsoft.com/DailyAbsentEmployee.aspx', { waitUntil: 'domcontentloaded' });
+  await page.goto('https://onlinerealsoft.com/ERP_DailyAbsent.aspx', { waitUntil: 'domcontentloaded' });   // V26: was DailyAbsentEmployee.aspx
   await page.waitForTimeout(1500);
   const grid = await readGrid(page);
   if (grid.length < 2) return [];
@@ -93,7 +93,7 @@ async function absentList(page) {
 }
 
 async function lateList(page) {
-  await page.goto('https://onlinerealsoft.com/DailyLateEmployee.aspx', { waitUntil: 'domcontentloaded' });
+  await page.goto('https://onlinerealsoft.com/ERP_DailyLate.aspx', { waitUntil: 'domcontentloaded' });   // V26: was DailyLateEmployee.aspx
   await page.waitForTimeout(1500);
   const grid = await readGrid(page);
   if (grid.length < 2) return [];
@@ -118,6 +118,12 @@ async function gatherState(page) {
   const absent = await absentList(page);
 
   for (const r of present.rows) r.dept = (master[r.code] && master[r.code].dept) || r.dept || '';
+
+  // V26 dashboard no longer exposes Present/Absent/Late count cards — derive them from the lists.
+  counts.totalPresent = present.rows.length;
+  counts.totalAbsent = absent.length;
+  counts.totalLate = late.length;
+  if (!counts.totalEmployees) counts.totalEmployees = Object.keys(master).length || (present.rows.length + absent.length);
 
   const perDept = {};
   for (const r of present.rows) perDept[r.dept || '—'] = (perDept[r.dept || '—'] || 0) + 1;
