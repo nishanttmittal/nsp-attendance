@@ -31,11 +31,17 @@ export function computePay({ emp, att, daysInMonth, elapsedDays, fullMonth, adva
     if (emp.exitDate) { const x = new Date(emp.exitDate); if (x < end) end = x; }
     effElapsed = Math.max(0, Math.round((end - start) / DAY) + 1);
   }
+  // Owner rule (2026-06-14): a Saturday WORKED in a week that didn't earn the weekly-off
+  // (fewer than 4 present days that week) is NOT paid as a day — only its OT counts, and the
+  // Saturday stays absent. att.unpaidWorkedSat is the count of such Saturdays (from the daily
+  // weekly-off audit). It reduces the paid days but NOT the OT (OT already includes those hrs).
+  const unpaidSat = emp.type === 'daily' ? 0 : Number(att.unpaidWorkedSat || 0);
+
   // app-only daily-wager: pay = wage × equivalent-days (Σ hours/11, each day capped at 1).
-  // machine daily-wage: wage × present days. monthly: prorated, deduct absences.
+  // machine daily-wage: wage × present days. monthly: prorated, deduct absences + unpaid worked Sats.
   const base = emp.type === 'daily'
     ? (emp.appOnly ? rate * (att.equivalentDays || 0) : rate * (att.presentDays || 0))
-    : perDay * Math.max(0, effElapsed - (att.absentDays || 0));
+    : perDay * Math.max(0, effElapsed - (att.absentDays || 0) - unpaidSat);
 
   // Net OT = raw OT − late − early, floored at 0 (lateness is also handled by the penalty tab)
   const netOtHrs = emp.appOnly ? 0 : Math.max(0, (att.otHrs || 0) - (att.lateHrs || 0) - (att.earlyHrs || 0));
@@ -70,12 +76,12 @@ export function computePay({ emp, att, daysInMonth, elapsedDays, fullMonth, adva
   const weeklyOffAll = weeklyOff + weeklyOffPresent;        // total Saturdays in the period (off + worked)
   const paidDays = emp.type === 'daily'
     ? round(present)                                        // daily: only worked weekdays; off/holiday → OT, not paid days
-    : round(present + weeklyOffAll + holiday);              // monthly: all Saturdays paid; worked ones earn OT on top
+    : round(present + weeklyOffAll + holiday - unpaidSat);  // monthly: paid Saturdays minus those worked in an unearned week (OT only)
 
   return {
     type: emp.type, effectiveRate: rate, effectiveRemark: eff.remark,
     payableDays: effElapsed, presentDays: att.presentDays || 0, absentDays: att.absentDays || 0,
-    weeklyOff, weeklyOffPresent, weeklyOffAll, holiday, paidDays,
+    weeklyOff, weeklyOffPresent, weeklyOffAll, holiday, paidDays, unpaidWorkedSat: unpaidSat,
     otHrs: round(att.otHrs || 0), otHrsNet: round(netOtHrs),
     base: round(base), otPay: round(otPay), perfectBonus: round(perfectBonus), bonus: round(Number(bonus || 0)),
     fines: round(Number(fines || 0)), loanInstallment: round(Number(loanInstallment || 0)),

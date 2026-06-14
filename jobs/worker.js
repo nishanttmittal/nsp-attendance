@@ -71,6 +71,11 @@ async function handle(type, p) {
     await sendTelegram(`🔄 Reprocessed attendance ${p.from} → ${p.to}.`);
     return 'reprocessed ' + p.from + '..' + p.to;
   }
+  if (type === 'weeklyoff_audit') {   // worked-but-unearned Saturdays → unpaidWorkedSat (OT-only rule)
+    const { audit } = require('./weeklyOffAudit');
+    const r = await audit(Number(p.month || 0));
+    return `weekly-off audit ${r.label}: ${r.flagged} flagged`;
+  }
   if (type === 'scan_missed') {     // rescan a chosen month's missed punches for the app's Problems tab
     const { scanMissed } = require('./missedPunchScan');
     const ist = new Date(Date.now() + 5.5 * 3600 * 1000);
@@ -202,6 +207,18 @@ async function main() {
       console.log(`missed-punch scan: ${n}`);
     }
   } catch (e) { console.error('missed scan failed:', e.message); }
+
+  // once-a-day: weekly-off audit (worked Saturdays in unearned weeks → unpaidWorkedSat, OT-only)
+  try {
+    const wref = db().collection('att_alert_state').doc('weeklyoff_audit');
+    const today = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
+    if ((await wref.get()).data()?.date !== today) {
+      const { audit } = require('./weeklyOffAudit');
+      const r = await audit(0);
+      await wref.set({ date: today, flagged: r.flagged, at: new Date().toISOString() });
+      console.log(`weekly-off audit: ${r.flagged} flagged`);
+    }
+  } catch (e) { console.error('weekly-off audit failed:', e.message); }
 
   const snap = await db().collection('att_job_requests').where('status', '==', 'pending').limit(10).get();
   if (snap.empty) { console.log('no pending jobs'); return; }

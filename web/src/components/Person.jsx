@@ -38,10 +38,12 @@ export default function Person({ code, mk, user, onBack }) {
         {md.approved && !md.payment && <p className="text-xs bg-amber-50 border border-amber-200 text-amber-800 rounded p-1.5 mb-2">🔒 Ticked — figures frozen at {rupee(md.approvedNet)}. Undo the tick in the list to edit.</p>}
         <Row k="Days" v={`present ${pay.presentDays} · absent ${pay.absentDays}`} />
         {(() => {
-          const sat = (att.weeklyOff || 0) + (att.weeklyOffPresent || 0);
+          const unpaid = pay.unpaidWorkedSat || 0;
+          const sat = (att.weeklyOff || 0) + (att.weeklyOffPresent || 0) - unpaid;  // paid Saturdays only
           if (!sat && !att.weeklyOffPresent) return null;
           return <Row k="Weekly off (paid)" v={`${sat} Sat${att.weeklyOffPresent ? ` · worked ${att.weeklyOffPresent} → +OT` : ''}`} />;
         })()}
+        {pay.unpaidWorkedSat > 0 && <Row k="Worked Sat (OT only)" v={`${pay.unpaidWorkedSat} — week not earned (4+ absences): day unpaid, OT kept`} />}
         {emp.type !== 'daily' && <Row k="Paid days" v={`${Math.max(0, (pay.payableDays || 0) - (pay.absentDays || 0))} of ${ctx.daysInMonth} (weekly-offs included)`} />}
         <Row k="Overtime" v={`${pay.otHrs}h → pays ${pay.otHrsNet}h`} />
         <hr className="my-1.5" />

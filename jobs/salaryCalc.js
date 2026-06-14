@@ -50,9 +50,13 @@ function computePay({ emp, att, daysInMonth, elapsedDays, fullMonth, advances, a
     if (emp.exitDate) { const x = new Date(emp.exitDate); if (x < end) end = x; }
     effElapsed = Math.max(0, Math.round((end - start) / DAY) + 1);
   }
+  // Owner rule (2026-06-14): a Saturday worked in a week that didn't earn the weekly-off
+  // (<4 present days that week) is paid as OT only — the day stays absent. att.unpaidWorkedSat
+  // (from the daily weekly-off audit) reduces paid days but NOT OT.
+  const unpaidSat = emp.type === 'daily' ? 0 : Number(att.unpaidWorkedSat || 0);
   const base = emp.type === 'daily'
     ? (emp.appOnly ? rate * (att.equivalentDays || 0) : rate * att.presentDays)
-    : perDay * Math.max(0, effElapsed - att.absentDays);
+    : perDay * Math.max(0, effElapsed - att.absentDays - unpaidSat);
   // net OT = Realtime OT (capped Working−Shift) minus late/early shortfall; can go negative
   const netOtHrs = Math.max(0, (att.otHrs || 0) - (att.lateHrs || 0) - (att.earlyHrs || 0)); // floored at 0
   // OT paid at NORMAL 1× rate = perDay / shift-hours. (Saturday-worked hours flow in via Realtime's OT.)
@@ -79,6 +83,7 @@ function computePay({ emp, att, daysInMonth, elapsedDays, fullMonth, advances, a
   return {
     type: emp.type, effectiveRate: rate, effectiveRemark: eff.remark,
     presentDays: att.presentDays, absentDays: att.absentDays, payableDays: effElapsed,
+    unpaidWorkedSat: unpaidSat,
     otHrs: round(att.otHrs), otHrsNet: round(netOtHrs),
     base: round(base), otPay: round(otPay), perfectBonus: round(perfectBonus), bonus: round(Number(bonus || 0)),
     fines: round(Number(fines || 0)), loanInstallment: round(Number(loanInstallment || 0)),
