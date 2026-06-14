@@ -354,9 +354,11 @@ export async function loadPayout(month) {
   const s = await getDoc(doc(db, 'att_meta', 'payout_' + month));
   return s.exists() ? s.data() : { items: {} };
 }
-// Manager marks a person paid — applied by the worker with admin rights.
-export async function queueMarkPaid(code, month, mode, by, remark) {
-  return queueJob('mark_paid', { code, month, mode, remark: remark || '' }, by);
+// Manager marks a person paid — applied by the worker with admin rights. `amount` = the actual
+// amount handed over (defaults to the net due); anything paid OVER the net becomes an advance
+// carried forward to next month.
+export async function queueMarkPaid(code, month, mode, by, remark, amount) {
+  return queueJob('mark_paid', { code, month, mode, remark: remark || '', amount: amount != null ? Number(amount) : null }, by);
 }
 
 // Resign prompts (set by publishMonthly when someone is absent a full month).

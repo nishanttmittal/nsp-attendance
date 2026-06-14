@@ -192,9 +192,9 @@ function ManagerSalary({ user }) {
     .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
   const pending = items.filter((i) => !i.paid && !done[i.code]);
 
-  async function pay(i, mode, remark) {
+  async function pay(i, mode, remark, amount) {
     setBusy(i.code);
-    try { await queueMarkPaid(i.code, mk, mode, user.email, remark); setDone({ ...done, [i.code]: mode }); setConfirm(null); }
+    try { await queueMarkPaid(i.code, mk, mode, user.email, remark, amount); setDone({ ...done, [i.code]: mode }); setConfirm(null); }
     finally { setBusy(''); }
   }
 
@@ -217,8 +217,8 @@ function ManagerSalary({ user }) {
               <div className="font-bold text-red-700 mr-1">{rupee(i.net)}</div>
               {paidMode ? <span className="text-xs text-green-700 font-medium">✓ {paidMode}</span> : (
                 <div className="flex gap-1">
-                  <button disabled={busy === i.code} onClick={() => setConfirm({ item: i, mode: 'cash', remark: '' })} className="bg-green-700 text-white text-xs rounded-lg px-2.5 py-2 font-medium disabled:opacity-50">💵 Cash</button>
-                  <button disabled={busy === i.code} onClick={() => setConfirm({ item: i, mode: 'bank', remark: '' })} className="bg-gray-800 text-white text-xs rounded-lg px-2.5 py-2 font-medium disabled:opacity-50">🏦 Bank</button>
+                  <button disabled={busy === i.code} onClick={() => setConfirm({ item: i, mode: 'cash', remark: '', amount: String(i.net) })} className="bg-green-700 text-white text-xs rounded-lg px-2.5 py-2 font-medium disabled:opacity-50">💵 Cash</button>
+                  <button disabled={busy === i.code} onClick={() => setConfirm({ item: i, mode: 'bank', remark: '', amount: String(i.net) })} className="bg-gray-800 text-white text-xs rounded-lg px-2.5 py-2 font-medium disabled:opacity-50">🏦 Bank</button>
                 </div>
               )}
             </div>
@@ -233,15 +233,23 @@ function ManagerSalary({ user }) {
               <div className="text-3xl mb-1">{confirm.mode === 'cash' ? '💵' : '🏦'}</div>
               <p className="text-gray-600 text-sm">Pay salary by {confirm.mode === 'cash' ? 'Cash' : 'Bank'}?</p>
               <p className="font-bold text-gray-800 text-lg mt-1">{confirm.item.name}</p>
-              <p className="font-bold text-red-700 text-2xl">{rupee(confirm.item.net)}</p>
-              <p className="text-xs text-gray-400">{monthOptions(3).find((m) => m.mk === mk)?.label || mk}</p>
+              <p className="text-xs text-gray-500">Net due: <b className="text-red-700">{rupee(confirm.item.net)}</b> · {monthOptions(3).find((m) => m.mk === mk)?.label || mk}</p>
             </div>
+            <label className="block text-xs text-gray-500">Amount paid ₹
+              <input type="number" value={confirm.amount} onChange={(e) => setConfirm({ ...confirm, amount: e.target.value })}
+                className="mt-1 w-full border rounded-lg px-3 py-2 text-lg font-bold text-gray-800" />
+            </label>
+            {Number(confirm.amount) > confirm.item.net && (
+              <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2">
+                Paying {rupee(Number(confirm.amount) - confirm.item.net)} extra → recorded as an <b>advance carried forward</b> to next month.
+              </p>
+            )}
             <input value={confirm.remark} onChange={(e) => setConfirm({ ...confirm, remark: e.target.value })} placeholder="Remark (optional)"
               className="w-full border rounded-lg px-3 py-2 text-sm" />
             <div className="flex gap-2">
               <button disabled={!!busy} onClick={() => setConfirm(null)} className="flex-1 border rounded-xl py-3 font-medium text-gray-600 disabled:opacity-50">Cancel</button>
-              <button disabled={!!busy} onClick={() => pay(confirm.item, confirm.mode, confirm.remark.trim())}
-                className="flex-1 bg-green-700 text-white rounded-xl py-3 font-semibold disabled:opacity-50">{busy ? 'Paying…' : 'Confirm Paid'}</button>
+              <button disabled={!!busy || !(Number(confirm.amount) >= 0)} onClick={() => pay(confirm.item, confirm.mode, confirm.remark.trim(), Number(confirm.amount))}
+                className="flex-1 bg-green-700 text-white rounded-xl py-3 font-semibold disabled:opacity-50">{busy ? 'Paying…' : `Pay ${rupee(Number(confirm.amount) || 0)}`}</button>
             </div>
           </div>
         </div>

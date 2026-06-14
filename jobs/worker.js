@@ -94,15 +94,24 @@ async function handle(type, p) {
     const e = snap.data();
     const md = (e.months || {})[p.month] || {};
     if (!md.approved) throw new Error('not approved yet');
+    const due = Number(md.approvedNet || 0);
+    const paidNet = p.amount != null ? Number(p.amount) : due;   // actual amount handed over
+    const extra = Math.max(0, paidNet - due);                     // paid more than earned → advance
+    const date = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
     const months = { ...(e.months || {}) };
-    months[p.month] = { ...md, locked: true, payment: { date: new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10), mode: p.mode || 'cash', net: md.approvedNet || 0, by: p._by || 'manager', remark: p.remark || '' } };
+    months[p.month] = { ...md, locked: true, payment: { date, mode: p.mode || 'cash', net: paidNet, due, extra, by: p._by || 'manager', remark: p.remark || '' } };
     // roll unrecovered advance into next month
     const [y, m] = p.month.split('-').map(Number);
     const next = m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`;
     months[next] = { ...(months[next] || {}), advanceBalanceIn: Number(md.approvedCarry || 0) };
-    await ref.set({ months }, { merge: true });
-    await sendTelegram(`💵 Paid: <b>${e.name || p.code}</b> ₹${Number(md.approvedNet || 0).toLocaleString('en-IN')} (${p.mode}) · ${p.month}${p.remark ? ` · ${p.remark}` : ''} · by ${p._by || 'manager'}`);
-    return 'marked paid';
+    const patch = { months };
+    // overpayment → record as a NEXT-MONTH advance entry (carried forward, recovered next month)
+    if (extra > 0) {
+      patch.advances = [...(e.advances || []), { date: `${next}-01`, amount: extra, mode: p.mode || 'cash', remark: `extra paid with ${p.month} salary`, paidBy: p._by || 'manager' }];
+    }
+    await ref.set(patch, { merge: true });
+    await sendTelegram(`💵 Paid: <b>${e.name || p.code}</b> ₹${paidNet.toLocaleString('en-IN')} (${p.mode}) · ${p.month}${extra > 0 ? ` · ₹${extra.toLocaleString('en-IN')} extra → advance carried forward` : ''}${p.remark ? ` · ${p.remark}` : ''} · by ${p._by || 'manager'}`);
+    return extra > 0 ? `marked paid (₹${extra} extra → advance)` : 'marked paid';
   }
   if (type === 'add_advance') {  // manager-created; applied with admin SDK (bypasses rules)
     const ref = db().collection('att_salary').doc(p.code);
