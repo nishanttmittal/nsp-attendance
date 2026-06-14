@@ -38,20 +38,37 @@ async function runDueTasks() {
   const nowMin = ist.getUTCHours() * 60 + ist.getUTCMinutes();
   const wday = ist.getUTCDay();
 
+  // State is per-IST-day: { day, done{name}, fails{name} }. A task counts as DONE only when it
+  // SUCCEEDS — if the machine is down it keeps retrying on later cycles the SAME day (owner rule
+  // 2026-06-14), until it succeeds or hits the retry cap. No 3h cutoff: better late, same day.
+  const MAX_RETRY = 36;                                  // give up after ~36 failed tries that day (storm guard)
   const ref = db().collection('att_alert_state').doc('scheduler');
-  const last = (await ref.get()).data()?.lastRun || {};
+  const cur = (await ref.get()).data() || {};
+  let st;
+  if (cur.day === today) st = cur;
+  else {
+    // new day, or migrating from the old {lastRun:{name:date}} shape — seed today's already-done
+    // tasks from lastRun so a deploy/midday reset doesn't re-fire alerts already sent today.
+    const seed = {};
+    if (cur.lastRun) for (const [k, v] of Object.entries(cur.lastRun)) if (v === today) seed[k] = true;
+    st = { day: today, done: seed, fails: {} };
+  }
+  const done = st.done || {}, fails = st.fails || {};
   const ran = [];
   for (const t of TASKS) {
     if (t.day !== undefined && t.day !== wday) continue; // wrong weekday
     if (nowMin < t.min) continue;                        // not due yet today
-    if (nowMin > t.min + 180) continue;                  // >3h late — skip, catch up tomorrow (no stale alerts)
-    if (last[t.name] === today) continue;                // already ran today
+    if (done[t.name]) continue;                          // already SUCCEEDED today
+    if ((fails[t.name] || 0) >= MAX_RETRY) continue;     // gave up after too many failures today
     if (dry) { ran.push(t.name + '(due)'); continue; }
-    try { t.run(); ran.push(t.name); }
-    catch (e) { console.error(`scheduler ${t.name} failed: ${String(e.message || e).split('\n')[0]}`); }
-    last[t.name] = today;                                // mark attempted (once/day, no retry storms)
+    try { t.run(); done[t.name] = true; ran.push(t.name); }                  // success → done for the day
+    catch (e) {
+      fails[t.name] = (fails[t.name] || 0) + 1;                              // failure → retry next cycle, same day
+      console.error(`scheduler ${t.name} failed (try ${fails[t.name]}): ${String(e.message || e).split('\n')[0]}`);
+      ran.push(`${t.name}(retry ${fails[t.name]})`);
+    }
   }
-  if (!dry && ran.length) await ref.set({ lastRun: last, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+  if (!dry) await ref.set({ day: today, done, fails, updatedAt: FieldValue.serverTimestamp() });
   return ran;
 }
 

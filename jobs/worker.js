@@ -230,9 +230,20 @@ async function main() {
       await doc.ref.update({ status: 'done', result, finishedAt: new Date().toISOString() });
       console.log(`[done] ${type}: ${result}`);
     } catch (e) {
-      await doc.ref.update({ status: 'error', error: String(e.message || e).slice(0, 500), finishedAt: new Date().toISOString() });
-      await sendTelegram(`⚠️ Job ${type} failed: ${String(e.message || e).split('\n')[0]}`).catch(() => {});
-      console.log(`[error] ${type}: ${e.message}`);
+      // Owner rule (2026-06-14): if the MACHINE is unreachable, don't fail the job — requeue it
+      // to retry on a later cycle the same day. Only give up (status 'error') after the cap or
+      // for a non-transient error (bad data etc.).
+      const msg = String(e.message || e).split('\n')[0];
+      const attempts = Number(doc.data().attempts || 0) + 1;
+      const transient = /timeout|login|net::|ECONN|ETIMEDOUT|socket|download did not start|not found on machine|navigation/i.test(msg);
+      if (transient && attempts < 40) {                  // ~retry through the day while the machine/runner is down
+        await doc.ref.update({ status: 'pending', attempts, lastError: msg.slice(0, 300), retriedAt: new Date().toISOString() });
+        console.log(`[retry ${attempts}] ${type}: ${msg}`);
+      } else {
+        await doc.ref.update({ status: 'error', attempts, error: msg.slice(0, 500), finishedAt: new Date().toISOString() });
+        await sendTelegram(`⚠️ Job ${type} failed${transient ? ' (gave up after ' + attempts + ' tries)' : ''}: ${msg}`).catch(() => {});
+        console.log(`[error] ${type}: ${msg}`);
+      }
     }
   }
 }
