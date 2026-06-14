@@ -32,9 +32,14 @@ async function downloadMonth(page, offset) {
   if (!fs.existsSync(OUT_DIR)) fs.mkdirSync(OUT_DIR, { recursive: true });
   const { browser, page } = await session();
   const fdb = db();
+  // FREEZE guard: never overwrite a month that's been frozen (e.g. May 2026 after the
+  // 2026-06-14 mass-insert corruption was cleaned in-app). att_meta/freeze = { months:[...] }.
+  let frozen = [];
+  try { const fz = await fdb.collection('att_meta').doc('freeze').get(); frozen = (fz.exists && fz.data().months) || []; } catch {}
   try {
     for (const offset of MONTHS) {
       const { label, fullMonth, daysInMonth, emps } = await downloadMonth(page, offset);
+      if (frozen.includes(label)) { console.log(`publishMonthly: SKIP frozen month ${label} (att_meta/freeze)`); continue; }
       let batch = fdb.batch(), n = 0, written = 0;
       for (const e of emps) {
         const rec = {
