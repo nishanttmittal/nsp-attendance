@@ -14,6 +14,9 @@ if (fs.existsSync(NATIVE_LIBS)) {
 }
 
 const SITE_URL = 'https://onlinerealsoft.com/Default.aspx';
+// Portal redesign (2026-06-14): login moved to ErpLogin.aspx with a "Corporate ID" tab; the
+// corporate fields (TextBox1/2/3) are the same, and it lands on Home.aspx (was Welcome.aspx).
+const LOGIN_URL = 'https://onlinerealsoft.com/ErpLogin.aspx';
 const SECRETS_FILE = path.resolve(__dirname, '..', 'secrets.json');
 
 function loadSecrets() {
@@ -29,16 +32,23 @@ async function launch() {
 }
 
 async function login(page, s = loadSecrets()) {
-  await page.goto(SITE_URL, { waitUntil: 'domcontentloaded' });
-  await page.click('a[href="#corporate"]');
-  await page.waitForSelector('#TextBox1', { state: 'visible' });
+  await page.goto(LOGIN_URL, { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(800);
+  // new portal: a "Corporate ID" tab reveals the corporate-login fields. Fall back to the old
+  // "#corporate" anchor if we ever hit the previous page again.
+  const tab = page.locator('li.nav-item', { hasText: 'Corporate ID' }).first();
+  if (await tab.count().catch(() => 0)) await tab.click().catch(() => {});
+  else await page.click('a[href="#corporate"]').catch(() => {});
+  await page.waitForSelector('#TextBox1', { state: 'visible', timeout: 15000 });
   await page.fill('#TextBox1', s.corporateId);
   await page.fill('#TextBox2', s.username);
   await page.fill('#TextBox3', s.password);
   await Promise.all([
-    page.waitForURL('**/Welcome.aspx*', { timeout: 40000 }),
+    // lands on Home.aspx now (was Welcome.aspx) — just wait until we leave the login page
+    page.waitForURL((u) => !/ErpLogin|Default\.aspx/i.test(u.toString()), { timeout: 40000 }).catch(() => {}),
     page.click('#Button1'),
   ]);
+  await page.waitForLoadState('networkidle', { timeout: 20000 }).catch(() => {});
 }
 
 // Open a logged-in page; returns { browser, context, page }.
