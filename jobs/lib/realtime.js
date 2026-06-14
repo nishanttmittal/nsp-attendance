@@ -69,29 +69,18 @@ async function readGrid(page) {
   );
 }
 
-// Pick "Few Employee" then tick the employee whose label contains the code.
-// (employee radio id is unprefixed `optFewEmployee`; checkboxes are styled -> DOM click)
+// V26 portal: the employee list is `LstEmployee_N` checkboxes; each row's text reads
+// "name (code)". Tick the one whose row contains the code. (Was: optFewEmployee radio +
+// chkemployeelist on the old portal.)
 async function selectFewEmployee(page, code) {
-  // "Few Employee" is a styled radio with an AutoPostBack that loads the employee checkbox list.
-  // That postback is slow on the CI runner, so click then WAIT for the list to actually appear
-  // (retry the click once) instead of a fixed pause — fixes "not found among 0" on GitHub Actions.
-  const clickRadio = () => page.locator('#optFewEmployee').evaluate(r => { if (!r.checked) r.click(); });
-  const waitList = () => page.waitForSelector('input[id^="chkemployeelist_"]', { timeout: 30000 }).then(() => true).catch(() => false);
-  await clickRadio();
-  let loaded = await waitList();
-  if (!loaded) { await clickRadio(); loaded = await waitList(); }   // re-fire the postback once
-  await page.waitForLoadState('networkidle', { timeout: 20000 }).catch(() => {});
+  await page.waitForSelector('input[id^="LstEmployee_"]', { timeout: 30000 }).catch(() => {});
   const res = await page.evaluate((c) => {
-    const boxes = Array.from(document.querySelectorAll('input[id^="chkemployeelist_"]'));
-    const labelOf = cb => {
-      const l = document.querySelector(`label[for="${cb.id}"]`);
-      if (l) return l.innerText.trim();
-      return cb.parentElement ? cb.parentElement.innerText.trim() : '';
-    };
-    const target = boxes.find(cb => labelOf(cb).includes(c));
+    const boxes = Array.from(document.querySelectorAll('input[id^="LstEmployee_"]'));
+    const rowText = cb => { const r = cb.closest('tr') || cb.parentElement; return (r && r.innerText ? r.innerText : '').replace(/\s+/g, ' ').trim(); };
+    const target = boxes.find(cb => rowText(cb).includes(c));
     if (!target) return { ok: false, count: boxes.length };
-    if (!target.checked) target.click();
-    return { ok: true, label: labelOf(target) };
+    if (!target.checked) { target.checked = true; target.dispatchEvent(new Event('click', { bubbles: true })); }
+    return { ok: true, label: rowText(target) };
   }, code);
   if (!res.ok) throw new Error(`Employee ${code} not found among ${res.count}`);
   return res.label;
@@ -109,13 +98,13 @@ async function setField(page, sel, value) {
 
 // Reprocess a date range for all employees (recomputes attendance under current rules).
 async function reprocessRange(page, fromDdmmyyyy, toDdmmyyyy) {
-  await page.goto('https://onlinerealsoft.com/ManualProcess.aspx', { waitUntil: 'domcontentloaded' });
-  await page.waitForTimeout(1200);
-  await setField(page, '#MainContent_txtdate', fromDdmmyyyy);
-  await setField(page, '#MainContent_txttodate', toDdmmyyyy);
+  await page.goto('https://onlinerealsoft.com/ERP_ManualProcess.aspx', { waitUntil: 'domcontentloaded' });   // V26 portal
+  await page.waitForTimeout(1500);
+  await setField(page, '#txtdate', fromDdmmyyyy);      // V26: was #MainContent_txtdate
+  await setField(page, '#txtdateto', toDdmmyyyy);      // V26: was #MainContent_txttodate
   await Promise.all([
     page.waitForLoadState('networkidle', { timeout: 90000 }).catch(() => {}),
-    page.click('#MainContent_cmdShowReport'),
+    page.click('#cmdShowReport'),                      // V26: "Process Data" (was #MainContent_cmdShowReport)
   ]);
   await page.waitForTimeout(3000);
 }
