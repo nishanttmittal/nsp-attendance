@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { loadMissedDoc, loadLateList, loadEmployees, loadRoster, loadAllAttendance, loadPayout, decideResignPrompt, leaveMissedPunch, queueScanMissed, queueReprocess, queueJob, istMonth } from '../lib/data';
 import { monthOptions } from '../lib/paycalc';
 import { SHIFT_HOURS } from '../lib/payroll';
+import { problemsPdf, sharePdf } from '../lib/salaryPdf';
 import NamePick from './NamePick.jsx';
 
 const SHIFT_START = '09:00';                  // factory standard morning start (owner-confirmed)
@@ -82,8 +83,20 @@ export default function Problems({ user }) {
 
   const monthLabel = monthOptions(6).find((o) => o.mk === mMonth)?.label || mMonth;
 
+  const exportPdf = () => {
+    const doc = problemsPdf({ monthLabel, missed: visMissed, short, late, highOt, resigns });
+    sharePdf(doc, `attendance-problems-${mMonth}.pdf`);
+  };
+  const hasProblems = visMissed.length || short.length || late.length || highOt.length || resigns.length;
+
   return (
     <div className="space-y-3">
+      <button onClick={exportPdf} disabled={!hasProblems}
+        className="w-full bg-gray-800 text-white rounded-xl py-2.5 text-sm font-medium disabled:opacity-40">
+        📄 Export all problems to PDF{hasProblems ? '' : ' (nothing to export)'}
+      </button>
+      <p className="text-[11px] text-gray-400 -mt-1">A one-page report ({monthLabel}) to show staff — missed punches, late, short days, high OT & full-month absentees.</p>
+
       {unpaid > 0 && (
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-sm text-amber-800">
           💵 <b>{unpaid}</b> ticked but not yet paid — check the Salary page.

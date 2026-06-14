@@ -61,6 +61,57 @@ export function payslipAllPdf(rows, monthLabel) {
   return doc;
 }
 
+// Problems-tab export: a clean one-document summary of every attendance problem so the owner
+// can show/brief staff. data = { monthLabel, missed, short, late, highOt, resigns }.
+export function problemsPdf(data) {
+  const doc = new jsPDF();
+  const W = doc.internal.pageSize.getWidth();
+  doc.setFontSize(16); doc.text('NSP ENTERPRISES', 14, 16);
+  doc.setFontSize(12); doc.text('Attendance Problems Report  -  ' + (data.monthLabel || ''), 14, 24);
+  doc.setFontSize(9); doc.setTextColor(120);
+  doc.text('Generated ' + new Date().toLocaleString('en-IN'), 14, 30);
+  doc.setTextColor(0);
+  let y = 36;
+
+  const section = (title, head, body, note) => {
+    if (y > 250) { doc.addPage(); y = 18; }
+    doc.setFontSize(11); doc.text(title, 14, y); y += 2;
+    if (note) { doc.setFontSize(8); doc.setTextColor(120); doc.text(note, 14, y + 3); doc.setTextColor(0); y += 4; }
+    if (!body.length) { doc.setFontSize(9); doc.setTextColor(110); doc.text('None - well done.', 16, y + 6); doc.setTextColor(0); y += 12; return; }
+    autoTable(doc, { startY: y + 4, head: [head], body, theme: 'striped', styles: { fontSize: 9 }, headStyles: { fillColor: [192, 57, 43] }, margin: { left: 14, right: 14 } });
+    y = (doc.lastAutoTable?.finalY || y) + 10;
+  };
+
+  section('Missed punches (forgot to punch IN or OUT)',
+    ['Name', 'Date', 'Missing', 'Punched'],
+    (data.missed || []).map(m => [m.name, m.date, 'no ' + String(m.which).toUpperCase(), m.otherTime || '-']),
+    'Always punch BOTH in and out. A missed punch needs a manual correction.');
+
+  section('Late arrivals (3 or more days)',
+    ['Name', 'Dept', 'Late days', 'Dates'],
+    (data.late || []).map(l => [l.name, l.dept || '-', String(l.count), (l.days || []).map(d => `${d.date.slice(8)}:${d.inT}`).join(', ')]),
+    'Reach on time. Repeated lateness is cut by the machine rules.');
+
+  section('Short days (worked less than the shift)',
+    ['Name', 'Date', 'Worked', 'Required', 'In-Out'],
+    (data.short || []).map(s => [s.name, s.date, s.hours + 'h', s.need + 'h', `${s.in}-${s.out}`]),
+    'Complete full shift hours.');
+
+  section('Unusually high overtime (please verify)',
+    ['Name', 'OT hours', 'Per day', 'Days'],
+    (data.highOt || []).map(h => [h.name, h.ot + 'h', h.perDay + 'h/day', String(h.days)]),
+    'Flagged for the owner to confirm these are genuine before paying.');
+
+  section('Absent the full month',
+    ['Name', 'Month'],
+    (data.resigns || []).map(e => [e.name || e.code, (e.resignPrompt && e.resignPrompt.month) || '-']),
+    'Decide whether to keep or resign these staff.');
+
+  doc.setFontSize(8); doc.setTextColor(120);
+  doc.text('Please punch both times daily, arrive on time, and complete full hours. - Management', 14, doc.internal.pageSize.getHeight() - 10);
+  return doc;
+}
+
 export async function sharePdf(doc, filename) {
   const blob = doc.output('blob');
   const file = new File([blob], filename, { type: 'application/pdf' });
