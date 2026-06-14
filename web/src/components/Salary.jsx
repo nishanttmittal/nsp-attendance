@@ -146,34 +146,32 @@ function OwnerRow({ r, busy, onName, onTick, onHold, onRelease }) {
   );
 }
 
-// Tap "paid days" to see what makes it up. A WORKED Saturday is NOT an extra paid day —
-// it sits inside the weekly-off count; the reward for working it is OVERTIME (shown separately).
-//  • monthly: present + all weekly-offs (paid) + holidays
-//  • daily: only present working days; weekly-offs/holidays are unpaid (worked ones → OT)
+// Tap "paid days" to see what makes it up — straight from the Realtime sheet:
+//  • monthly: Present + Paid Saturday (ALL Saturdays — salaried) + Holiday. Worked Saturdays
+//    are in OT (their own line), not an extra day.
+//  • daily: only present working days; Saturdays/holidays unpaid (working one → OT).
 function DaysBreakdown({ pay }) {
   const daily = pay.type === 'daily';
-  const worked = pay.weeklyOffPresent || 0;
-  const woNote = worked > 0 ? ` · ${worked} worked → OT` : '';
   const lines = [
-    ['Present', pay.presentDays, true, ''],
-    [`Weekly-off (Sat)`, pay.weeklyOffAll, !daily, woNote],
-    ['Holiday', pay.holiday, !daily, ''],
+    ['Present', pay.presentDays, true],
+    [daily ? 'Saturday' : 'Paid Saturday', pay.weeklyOffAll, !daily],
+    ['Holiday', pay.holiday, !daily],
   ];
   return (
     <div className="mt-1 bg-gray-50 rounded-lg p-2 text-[11px] text-gray-600 space-y-0.5">
-      {lines.map(([label, val, paid, note]) => (
+      {lines.map(([label, val, paid]) => (
         <div key={label} className="flex justify-between">
-          <span>{label}{note && <span className="text-blue-600">{note}</span>}</span>
+          <span>{label}</span>
           <span className={paid ? 'text-gray-800 font-medium' : 'text-gray-400'}>{val || 0}d{paid ? '' : ' · unpaid'}</span>
         </div>
       ))}
       {pay.absentDays > 0 && <div className="flex justify-between"><span>Absent</span><span className="text-red-500">−{pay.absentDays}d</span></div>}
       <div className="flex justify-between border-t border-gray-200 pt-0.5 mt-0.5 font-semibold text-gray-800"><span>Paid days</span><span>{pay.paidDays}d</span></div>
-      {pay.otHrsNet > 0 && <div className="flex justify-between text-blue-700"><span>Overtime</span><span>{pay.otHrsNet}h</span></div>}
+      {pay.otHrsNet > 0 && <div className="flex justify-between text-blue-700"><span>Overtime{pay.weeklyOffPresent > 0 ? ` (incl. ${pay.weeklyOffPresent} Sat worked)` : ''}</span><span>{pay.otHrsNet}h</span></div>}
       <div className="text-gray-400 pt-0.5 leading-snug">
         {daily
-          ? 'Daily wage: only worked days are paid. Weekly-offs & holidays are unpaid — working one earns OT, not a paid day.'
-          : 'Working a weekly-off does not add a paid day (the Saturday is already paid) — the extra is overtime.'}
+          ? 'Daily wage: only worked days are paid. Saturdays & holidays are unpaid — working one earns OT, not a paid day.'
+          : 'All Saturdays are paid for monthly staff. Working a Saturday earns overtime on top — not an extra day.'}
       </div>
     </div>
   );
