@@ -6,11 +6,13 @@ import Dashboard from './components/Dashboard.jsx';
 import Salary from './components/Salary.jsx';
 import Problems from './components/Problems.jsx';
 import Settings from './components/Settings.jsx';
+import Archive from './components/Archive.jsx';
 
 const TABS = [
   { key: 'floor', label: 'Floor', feature: 'dashboard' },
   { key: 'salary', label: 'Salary', feature: 'salary' },
   { key: 'problems', label: 'Problems', feature: 'problems' },
+  { key: 'archive', label: '🗄️', feature: 'archive' },
 ];
 
 export default function App() {
@@ -91,6 +93,7 @@ export default function App() {
             {active === 'floor' && <Dashboard />}
             {active === 'salary' && canSee(user.role, 'salary') && <Salary user={user} />}
             {active === 'problems' && canSee(user.role, 'problems') && <Problems user={user} />}
+            {active === 'archive' && canSee(user.role, 'archive') && <Archive />}
           </>
         )}
       </main>

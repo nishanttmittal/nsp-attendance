@@ -15,7 +15,7 @@ export const ADMIN_EMAILS = [
 // Manager sees: Floor, Salary (approved payout list + mark paid + give advance), Problems.
 // Settings (and the owner approval side of Salary) stay admin-only.
 export const MANAGER_FEATURES = ['dashboard', 'salary', 'problems'];
-export const ALL_FEATURES = ['dashboard', 'salary', 'problems', 'settings', 'admin'];
+export const ALL_FEATURES = ['dashboard', 'salary', 'problems', 'settings', 'admin', 'archive'];
 
 export function canSee(role, feature) {
   if (role === 'admin') return true;

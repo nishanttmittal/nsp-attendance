@@ -29,8 +29,21 @@ async function handle(type, p) {
       corrections.push({ date: p.date, in: p.in || '', out: p.out || '', reason: p.reason || p.remark || 'manual', by: p._by || 'app', at: new Date().toISOString() });
       await ref.set({ corrections }, { merge: true });
     } catch (e) { console.error('correction log failed:', e.message); }
+    // remove this entry from the missed-punch list NOW so it drops off immediately (don't wait for the next rescan)
+    try {
+      const m = /(\d{2})\/(\d{2})\/(\d{4})/.exec(p.date || '');
+      if (m) {
+        const mref = db().collection('att_missed_punch').doc(`${m[3]}-${m[2]}`);
+        const ms = await mref.get();
+        if (ms.exists) {
+          const d = ms.data();
+          const keep = (arr) => (arr || []).filter(e => !(e.code === p.emp && e.date === p.date));
+          await mref.set({ entries: keep(d.entries), shortHours: keep(d.shortHours) }, { merge: true });
+        }
+      }
+    } catch (e) { console.error('missed-list cleanup failed:', e.message); }
     await sendTelegram(`✏️ Punch correction: ${p.emp} on ${p.date} (in ${p.in || '—'}/out ${p.out || '—'})${p.reason ? ' — ' + p.reason : ''}.`);
-    return 'punch inserted + day reprocessed + logged';
+    return 'punch inserted + day reprocessed + logged + removed from list';
   }
   if (type === 'backup') {
     run('backup.js', { REASON: p.reason || 'on demand' });
@@ -41,9 +54,17 @@ async function handle(type, p) {
     await sendTelegram(`🧑‍🏭 New employee added: ${p.name} (${p.cardno}) · ${p.dept} · ${p.shift}.`);
     return 'employee created on machine';
   }
-  if (type === 'resign_employee') {
-    await sendTelegram(`👋 ${p.code} marked resigned.`);
-    return 'resigned (app); disable on device if needed';
+  if (type === 'push_employee_edit') {   // owner edited name/dept in app → push to the machine
+    const env = { CARD: p.code, DRY: 'false' };
+    if (p.name) env.NAME = p.name;
+    if (p.dept) env.DEPT = p.dept;
+    run('pushEmployeeEdit.js', env);
+    await sendTelegram(`✏️ Updated on machine: ${p.code}${p.name ? ' · name “' + p.name + '”' : ''}${p.dept ? ' · dept ' + p.dept : ''}.`);
+    return 'name/dept pushed to machine';
+  }
+  if (type === 'resign_employee') {      // archive full history, THEN delete from the machine
+    run('archiveDelete.js', { CARD: p.code, BY: p._by || 'app' });   // archiveDelete.js sends its own Telegram + handles the safety gate
+    return 'archived + deleted from machine';
   }
   if (type === 'reprocess_period') {
     run('reprocessRange.js', { FROM: p.from, TO: p.to });

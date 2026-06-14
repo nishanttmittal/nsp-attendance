@@ -211,6 +211,23 @@ export async function saveEmployee(code, patch) {
   const store = loadSal(); store[code] = { ...(store[code] || {}), ...patch }; saveSal(store);
 }
 
+// Save a name/dept correction in the app AND push it to the Realtime machine (owner rule
+// 2026-06-14). Locks the field so machine-sync won't revert it. App-only staff aren't on the
+// machine, so they only save locally. `name`/`dept` are optional — push only what changed.
+export async function editNameDept(code, { name, dept }, by) {
+  const emp = await loadEmployee(code);
+  const patch = {};
+  if (name != null && name !== emp.name) { patch.name = name; patch.nameLocked = true; }
+  if (dept != null && dept !== emp.dept) { patch.dept = dept; patch.deptLocked = true; }
+  if (!Object.keys(patch).length) return { changed: false };
+  await saveEmployee(code, patch);
+  const onMachine = !emp.appOnly && emp.onMachine !== false;
+  if (onMachine) {
+    await queueJob('push_employee_edit', { code, ...(patch.name ? { name } : {}), ...(patch.dept ? { dept } : {}) }, by);
+  }
+  return { changed: true, pushed: onMachine };
+}
+
 // Late-arrival penalty tasks: employees with >=4 late marks in the month (att_late_log) →
 // owner approves 25% (¼ day) / 50% (½ day) or rejects. Decision stored in months[mk].
 const LATE_THRESHOLD = 4;
@@ -400,6 +417,14 @@ export async function saveMonth(code, month, data) {
 export async function resignEmployee(code, by) {
   await saveEmployee(code, { active: false, resignedAt: new Date().toISOString().slice(0, 10) });
   return queueJob('resign_employee', { code }, by);
+}
+// Archived (resigned + removed-from-machine) workers, newest first. Their full history is kept
+// in att_archive/{code} by the worker before the machine record is deleted.
+export async function loadArchive() {
+  if (!isConfigured || !db) return [];
+  const snap = await getDocs(collection(db, 'att_archive'));
+  return snap.docs.map((d) => d.data())
+    .sort((a, b) => (String(b.archivedAt || '')).localeCompare(String(a.archivedAt || '')));
 }
 // Monthly attendance per employee — written by the publishSalaryData job to att_attendance/{code}.
 export async function loadAttendance(code) {

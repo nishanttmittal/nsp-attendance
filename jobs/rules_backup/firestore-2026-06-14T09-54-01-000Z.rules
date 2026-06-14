@@ -25,7 +25,6 @@ match /att_daily_stats/{d} { allow read: if request.auth != null; allow write: i
     match /att_users/{u} { allow read: if request.auth != null; allow write: if isAttAdmin(); }
     match /att_attendance/{d} { allow read: if isAttAdmin(); allow write: if false; }
     match /att_salary/{d} { allow read, write: if isAttAdmin(); }
-    match /att_archive/{d} { allow read: if isAttAdmin(); allow write: if false; }
     match /att_advances/{d} { allow read, write: if isAttAdmin(); }
     match /att_increments/{d} { allow read, write: if isAttAdmin(); }
     match /att_loans/{d} { allow read, write: if isAttAdmin(); }

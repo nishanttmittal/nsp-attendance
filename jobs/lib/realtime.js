@@ -62,9 +62,15 @@ async function readGrid(page) {
 // Pick "Few Employee" then tick the employee whose label contains the code.
 // (employee radio id is unprefixed `optFewEmployee`; checkboxes are styled -> DOM click)
 async function selectFewEmployee(page, code) {
-  await page.locator('#optFewEmployee').evaluate(r => { if (!r.checked) r.click(); });
+  // "Few Employee" is a styled radio with an AutoPostBack that loads the employee checkbox list.
+  // That postback is slow on the CI runner, so click then WAIT for the list to actually appear
+  // (retry the click once) instead of a fixed pause — fixes "not found among 0" on GitHub Actions.
+  const clickRadio = () => page.locator('#optFewEmployee').evaluate(r => { if (!r.checked) r.click(); });
+  const waitList = () => page.waitForSelector('input[id^="chkemployeelist_"]', { timeout: 30000 }).then(() => true).catch(() => false);
+  await clickRadio();
+  let loaded = await waitList();
+  if (!loaded) { await clickRadio(); loaded = await waitList(); }   // re-fire the postback once
   await page.waitForLoadState('networkidle', { timeout: 20000 }).catch(() => {});
-  await page.waitForTimeout(1000);
   const res = await page.evaluate((c) => {
     const boxes = Array.from(document.querySelectorAll('input[id^="chkemployeelist_"]'));
     const labelOf = cb => {
@@ -105,4 +111,21 @@ async function reprocessRange(page, fromDdmmyyyy, toDdmmyyyy) {
 }
 const reprocessDay = (page, ddmmyyyy) => reprocessRange(page, ddmmyyyy, ddmmyyyy);
 
-module.exports = { SITE_URL, loadSecrets, launch, login, session, readGrid, selectFewEmployee, setField, reprocessDay, reprocessRange };
+// Find a worker's Employee.aspx edit RowId by card number. The whole roster renders on one
+// EmployeeList.aspx page (no pagination) — scan the row whose text holds the card, grab its
+// Employee.aspx?RowId link. Returns the RowId string, or null if not found. Read-only.
+async function findEmployeeRowId(page, card) {
+  await page.goto('https://onlinerealsoft.com/EmployeeList.aspx', { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(1500);
+  return await page.evaluate((c) => {
+    for (const tr of document.querySelectorAll('tr')) {
+      if ((tr.innerText || '').includes(c)) {
+        const a = tr.querySelector('a[href*="Employee.aspx?RowId="]');
+        if (a) { const m = /RowId=(\d+)/.exec(a.getAttribute('href')); if (m) return m[1]; }
+      }
+    }
+    return null;
+  }, String(card));
+}
+
+module.exports = { SITE_URL, loadSecrets, launch, login, session, readGrid, selectFewEmployee, setField, reprocessDay, reprocessRange, findEmployeeRowId };

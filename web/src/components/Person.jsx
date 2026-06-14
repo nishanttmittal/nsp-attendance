@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { loadEmployee, loadAllAttendance, saveEmployee, saveMonth, addAdvance, addIncrement, resignEmployee, settleAndResign, checkActionPassword, queueJob } from '../lib/data';
+import { loadEmployee, loadAllAttendance, saveEmployee, saveMonth, addAdvance, addIncrement, resignEmployee, settleAndResign, checkActionPassword, queueJob, editNameDept } from '../lib/data';
 import { monthCtx, payFor, rupee } from '../lib/paycalc';
 import { payslipOnePdf, sharePdf } from '../lib/salaryPdf';
 
@@ -92,7 +92,9 @@ export default function Person({ code, mk, user, onBack }) {
 
       <CorrectionsLog emp={emp} />
 
-      <SalaryEdit emp={emp} busy={busy} onSave={(patch) => act(() => saveEmployee(code, patch))} />
+      <SalaryEdit emp={emp} busy={busy}
+        onSave={(patch) => act(() => saveEmployee(code, patch))}
+        onSaveNameDept={(nd) => act(() => editNameDept(code, nd, user.email))} />
 
       {emp.active !== false ? (
         <button disabled={busy || locked} onClick={async () => {
@@ -186,31 +188,51 @@ function CorrectionsLog({ emp }) {
   );
 }
 
-function SalaryEdit({ emp, onSave, busy }) {
+function SalaryEdit({ emp, onSave, onSaveNameDept, busy }) {
   const [show, setShow] = useState(false);
+  const DEPTS = ['FITTING', 'Frame', 'HELPER', 'POWDER', 'PRESS', 'T', 'DEMO'];
   const [f, setF] = useState({
     type: emp.type || 'monthly', amount: emp.type === 'daily' ? emp.wage : emp.amount, shift: emp.shift || 'GEN',
     phone: emp.phone || '', joinDate: emp.joinDate || '', nickname: emp.nickname || '',
   });
+  const [nd, setNd] = useState({ name: emp.name || '', dept: emp.dept || '' });
+  const ndChanged = nd.name !== (emp.name || '') || nd.dept !== (emp.dept || '');
+  const onMachine = !emp.appOnly && emp.onMachine !== false;
   return (
     <div className="bg-white rounded-xl shadow p-3">
       <button onClick={() => setShow(!show)} className="w-full text-left text-sm font-semibold text-gray-700">⚙ Salary &amp; profile {show ? '▲' : '▼'}</button>
       {show && (
-        <div className="grid grid-cols-3 gap-2 mt-2">
-          <select className="border rounded px-2 py-2 text-sm" value={f.type} onChange={(e) => setF({ ...f, type: e.target.value })}>
-            <option value="monthly">Monthly</option><option value="daily">Daily</option>
-          </select>
-          <input className="border rounded px-2 py-2 text-sm" type="number" value={f.amount || ''} onChange={(e) => setF({ ...f, amount: e.target.value })} />
-          <select className="border rounded px-2 py-2 text-sm" value={f.shift} onChange={(e) => setF({ ...f, shift: e.target.value })}>
-            {['GEN', '10H', '12H', 'wir'].map((s) => <option key={s}>{s}</option>)}
-          </select>
-          <input className="border rounded px-2 py-2 text-sm col-span-3" placeholder="Nickname (e.g. Raju Chrome line)" value={f.nickname} onChange={(e) => setF({ ...f, nickname: e.target.value })} />
-          <input className="border rounded px-2 py-2 text-sm col-span-2" placeholder="📞 Phone" value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} />
-          <input className="border rounded px-2 py-2 text-sm" type="date" title="Joining date" value={f.joinDate} onChange={(e) => setF({ ...f, joinDate: e.target.value })} />
-          <button disabled={busy} onClick={() => onSave({
-            ...(f.type === 'daily' ? { type: 'daily', wage: Number(f.amount) } : { type: 'monthly', amount: Number(f.amount) }),
-            shift: f.shift, phone: f.phone, joinDate: f.joinDate, nickname: f.nickname,
-          })} className="col-span-3 bg-gray-800 text-white rounded py-1.5 text-xs font-medium">Save</button>
+        <div className="space-y-3 mt-2">
+          {/* Name + Department — corrections here are pushed to the biometric machine too */}
+          <div className="border rounded-lg p-2">
+            <div className="text-xs text-gray-500 mb-1">Name &amp; department {onMachine ? '(also updated on the machine)' : '(app-only worker)'}</div>
+            <input className="border rounded px-2 py-2 text-sm w-full mb-1.5" placeholder="Full name" value={nd.name} onChange={(e) => setNd({ ...nd, name: e.target.value })} />
+            <select className="border rounded px-2 py-2 text-sm w-full" value={nd.dept} onChange={(e) => setNd({ ...nd, dept: e.target.value })}>
+              <option value="">— department —</option>
+              {[...new Set([emp.dept, ...DEPTS].filter(Boolean))].map((d) => <option key={d}>{d}</option>)}
+            </select>
+            <button disabled={busy || !ndChanged} onClick={() => onSaveNameDept({ name: nd.name, dept: nd.dept })}
+              className="mt-1.5 w-full bg-gray-800 text-white rounded py-1.5 text-xs font-medium disabled:opacity-40">
+              {onMachine ? 'Save & push to machine' : 'Save name/dept'}
+            </button>
+          </div>
+          {/* Salary / profile (app-only — not on the machine) */}
+          <div className="grid grid-cols-3 gap-2">
+            <select className="border rounded px-2 py-2 text-sm" value={f.type} onChange={(e) => setF({ ...f, type: e.target.value })}>
+              <option value="monthly">Monthly</option><option value="daily">Daily</option>
+            </select>
+            <input className="border rounded px-2 py-2 text-sm" type="number" value={f.amount || ''} onChange={(e) => setF({ ...f, amount: e.target.value })} />
+            <select className="border rounded px-2 py-2 text-sm" value={f.shift} onChange={(e) => setF({ ...f, shift: e.target.value })}>
+              {['GEN', '10H', '12H', 'wir'].map((s) => <option key={s}>{s}</option>)}
+            </select>
+            <input className="border rounded px-2 py-2 text-sm col-span-3" placeholder="Nickname (e.g. Raju Chrome line)" value={f.nickname} onChange={(e) => setF({ ...f, nickname: e.target.value })} />
+            <input className="border rounded px-2 py-2 text-sm col-span-2" placeholder="📞 Phone" value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} />
+            <input className="border rounded px-2 py-2 text-sm" type="date" title="Joining date" value={f.joinDate} onChange={(e) => setF({ ...f, joinDate: e.target.value })} />
+            <button disabled={busy} onClick={() => onSave({
+              ...(f.type === 'daily' ? { type: 'daily', wage: Number(f.amount) } : { type: 'monthly', amount: Number(f.amount) }),
+              shift: f.shift, phone: f.phone, joinDate: f.joinDate, nickname: f.nickname,
+            })} className="col-span-3 bg-gray-800 text-white rounded py-1.5 text-xs font-medium">Save salary &amp; profile</button>
+          </div>
         </div>
       )}
     </div>
