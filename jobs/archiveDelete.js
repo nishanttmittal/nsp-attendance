@@ -8,15 +8,16 @@
 //   5. Telegram the owner + attach the punch-history file
 const path = require('path');
 const fs = require('fs');
-const { execFileSync } = require('child_process');
-const { session, findEmployeeRowId } = require('./lib/realtime');
+const { session, selectFewEmployee, setField } = require('./lib/realtime');   // V26 helpers
 const { db } = require('./lib/firestore');
 const { sendTelegram, sendTelegramDocument } = require('./lib/notify');
 
 const OUT_DIR = path.resolve(__dirname, 'downloads');
 const CARD = process.env.CARD;
 const DRY = process.env.DRY === 'true';
-const today = () => { const d = new Date(Date.now() + 5.5 * 3600 * 1000); return `${String(d.getUTCDate()).padStart(2, '0')}/${String(d.getUTCMonth() + 1).padStart(2, '0')}/${d.getUTCFullYear()}`; };
+const ddmmyyyy = (ms) => { const d = new Date(ms); return `${String(d.getUTCDate()).padStart(2, '0')}/${String(d.getUTCMonth() + 1).padStart(2, '0')}/${d.getUTCFullYear()}`; };
+const today = () => ddmmyyyy(Date.now() + 5.5 * 3600 * 1000);
+const daysAgo = (n) => ddmmyyyy(Date.now() + 5.5 * 3600 * 1000 - n * 86400000);   // V26 in-out report caps at 31 days
 
 (async () => {
   if (!CARD) { console.error('ERROR: CARD required'); process.exit(1); }
@@ -33,33 +34,30 @@ const today = () => { const d = new Date(Date.now() + 5.5 * 3600 * 1000); return
 
   const { browser, page } = await session();
   const dialogs = []; page.on('dialog', d => { dialogs.push(d.message()); d.accept().catch(() => {}); });
-  let inoutFile = null, inoutText = null, doj = null;
+  let inoutFile = null, inoutText = null;
   try {
-    const rowid = await findEmployeeRowId(page, CARD);
-    if (!rowid) throw new Error(`worker ${CARD} not found on machine — aborting (nothing deleted)`);
-    await page.goto('https://onlinerealsoft.com/Employee.aspx?RowId=' + rowid, { waitUntil: 'domcontentloaded' });
-    await page.waitForTimeout(1200);
-    doj = await page.locator('#MainContent_TxtDOJ').inputValue().catch(() => null);
-
-    // 2. scrape full in-out punch history (DOJ..today). Separate process = its own browser session.
+    // 2. best-effort: scrape this worker's in-out punch history via ERP_NewMonthly (V26).
+    //    select just this employee, pull "In_OUT IN .Excel Format" (LinkButton22). If anything
+    //    fails, we still archive the app record below and proceed.
     try {
-      const from = doj && /\d{2}\/\d{2}\/\d{4}/.test(doj) ? doj : '01/01/2024';
-      const out = execFileSync('node', [path.resolve(__dirname, 'monthlyDownload.js')], {
-        env: { ...process.env, SCOPE: 'emp:' + CARD, REPORT: 'Button15', FROM: from, TO: today() },
-        encoding: 'utf8', timeout: 200000,
-      });
-      const m = out.match(/DOWNLOADED (\S+)/);
-      if (m) { inoutFile = path.join(OUT_DIR, m[1]); inoutText = fs.readFileSync(inoutFile, 'utf8'); }
-    } catch (e) { console.error('in-out scrape failed (continuing with app record only):', e.message); }
+      await page.goto('https://onlinerealsoft.com/ERP_NewMonthly.aspx', { waitUntil: 'domcontentloaded', timeout: 30000 });
+      await page.waitForTimeout(1800);
+      await selectFewEmployee(page, CARD);
+      await setField(page, '#txtdate', daysAgo(30));      // last 31 days (portal caps in-out at 31 days)
+      await setField(page, '#txtdateto', today());
+      const [dl] = await Promise.all([page.waitForEvent('download', { timeout: 40000 }), page.click('#LinkButton22')]);
+      inoutFile = path.join(OUT_DIR, `archive_inout_${CARD}.xls`);
+      await dl.saveAs(inoutFile);
+      inoutText = fs.readFileSync(inoutFile, 'utf8');
+    } catch (e) { console.error('in-out scrape failed (continuing with app record only):', e.message.split('\n')[0]); }
 
-    // 3. write the archive + verify (the gate)
+    // 3. write the archive + verify (the safety gate — the app payroll record always succeeds)
     const archive = {
-      code: CARD, name, dept: (sal && sal.dept) || '', doj: doj || '',
+      code: CARD, name, dept: (sal && sal.dept) || '',
       archivedAt: new Date().toISOString(), archivedBy: process.env.BY || 'app',
       salary: sal || null, attendance: attDoc.exists ? attDoc.data() : null,
       inoutFileName: inoutFile ? path.basename(inoutFile) : null,
-      // Firestore caps a doc at ~1MB, and the full in-out report can exceed that — the COMPLETE
-      // history is sent to the owner's Telegram as a file. Here we keep only a small preview.
+      // Firestore caps a doc at ~1MB; the full in-out file goes to Telegram — keep only a preview.
       punchHistoryPreview: inoutText ? inoutText.slice(0, 40000) : '(in-out history sent to Telegram only)',
       punchHistoryCaptured: !!inoutText,
     };
@@ -70,25 +68,28 @@ const today = () => { const d = new Date(Date.now() + 5.5 * 3600 * 1000); return
 
     if (DRY) { console.log('=> DRY: archived only, machine NOT touched'); }
     else {
-      // 4. delete on the machine via the list page (tick row checkbox, click Delete, confirm)
-      await page.goto('https://onlinerealsoft.com/EmployeeList.aspx', { waitUntil: 'domcontentloaded' });
-      await page.waitForTimeout(1500);
+      // 4. delete on the machine: ERP_EmployeeList — tick the worker's row checkbox, click Delete, confirm
+      await page.goto('https://onlinerealsoft.com/ERP_EmployeeList.aspx', { waitUntil: 'domcontentloaded' });   // V26
+      await page.waitForTimeout(2000);
       const ticked = await page.evaluate((c) => {
         for (const tr of document.querySelectorAll('tr')) {
           if ((tr.innerText || '').includes(c)) {
             const cb = tr.querySelector('input[type=checkbox]');
-            if (cb) { cb.checked = true; cb.dispatchEvent(new Event('click', { bubbles: true })); return { id: cb.id, value: cb.value }; }
+            if (cb) { cb.checked = true; cb.dispatchEvent(new Event('click', { bubbles: true })); cb.dispatchEvent(new Event('change', { bubbles: true })); return { id: cb.id, value: cb.value }; }
           }
         }
         return null;
       }, CARD);
       if (!ticked) throw new Error('could not tick worker row for delete (archive is safe)');
-      await Promise.all([page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {}), page.click('#MainContent_BtnDel')]);
+      await Promise.all([page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {}), page.click('#BtnDel')]);   // V26: was #MainContent_BtnDel
       await page.waitForTimeout(2500);
+      // verify gone (re-scan the list)
+      await page.goto('https://onlinerealsoft.com/ERP_EmployeeList.aspx', { waitUntil: 'domcontentloaded' });
+      await page.waitForTimeout(1800);
       const still = await page.evaluate((c) => document.body.innerText.includes(c), CARD);
       if (still) throw new Error('delete did not take — worker still on machine (archive is safe)');
       console.log('deleted from machine. confirm dialog:', JSON.stringify(dialogs));
-      await fdb.collection('att_salary').doc(CARD).set({ archivedToMachine: false, deletedFromMachine: true, deletedAt: new Date().toISOString() }, { merge: true });
+      await fdb.collection('att_salary').doc(CARD).set({ deletedFromMachine: true, deletedAt: new Date().toISOString() }, { merge: true });
     }
   } finally { await browser.close(); }
 
