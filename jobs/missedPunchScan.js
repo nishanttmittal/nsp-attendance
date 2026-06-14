@@ -18,13 +18,13 @@ async function scanMissed(offset = 0) {
   const { first, to, label } = range(offset); // offset 0 = current month (1st..yesterday); >0 = whole past month
   const { browser, page } = await session();
   try {
-    await page.goto('https://onlinerealsoft.com/NewMonthly.aspx', { waitUntil: 'domcontentloaded' });
+    await page.goto('https://onlinerealsoft.com/ERP_NewMonthly.aspx', { waitUntil: 'domcontentloaded' });   // V26 portal
     await page.waitForTimeout(1500);
-    if (await page.locator('#MainContent_chknewwindow').isChecked().catch(() => false)) await page.uncheck('#MainContent_chknewwindow').catch(() => {});
-    await setField(page, '#MainContent_txtdate', fmt(first));
-    await setField(page, '#MainContent_txttodate', fmt(to));
+    await setField(page, '#txtdate', fmt(first));        // V26: was #MainContent_txtdate
+    await setField(page, '#txtdateto', fmt(to));         // V26: was #MainContent_txttodate
     const file = path.join(__dirname, 'downloads', `inout_${label}.xls`);
-    const [dl] = await Promise.all([page.waitForEvent('download', { timeout: 45000 }), page.click('#MainContent_Button15')]);
+    // V26: "In_OUT IN .Excel Format" is LinkButton22 (was #MainContent_Button15)
+    const [dl] = await Promise.all([page.waitForEvent('download', { timeout: 45000 }), page.click('#LinkButton22')]);
     await dl.saveAs(file);
 
     const rows = XLSX.utils.sheet_to_json(XLSX.readFile(file).Sheets.Sheet1, { header: 1, defval: '' }).slice(1);

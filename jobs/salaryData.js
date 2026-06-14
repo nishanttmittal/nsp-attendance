@@ -6,7 +6,7 @@ const fs = require('fs');
 const XLSX = require('xlsx');
 const { session, setField } = require('./lib/realtime');
 
-const URL = 'https://onlinerealsoft.com/NewMonthly.aspx';
+const URL = 'https://onlinerealsoft.com/ERP_NewMonthly.aspx';   // V26 portal (was NewMonthly.aspx)
 const OUT_DIR = path.resolve(__dirname, 'downloads');
 const MONTH = parseInt(process.env.MONTH || '0', 10);
 
@@ -69,13 +69,13 @@ if (require.main === module) {
     if (!fs.existsSync(OUT_DIR)) fs.mkdirSync(OUT_DIR, { recursive: true });
     const { browser, page } = await session();
     try {
-      await page.goto(URL, { waitUntil: 'domcontentloaded' }); await page.waitForTimeout(1200);
-      if (await page.locator('#MainContent_chknewwindow').isChecked().catch(() => false)) await page.uncheck('#MainContent_chknewwindow').catch(() => {});
+      await page.goto(URL, { waitUntil: 'domcontentloaded' }); await page.waitForTimeout(1500);
       const { first, to, daysInMonth, label } = range(MONTH);
-      await setField(page, '#MainContent_txtdate', fmt(first));
-      await setField(page, '#MainContent_txttodate', fmt(to));
+      await setField(page, '#txtdate', fmt(first));        // V26: was #MainContent_txtdate
+      await setField(page, '#txtdateto', fmt(to));         // V26: was #MainContent_txttodate
       const file = path.join(OUT_DIR, `salarydata_${label}.xls`);
-      const [dl] = await Promise.all([page.waitForEvent('download', { timeout: 35000 }), page.click('#MainContent_Button10')]);
+      // V26: "Monthly Summary In Excel" is LinkButton21 (was #MainContent_Button10); all employees by default
+      const [dl] = await Promise.all([page.waitForEvent('download', { timeout: 45000 }), page.click('#LinkButton21')]);
       await dl.saveAs(file);
       const emps = parseSummary(file);
       console.log(JSON.stringify({ month: label, from: fmt(first), to: fmt(to), daysInMonth, count: emps.length, employees: emps }, null, 2));

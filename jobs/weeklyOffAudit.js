@@ -53,16 +53,16 @@ async function audit(offset = 0) {
   const from = new Date(first); from.setDate(from.getDate() - from.getDay()); // getDay 0=Sun
   const { browser, page } = await session();
   try {
-    await page.goto('https://onlinerealsoft.com/NewMonthly.aspx', { waitUntil: 'domcontentloaded' });
+    await page.goto('https://onlinerealsoft.com/ERP_NewMonthly.aspx', { waitUntil: 'domcontentloaded' });   // V26 portal
     await page.waitForTimeout(1500);
-    if (await page.locator('#MainContent_chknewwindow').isChecked().catch(() => false)) await page.uncheck('#MainContent_chknewwindow').catch(() => {});
-    await setField(page, '#MainContent_txtdate', fmt(from));
-    await setField(page, '#MainContent_txttodate', fmt(to));
+    await setField(page, '#txtdate', fmt(from));         // V26: was #MainContent_txtdate
+    await setField(page, '#txtdateto', fmt(to));         // V26: was #MainContent_txttodate
     await page.waitForTimeout(800);
     const file = path.join(__dirname, 'downloads', `inout_audit_${label}.xls`);
     let dl;
     try {
-      [dl] = await Promise.all([page.waitForEvent('download', { timeout: 120000 }), page.click('#MainContent_Button15')]);
+      // V26: "In_OUT IN .Excel Format" is LinkButton22 (was #MainContent_Button15)
+      [dl] = await Promise.all([page.waitForEvent('download', { timeout: 120000 }), page.click('#LinkButton22')]);
     } catch (e) {
       await page.screenshot({ path: path.join(__dirname, 'downloads', `audit_fail_${label}.png`), fullPage: true }).catch(() => {});
       throw new Error('in-out download did not start: ' + e.message);
