@@ -57,22 +57,25 @@ export function computePay({ emp, att, daysInMonth, elapsedDays, fullMonth, adva
   const advanceDue = Number(advancesThisMonth || 0) + Number(advanceBalanceIn || 0);
   const advanceRecovered = Math.min(Number(advanceRecover || 0), advanceDue, avail);
 
-  // Day breakdown for the salary tab. Paid days = days the worker is actually PAID for:
-  //  • monthly staff: present + weekly-offs + worked-weekly-offs + holidays (all non-absent days)
-  //  • daily wagers: only days worked (present + any weekly-off they came in for) — weekly-offs
-  //    and holidays are NOT paid for daily wage. See computePay base above.
+  // Day breakdown for the salary tab. Paid days = days the worker is actually PAID for.
+  // A WORKED weekly-off (weeklyOffPresent) is NOT an extra paid day — the Saturday is already
+  // covered (paid for monthly staff, off for daily) and working it is rewarded as OVERTIME only.
+  //  • monthly staff: present + ALL weekly-offs (worked or not) + holidays = all non-absent days.
+  //    The worked Saturdays sit INSIDE the weekly-off count; the extra is OT, not days.
+  //  • daily wagers: only present working days. Weekly-offs/holidays are unpaid; working one → OT.
   const present = att.presentDays || 0;
   const weeklyOff = att.weeklyOff || 0;
   const weeklyOffPresent = att.weeklyOffPresent || 0;
   const holiday = att.holiday || 0;
+  const weeklyOffAll = weeklyOff + weeklyOffPresent;        // total Saturdays in the period (off + worked)
   const paidDays = emp.type === 'daily'
-    ? round(present + weeklyOffPresent)
-    : round(present + weeklyOff + weeklyOffPresent + holiday);
+    ? round(present)                                        // daily: only worked weekdays; off/holiday → OT, not paid days
+    : round(present + weeklyOffAll + holiday);              // monthly: all Saturdays paid; worked ones earn OT on top
 
   return {
     type: emp.type, effectiveRate: rate, effectiveRemark: eff.remark,
     payableDays: effElapsed, presentDays: att.presentDays || 0, absentDays: att.absentDays || 0,
-    weeklyOff, weeklyOffPresent, holiday, paidDays,
+    weeklyOff, weeklyOffPresent, weeklyOffAll, holiday, paidDays,
     otHrs: round(att.otHrs || 0), otHrsNet: round(netOtHrs),
     base: round(base), otPay: round(otPay), perfectBonus: round(perfectBonus), bonus: round(Number(bonus || 0)),
     fines: round(Number(fines || 0)), loanInstallment: round(Number(loanInstallment || 0)),
