@@ -2,7 +2,7 @@
 // days and ONCE more at 8 (this month). State in att_alert_state/long_absence; resets each month.
 const path = require('path');
 const fs = require('fs');
-const { session, setField } = require('./lib/realtime');
+const { session, setField, downloadMonthly } = require('./lib/realtime');
 const { parseSummary, range } = require('./salaryData');
 const { sendTelegram } = require('./lib/notify');
 const { db } = require('./lib/firestore');
@@ -18,12 +18,8 @@ if (require.main === module) {
     const { browser, page } = await session();
     try {
       const { first, to, label } = range(MONTH);
-      await page.goto('https://onlinerealsoft.com/ERP_NewMonthly.aspx', { waitUntil: 'domcontentloaded' }); await page.waitForTimeout(1500);   // V26
-      await setField(page, '#txtdate', fmt(first));        // V26: was #MainContent_txtdate
-      await setField(page, '#txtdateto', fmt(to));         // V26: was #MainContent_txttodate
       const file = path.join(OUT_DIR, `longabsence_${label}.xls`);
-      // V26: Monthly Summary = LinkButton21 (was #MainContent_Button10)
-      const [dl] = await Promise.all([page.waitForEvent('download', { timeout: 45000 }), page.click('#LinkButton21')]);
+      const dl = await downloadMonthly(page, fmt(first), fmt(to), 'summary');   // works on either portal
       await dl.saveAs(file);
       const emps = parseSummary(file);
 

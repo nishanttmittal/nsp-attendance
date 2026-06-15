@@ -32,13 +32,19 @@ async function launch() {
 }
 
 async function login(page, s = loadSecrets()) {
-  await page.goto(LOGIN_URL, { waitUntil: 'domcontentloaded' });
-  await page.waitForTimeout(800);
-  // new portal: a "Corporate ID" tab reveals the corporate-login fields. Fall back to the old
-  // "#corporate" anchor if we ever hit the previous page again.
-  const tab = page.locator('li.nav-item', { hasText: 'Corporate ID' }).first();
-  if (await tab.count().catch(() => 0)) await tab.click().catch(() => {});
-  else await page.click('a[href="#corporate"]').catch(() => {});
+  // The vendor flip-flops between the OLD portal (Default.aspx + a[href="#corporate"] →
+  // Welcome.aspx) and the V26 portal (ErpLogin.aspx + a "Corporate ID" nav-tab → Home.aspx).
+  // Both use the same TextBox1/2/3 + Button1. Detect whichever is live so we survive the flips.
+  await page.goto(SITE_URL, { waitUntil: 'domcontentloaded' });   // SITE_URL = Default.aspx
+  await page.waitForTimeout(1000);
+  if (await page.locator('a[href="#corporate"]').count().catch(() => 0)) {
+    await page.click('a[href="#corporate"]').catch(() => {});      // OLD portal
+  } else {
+    await page.goto(LOGIN_URL, { waitUntil: 'domcontentloaded' }).catch(() => {});   // V26 portal
+    await page.waitForTimeout(800);
+    const tab = page.locator('li.nav-item', { hasText: 'Corporate ID' }).first();
+    if (await tab.count().catch(() => 0)) await tab.click().catch(() => {});
+  }
   await page.waitForSelector('#TextBox1', { state: 'visible', timeout: 15000 });
   await page.fill('#TextBox1', s.corporateId);
   await page.fill('#TextBox2', s.username);
@@ -116,6 +122,30 @@ async function reprocessRange(page, fromDdmmyyyy, toDdmmyyyy) {
 }
 const reprocessDay = (page, ddmmyyyy) => reprocessRange(page, ddmmyyyy, ddmmyyyy);
 
+// Download a monthly report, working on EITHER portal (the vendor flip-flops old<->V26).
+// kind: 'summary' (Monthly Summary In Excel) | 'inout' (In_OUT IN .Excel Format).
+// Detects which portal is live, sets the dates, clicks the right control, returns the Download.
+async function downloadMonthly(page, fromDdmmyyyy, toDdmmyyyy, kind = 'summary') {
+  await page.goto('https://onlinerealsoft.com/NewMonthly.aspx', { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(1300);
+  const isOld = await page.locator('#MainContent_txtdate').count().catch(() => 0);
+  let dFrom, dTo, btn;
+  if (isOld) {                                   // OLD portal
+    if (await page.locator('#MainContent_chknewwindow').isChecked().catch(() => false)) await page.uncheck('#MainContent_chknewwindow').catch(() => {});
+    dFrom = '#MainContent_txtdate'; dTo = '#MainContent_txttodate';
+    btn = kind === 'inout' ? '#MainContent_Button15' : '#MainContent_Button10';
+  } else {                                       // V26 portal
+    await page.goto('https://onlinerealsoft.com/ERP_NewMonthly.aspx', { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(1500);
+    dFrom = '#txtdate'; dTo = '#txtdateto';
+    btn = kind === 'inout' ? '#LinkButton22' : '#LinkButton21';
+  }
+  await setField(page, dFrom, fromDdmmyyyy);
+  await setField(page, dTo, toDdmmyyyy);
+  const [dl] = await Promise.all([page.waitForEvent('download', { timeout: 60000 }), page.click(btn)]);
+  return dl;
+}
+
 // Find a worker's Employee.aspx edit RowId by card number. The whole roster renders on one
 // EmployeeList.aspx page (no pagination) — scan the row whose text holds the card, grab its
 // Employee.aspx?RowId link. Returns the RowId string, or null if not found. Read-only.
@@ -133,4 +163,4 @@ async function findEmployeeRowId(page, card) {
   }, String(card));
 }
 
-module.exports = { SITE_URL, loadSecrets, launch, login, session, readGrid, selectFewEmployee, setField, reprocessDay, reprocessRange, findEmployeeRowId };
+module.exports = { SITE_URL, loadSecrets, launch, login, session, readGrid, selectFewEmployee, setField, reprocessDay, reprocessRange, findEmployeeRowId, downloadMonthly };
