@@ -5,6 +5,15 @@ const { session, readGrid } = require('./lib/realtime');
 
 const MEAL_EXCLUDE_DEPT = 'WELDING'; // welders excluded from the food headcount
 
+// Navigate to a page that exists on EITHER portal: try the OLD url; if it 404s, use the V26 url.
+async function gotoDual(page, oldUrl, v26Url) {
+  await page.goto(oldUrl, { waitUntil: 'domcontentloaded' }).catch(() => {});
+  await page.waitForTimeout(700);
+  const notFound = /resource cannot be found|HTTP 404|Parser Error/i.test(await page.title().catch(() => '') + ' ' + await page.evaluate(() => document.body ? document.body.innerText.slice(0, 80) : '').catch(() => ''));
+  if (notFound) { await page.goto(v26Url, { waitUntil: 'domcontentloaded' }).catch(() => {}); await page.waitForTimeout(800); }
+  await page.waitForTimeout(600);
+}
+
 function colIndex(header, ...names) {
   const lower = header.map(h => h.toLowerCase());
   for (const n of names) {
@@ -15,8 +24,7 @@ function colIndex(header, ...names) {
 }
 
 async function dashboardCounts(page) {
-  await page.goto('https://onlinerealsoft.com/Home.aspx', { waitUntil: 'domcontentloaded' });   // V26: was Welcome.aspx
-  await page.waitForTimeout(1200);
+  await gotoDual(page, 'https://onlinerealsoft.com/Welcome.aspx', 'https://onlinerealsoft.com/Home.aspx');
   return page.evaluate(() => {
     const num = (label) => {
       const el = Array.from(document.querySelectorAll('*')).find(e =>
@@ -48,8 +56,8 @@ function normalizeUsDate(raw) {
 
 // code -> { name, dept } from the employee master (DailyPresentEmployee lacks Department)
 async function employeeMaster(page) {
-  await page.goto('https://onlinerealsoft.com/ERP_EmployeeList.aspx', { waitUntil: 'domcontentloaded' });   // V26: was EmployeeList.aspx
-  await page.waitForTimeout(1800);
+  await gotoDual(page, 'https://onlinerealsoft.com/EmployeeList.aspx', 'https://onlinerealsoft.com/ERP_EmployeeList.aspx');
+  await page.waitForTimeout(800);
   const grid = await readGrid(page);
   const map = {};
   if (grid.length < 2) return map;
@@ -64,8 +72,7 @@ async function employeeMaster(page) {
 }
 
 async function presentList(page) {
-  await page.goto('https://onlinerealsoft.com/ERP_DailyPresent.aspx', { waitUntil: 'domcontentloaded' });   // V26: was DailyPresentEmployee.aspx
-  await page.waitForTimeout(1500);
+  await gotoDual(page, 'https://onlinerealsoft.com/DailyPresentEmployee.aspx', 'https://onlinerealsoft.com/ERP_DailyPresent.aspx');
   const grid = await readGrid(page);
   if (grid.length < 2) return { rows: [], header: [] };
   const header = grid[0];
@@ -82,8 +89,7 @@ async function presentList(page) {
 }
 
 async function absentList(page) {
-  await page.goto('https://onlinerealsoft.com/ERP_DailyAbsent.aspx', { waitUntil: 'domcontentloaded' });   // V26: was DailyAbsentEmployee.aspx
-  await page.waitForTimeout(1500);
+  await gotoDual(page, 'https://onlinerealsoft.com/DailyAbsentEmployee.aspx', 'https://onlinerealsoft.com/ERP_DailyAbsent.aspx');
   const grid = await readGrid(page);
   if (grid.length < 2) return [];
   const h = grid[0];
@@ -93,8 +99,7 @@ async function absentList(page) {
 }
 
 async function lateList(page) {
-  await page.goto('https://onlinerealsoft.com/ERP_DailyLate.aspx', { waitUntil: 'domcontentloaded' });   // V26: was DailyLateEmployee.aspx
-  await page.waitForTimeout(1500);
+  await gotoDual(page, 'https://onlinerealsoft.com/DailyLateEmployee.aspx', 'https://onlinerealsoft.com/ERP_DailyLate.aspx');
   const grid = await readGrid(page);
   if (grid.length < 2) return [];
   const h = grid[0];
