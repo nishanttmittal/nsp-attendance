@@ -70,20 +70,26 @@ async function readGrid(page) {
 }
 
 // V26 portal: the employee list is `LstEmployee_N` checkboxes; each row's text reads
-// "name (code)". Tick the one whose row contains the code. (Was: optFewEmployee radio +
-// chkemployeelist on the old portal.)
+// "name (code)". The list DEFAULTS TO ALL CHECKED — so to target ONE employee we MUST uncheck
+// every box first, then check only the target. (The 2026-06-14 mass-insert bug was caused by
+// not unchecking the rest.) Returns { label, checkedCount }; callers MUST verify checkedCount===1
+// before any write (insert). Was: optFewEmployee radio + chkemployeelist on the old portal.
 async function selectFewEmployee(page, code) {
   await page.waitForSelector('input[id^="LstEmployee_"]', { timeout: 30000 }).catch(() => {});
   const res = await page.evaluate((c) => {
     const boxes = Array.from(document.querySelectorAll('input[id^="LstEmployee_"]'));
     const rowText = cb => { const r = cb.closest('tr') || cb.parentElement; return (r && r.innerText ? r.innerText : '').replace(/\s+/g, ' ').trim(); };
+    // 1) uncheck ALL (synthetic 'click' fires handlers WITHOUT toggling .checked, so set then fire change)
+    boxes.forEach(cb => { if (cb.checked) { cb.checked = false; cb.dispatchEvent(new Event('click', { bubbles: true })); cb.dispatchEvent(new Event('change', { bubbles: true })); } });
+    // 2) check ONLY the target
     const target = boxes.find(cb => rowText(cb).includes(c));
     if (!target) return { ok: false, count: boxes.length };
-    if (!target.checked) { target.checked = true; target.dispatchEvent(new Event('click', { bubbles: true })); }
-    return { ok: true, label: rowText(target) };
+    target.checked = true; target.dispatchEvent(new Event('click', { bubbles: true })); target.dispatchEvent(new Event('change', { bubbles: true }));
+    const checkedCount = boxes.filter(b => b.checked).length;
+    return { ok: true, label: rowText(target), checkedCount };
   }, code);
   if (!res.ok) throw new Error(`Employee ${code} not found among ${res.count}`);
-  return res.label;
+  return res;   // { label, checkedCount }
 }
 
 // Set a date/time text field by value + events (handles flatpickr/datepicker fields).

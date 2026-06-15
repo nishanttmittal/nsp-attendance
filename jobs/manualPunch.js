@@ -29,7 +29,9 @@ function bad(msg) { console.error('ERROR: ' + msg); process.exit(1); }
     await page.goto(URL, { waitUntil: 'domcontentloaded' });
     await page.waitForTimeout(1800);
 
-    const who = await selectFewEmployee(page, EMP);
+    const sel = await selectFewEmployee(page, EMP);
+    if (sel.checkedCount !== 1) bad(`SAFETY ABORT: ${sel.checkedCount} employees selected (expected 1) — NOT inserting`);
+    const who = sel.label;
     await setField(page, '#TxtPunchDate', DATE);       // V26 ids (dropped #MainContent_ prefix)
     await setField(page, '#Txtdateto', DATE);          // V26: single day = same from/to
     if (IN) await setField(page, '#txttime', IN);
@@ -49,7 +51,11 @@ function bad(msg) { console.error('ERROR: ' + msg); process.exit(1); }
       page.click('#BtnAdd1'),    // V26: "Insert Manual Attendance" (was #MainContent_cmdsave)
     ]);
     await page.waitForTimeout(2000);
-    if (dialogs.length) console.log('result: ' + dialogs.join(' | '));
+    const dialogText = dialogs.join(' | ');
+    if (dialogs.length) console.log('result: ' + dialogText.slice(0, 200));
+    // SAFETY: a mass-insert dialog lists many "Biometric ID" entries — catch any regression
+    const idCount = (dialogText.match(/Biometric ID/g) || []).length;
+    if (idCount > 2) throw new Error(`SAFETY: insert appears to have affected ${idCount} employees (mass-insert) — aborting before reprocess`);
     await page.screenshot({ path: path.join(OUT_DIR, 'manualpunch_inserted.png'), fullPage: true });
     console.log('=> INSERTED');
 

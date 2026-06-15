@@ -42,8 +42,8 @@ function monthRange(offset) {
 
     let scopeTag = 'all';
     if (SCOPE.startsWith('emp:')) {
-      const lbl = await selectFewEmployee(page, SCOPE.slice(4));         // V26 LstEmployee picker
-      console.log('  picked employee:', lbl); scopeTag = 'emp-' + SCOPE.slice(4);
+      const sel = await selectFewEmployee(page, SCOPE.slice(4));         // V26 LstEmployee picker
+      console.log('  picked employee:', sel.label, '(checked:', sel.checkedCount + ')'); scopeTag = 'emp-' + SCOPE.slice(4);
     } else if (SCOPE.startsWith('dept:')) {
       // best-effort: filter the list by department name, then Apply Filter
       const dept = SCOPE.slice(5);
