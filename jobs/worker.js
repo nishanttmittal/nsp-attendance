@@ -62,9 +62,13 @@ async function handle(type, p) {
     await sendTelegram(`✏️ Updated on machine: ${p.code}${p.name ? ' · name “' + p.name + '”' : ''}${p.dept ? ' · dept ' + p.dept : ''}.`);
     return 'name/dept pushed to machine';
   }
-  if (type === 'resign_employee') {      // archive full history, THEN delete from the machine
-    run('archiveDelete.js', { CARD: p.code, BY: p._by || 'app' });   // archiveDelete.js sends its own Telegram + handles the safety gate
-    return 'archived + deleted from machine';
+  if (type === 'resign_employee') {
+    // Owner rule (2026-06-15): NEVER delete from the machine — owner does that himself, and the
+    // att_salary record (incl. paid history) is KEPT in the salary sheet for product costing.
+    // We only archive a history snapshot (DRY=true skips the machine delete) + mark inactive.
+    run('archiveDelete.js', { CARD: p.code, BY: p._by || 'app', DRY: 'true' });
+    await sendTelegram(`👋 ${p.code} marked resigned (kept in salary sheet; machine removal is manual).`).catch(() => {});
+    return 'resigned: archived + kept in salary sheet (machine NOT touched)';
   }
   if (type === 'reprocess_period') {
     run('reprocessRange.js', { FROM: p.from, TO: p.to });

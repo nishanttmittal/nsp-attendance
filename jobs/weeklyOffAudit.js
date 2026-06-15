@@ -11,7 +11,7 @@ const { session, setField, downloadMonthly } = require('./lib/realtime');
 const { range } = require('./salaryData');
 const { db } = require('./lib/firestore');
 
-const QUALIFY = 4;                 // present working-days needed in a week to earn that Saturday
+const QUALIFY = 3;                 // present working-days needed in a week to earn that Saturday (owner changed 4→3 on 2026-06-15)
 const pad = n => String(n).padStart(2, '0');
 const fmt = d => `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()}`;
 const isNA = s => !/\d/.test(String(s));
