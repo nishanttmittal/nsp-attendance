@@ -104,10 +104,10 @@ async function handle(type, p) {
     const date = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
     const months = { ...(e.months || {}) };
     months[p.month] = { ...md, locked: true, payment: { date, mode: p.mode || 'cash', net: paidNet, due, extra, by: p._by || 'manager', remark: p.remark || '' } };
-    // roll unrecovered advance into next month
+    // NOTE: advance carry-forward now happens ONLY at month FINALIZE (hisab), not per-payment
+    // (owner 2026-06-15: "once its done only advance carry forward"). See 'finalize_hisab'.
     const [y, m] = p.month.split('-').map(Number);
     const next = m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`;
-    months[next] = { ...(months[next] || {}), advanceBalanceIn: Number(md.approvedCarry || 0) };
     const patch = { months };
     // overpayment → record as a NEXT-MONTH advance entry (carried forward, recovered next month)
     if (extra > 0) {
@@ -129,6 +129,32 @@ async function handle(type, p) {
     } catch (e2) { console.error('salary register write failed:', e2.message); }
     await sendTelegram(`💵 Paid: <b>${e.name || p.code}</b> ₹${paidNet.toLocaleString('en-IN')} (${p.mode}) · ${p.month}${extra > 0 ? ` · ₹${extra.toLocaleString('en-IN')} extra → advance carried forward` : ''}${p.remark ? ` · ${p.remark}` : ''} · by ${p._by || 'manager'}`);
     return extra > 0 ? `marked paid (₹${extra} extra → advance)` : 'marked paid';
+  }
+  if (type === 'finalize_hisab') {   // owner finalizes a whole month: lock + carry advances forward
+    const mk = p.month;
+    const [y, m] = mk.split('-').map(Number);
+    const next = m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`;
+    const sal = await db().collection('att_salary').get();
+    let batch = db().batch(), n = 0, locked = 0, total = 0;
+    const reg = { month: mk, byCode: {} };
+    sal.forEach((d) => {
+      const e = d.data(); const md = (e.months || {})[mk];
+      if (!md || !md.approved) return;            // only finalize TICKED people
+      const months = { ...(e.months || {}) };
+      months[mk] = { ...md, hisabFinalized: true, locked: true, finalizedAt: new Date().toISOString(), finalizedBy: p._by || 'owner' };
+      // carry the LEFTOVER advance forward — ONLY now, at finalize
+      months[next] = { ...(months[next] || {}), advanceBalanceIn: Number(md.approvedCarry || 0) };
+      batch.set(d.ref, { months }, { merge: true });
+      const net = Number(md.payment ? md.payment.net : md.approvedNet || 0);
+      reg.byCode[d.id] = { name: e.name || d.id, dept: e.dept || '', net, carry: Number(md.approvedCarry || 0), paid: !!md.payment };
+      total += net; locked++;
+      if (++n >= 400) { batch.commit(); batch = db().batch(); n = 0; }
+    });
+    if (n) await batch.commit();
+    reg.total = total; reg.count = locked; reg.finalizedAt = new Date().toISOString(); reg.finalizedBy = p._by || 'owner';
+    await db().collection('att_meta').doc('hisab_' + mk).set(reg);   // durable monthly hisab register
+    await sendTelegram(`🔒 <b>Hisab finalized — ${mk}</b>: ${locked} staff, total ₹${Math.round(total).toLocaleString('en-IN')}. Leftover advances carried to ${next}.`);
+    return `hisab finalized ${mk}: ${locked} staff, ₹${Math.round(total)}`;
   }
   if (type === 'add_advance') {  // manager-created; applied with admin SDK (bypasses rules)
     const ref = db().collection('att_salary').doc(p.code);

@@ -354,6 +354,12 @@ export async function loadPayout(month) {
   const s = await getDoc(doc(db, 'att_meta', 'payout_' + month));
   return s.exists() ? s.data() : { items: {} };
 }
+// Owner finalizes a whole month's hisab: locks every ticked person's month and carries their
+// leftover advance forward to next month (advance carries ONLY at finalize). Worker applies it.
+export async function queueFinalizeHisab(month, by) {
+  return queueJob('finalize_hisab', { month }, by);
+}
+
 // Manager marks a person paid — applied by the worker with admin rights. `amount` = the actual
 // amount handed over (defaults to the net due); anything paid OVER the net becomes an advance
 // carried forward to next month.

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { loadEmployees, loadAllAttendance, saveEmployee, loadPayout, queueMarkPaid, queueAdvance, loadRoster, approveSalary, unapproveSalary, holdSalary, releaseSalary, ensureApprovalBackup, istMonth, queueJob } from '../lib/data';
+import { loadEmployees, loadAllAttendance, saveEmployee, loadPayout, queueMarkPaid, queueAdvance, loadRoster, approveSalary, unapproveSalary, holdSalary, releaseSalary, ensureApprovalBackup, istMonth, queueJob, queueFinalizeHisab, checkActionPassword } from '../lib/data';
 import { monthOptions, monthCtx, payFor, rupee } from '../lib/paycalc';
 import Person from './Person.jsx';
 import SelfPunchCard from './SelfPunchCard.jsx';
@@ -61,11 +61,24 @@ function OwnerSalary({ user }) {
     try { await releaseSalary(r.emp.code, mk, user.email); await reload(); }
     finally { setBusy(''); }
   }
-  // owner pays & settles a ticked month (any month, incl. previous). queueMarkPaid locks the
-  // month and carries the unrecovered advance forward to next month.
+  // owner pays & settles a ticked month (any month, incl. previous).
   async function doPay(r, mode, remark, amount) {
     setBusy(r.emp.code);
     try { await queueMarkPaid(r.emp.code, mk, mode, user.email, remark, amount); setPayC(null); await reload(); }
+    finally { setBusy(''); }
+  }
+  // owner finalizes the whole month's hisab: locks ticked staff + carries each one's leftover
+  // advance forward (advance carries ONLY now). Admin-password gated.
+  async function finalizeHisab() {
+    if (!ticked.length) { alert('Tick (approve) people first — only ticked staff are finalized.'); return; }
+    if (!confirm(`Finalize the ${mk} hisab?\n\nThis LOCKS the ${ticked.length} ticked people for ${mk} and carries each one's leftover advance forward to next month. (Advances carry forward only now.)`)) return;
+    const pw = prompt('Admin password to finalize & lock:');
+    if (pw == null) return;
+    const ok = await checkActionPassword(pw);
+    if (ok === 'unset') { if (!confirm('No action password set (set one in ⚙ Settings). Finalize anyway?')) return; }
+    else if (!ok) { alert('Wrong password.'); return; }
+    setBusy('hisab');
+    try { await queueFinalizeHisab(mk, user.email); alert('Hisab finalize queued — locks the month + carries advances in a moment.'); await reload(); }
     finally { setBusy(''); }
   }
 
@@ -102,6 +115,11 @@ function OwnerSalary({ user }) {
         </div>
         {!ctx.fullMonth && <p className="text-xs text-gray-400">Running month — figures till yesterday.</p>}
         <label className="flex items-center gap-1.5 text-xs text-gray-500"><input type="checkbox" checked={showRemoved} onChange={(e) => setShowRemoved(e.target.checked)} /> Show removed/resigned staff (kept in the sheet for costing)</label>
+        {(() => {
+          if (rows.some((r) => r.md.hisabFinalized)) return <p className="text-xs text-green-700 font-medium">🔒 {mk} hisab finalized — month locked, advances carried forward.</p>;
+          if (!ticked.length) return null;
+          return <button disabled={busy === 'hisab'} onClick={finalizeHisab} className="w-full bg-gray-800 text-white rounded-lg py-2.5 text-sm font-semibold disabled:opacity-50">🔒 Finalize hisab ({ticked.length} ticked) — lock month + carry advances</button>;
+        })()}
       </div>
 
       <input className="w-full border rounded-lg px-3 py-2" placeholder="🔍 Search name…" value={q} onChange={(e) => setQ(e.target.value)} />
