@@ -21,13 +21,14 @@ function OwnerSalary({ user }) {
   const [showReport, setShowReport] = useState(false);
   const [busy, setBusy] = useState('');
   const [payC, setPayC] = useState(null);   // owner pay&settle dialog: { r, mode, amount, remark }
+  const [showRemoved, setShowRemoved] = useState(false);   // include resigned/removed (kept for costing)
   const ctx = useMemo(() => monthCtx(mk), [mk]);
 
   async function reload() {
-    const [list, am] = await Promise.all([loadEmployees(), loadAllAttendance()]);
+    const [list, am] = await Promise.all([loadEmployees(showRemoved), loadAllAttendance()]);
     setEmps(list); setAttMap(am);
   }
-  useEffect(() => { reload(); }, []);
+  useEffect(() => { reload(); }, [showRemoved]);
 
   if (openCode) return <Person code={openCode} mk={mk} user={user} onBack={() => { setOpenCode(''); reload(); }} />;
   if (emps === null) return <p className="text-gray-500">Loading…</p>;
@@ -100,6 +101,7 @@ function OwnerSalary({ user }) {
           )}
         </div>
         {!ctx.fullMonth && <p className="text-xs text-gray-400">Running month — figures till yesterday.</p>}
+        <label className="flex items-center gap-1.5 text-xs text-gray-500"><input type="checkbox" checked={showRemoved} onChange={(e) => setShowRemoved(e.target.checked)} /> Show removed/resigned staff (kept in the sheet for costing)</label>
       </div>
 
       <input className="w-full border rounded-lg px-3 py-2" placeholder="🔍 Search name…" value={q} onChange={(e) => setQ(e.target.value)} />

@@ -114,6 +114,19 @@ async function handle(type, p) {
       patch.advances = [...(e.advances || []), { date: `${next}-01`, amount: extra, mode: p.mode || 'cash', remark: `extra paid with ${p.month} salary`, paidBy: p._by || 'manager' }];
     }
     await ref.set(patch, { merge: true });
+    // DURABLE monthly salary register (owner 2026-06-15): snapshot each payment into
+    // att_meta/salary_register_{mk} so the month's total salary stays saved for product costing
+    // even if the employee is later removed from the machine/data. Immutable per month.
+    try {
+      const regRef = db().collection('att_meta').doc('salary_register_' + p.month);
+      const reg = (await regRef.get()).data() || { month: p.month, byCode: {} };
+      reg.byCode = reg.byCode || {};
+      reg.byCode[p.code] = { name: e.name || p.code, dept: e.dept || '', net: paidNet, mode: p.mode || 'cash', date, by: p._by || 'manager' };
+      reg.total = Object.values(reg.byCode).reduce((s, x) => s + Number(x.net || 0), 0);
+      reg.count = Object.keys(reg.byCode).length;
+      reg.updatedAt = new Date().toISOString();
+      await regRef.set(reg);
+    } catch (e2) { console.error('salary register write failed:', e2.message); }
     await sendTelegram(`💵 Paid: <b>${e.name || p.code}</b> ₹${paidNet.toLocaleString('en-IN')} (${p.mode}) · ${p.month}${extra > 0 ? ` · ₹${extra.toLocaleString('en-IN')} extra → advance carried forward` : ''}${p.remark ? ` · ${p.remark}` : ''} · by ${p._by || 'manager'}`);
     return extra > 0 ? `marked paid (₹${extra} extra → advance)` : 'marked paid';
   }
