@@ -18,12 +18,12 @@ if (require.main === module) {
     const { browser, page } = await session();
     try {
       const { first, to, label } = range(MONTH);
-      await page.goto('https://onlinerealsoft.com/NewMonthly.aspx', { waitUntil: 'domcontentloaded' }); await page.waitForTimeout(1200);
-      if (await page.locator('#MainContent_chknewwindow').isChecked().catch(() => false)) await page.uncheck('#MainContent_chknewwindow').catch(() => {});
-      await setField(page, '#MainContent_txtdate', fmt(first));
-      await setField(page, '#MainContent_txttodate', fmt(to));
+      await page.goto('https://onlinerealsoft.com/ERP_NewMonthly.aspx', { waitUntil: 'domcontentloaded' }); await page.waitForTimeout(1500);   // V26
+      await setField(page, '#txtdate', fmt(first));        // V26: was #MainContent_txtdate
+      await setField(page, '#txtdateto', fmt(to));         // V26: was #MainContent_txttodate
       const file = path.join(OUT_DIR, `longabsence_${label}.xls`);
-      const [dl] = await Promise.all([page.waitForEvent('download', { timeout: 35000 }), page.click('#MainContent_Button10')]);
+      // V26: Monthly Summary = LinkButton21 (was #MainContent_Button10)
+      const [dl] = await Promise.all([page.waitForEvent('download', { timeout: 45000 }), page.click('#LinkButton21')]);
       await dl.saveAs(file);
       const emps = parseSummary(file);
 
