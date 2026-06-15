@@ -20,6 +20,7 @@ function OwnerSalary({ user }) {
   const [openCode, setOpenCode] = useState('');
   const [showReport, setShowReport] = useState(false);
   const [busy, setBusy] = useState('');
+  const [payC, setPayC] = useState(null);   // owner pay&settle dialog: { r, mode, amount, remark }
   const ctx = useMemo(() => monthCtx(mk), [mk]);
 
   async function reload() {
@@ -57,6 +58,13 @@ function OwnerSalary({ user }) {
   async function release(r) {
     setBusy(r.emp.code);
     try { await releaseSalary(r.emp.code, mk, user.email); await reload(); }
+    finally { setBusy(''); }
+  }
+  // owner pays & settles a ticked month (any month, incl. previous). queueMarkPaid locks the
+  // month and carries the unrecovered advance forward to next month.
+  async function doPay(r, mode, remark, amount) {
+    setBusy(r.emp.code);
+    try { await queueMarkPaid(r.emp.code, mk, mode, user.email, remark, amount); setPayC(null); await reload(); }
     finally { setBusy(''); }
   }
 
@@ -98,18 +106,46 @@ function OwnerSalary({ user }) {
 
       <div className="bg-white rounded-xl shadow divide-y divide-gray-100">
         {visible.length === 0 && <p className="p-4 text-sm text-gray-400">No one matches.</p>}
-        {visible.map((r) => <OwnerRow key={r.emp.code} r={r} busy={busy === r.emp.code} onName={() => setOpenCode(r.emp.code)} onTick={() => tick(r)} onHold={() => hold(r)} onRelease={() => release(r)} />)}
+        {visible.map((r) => <OwnerRow key={r.emp.code} r={r} busy={busy === r.emp.code} onName={() => setOpenCode(r.emp.code)} onTick={() => tick(r)} onHold={() => hold(r)} onRelease={() => release(r)} onPay={() => setPayC({ r, mode: 'cash', amount: String(r.md.approvedNet ?? r.pay.net), remark: '' })} />)}
       </div>
 
       <AdvanceCard user={user} />
       {mk === istMonth() && <SelfPunchCard />}
       {noSalary.length > 0 && <NoSalaryList list={noSalary} onSaved={reload} />}
       {showReport && <ReportModal user={user} mk={mk} rows={rows} onClose={() => setShowReport(false)} />}
+
+      {payC && (() => { const due = Number(payC.r.md.approvedNet ?? payC.r.pay.net) || 0; const amt = Number(payC.amount) || 0; return (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-end sm:items-center justify-center p-4" onClick={() => busy ? null : setPayC(null)}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-5 space-y-4" onClick={(e) => e.stopPropagation()}>
+            <div className="text-center">
+              <div className="text-3xl mb-1">💵</div>
+              <p className="font-bold text-gray-800 text-lg">{payC.r.emp.name || payC.r.emp.code}</p>
+              <p className="text-xs text-gray-500">Pay &amp; settle · Net due <b className="text-red-700">{rupee(due)}</b> · {monthOptions().find((m) => m.mk === mk)?.label || mk}</p>
+            </div>
+            <label className="block text-xs text-gray-500">Amount paid ₹
+              <input type="number" value={payC.amount} onChange={(e) => setPayC({ ...payC, amount: e.target.value })}
+                className="mt-1 w-full border rounded-lg px-3 py-2 text-lg font-bold text-gray-800" />
+            </label>
+            {amt > due && <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2">Paying {rupee(amt - due)} extra → recorded as an <b>advance carried forward</b> to next month.</p>}
+            <div className="grid grid-cols-2 gap-2">
+              {['cash', 'bank'].map((m) => (
+                <button key={m} onClick={() => setPayC({ ...payC, mode: m })} className={`rounded-lg py-2 text-sm font-medium border ${payC.mode === m ? 'bg-gray-800 text-white border-gray-800' : 'border-gray-300 text-gray-600'}`}>{m === 'cash' ? '💵 Cash' : '🏦 Bank'}</button>
+              ))}
+            </div>
+            <input value={payC.remark} onChange={(e) => setPayC({ ...payC, remark: e.target.value })} placeholder="Remark (optional)" className="w-full border rounded-lg px-3 py-2 text-sm" />
+            <div className="flex gap-2">
+              <button disabled={!!busy} onClick={() => setPayC(null)} className="flex-1 border rounded-xl py-3 font-medium text-gray-600 disabled:opacity-50">Cancel</button>
+              <button disabled={!!busy || !(amt >= 0)} onClick={() => doPay(payC.r, payC.mode, payC.remark.trim(), amt)}
+                className="flex-1 bg-green-700 text-white rounded-xl py-3 font-semibold disabled:opacity-50">{busy ? 'Paying…' : `Pay ${rupee(amt)}`}</button>
+            </div>
+          </div>
+        </div>
+      ); })()}
     </div>
   );
 }
 
-function OwnerRow({ r, busy, onName, onTick, onHold, onRelease }) {
+function OwnerRow({ r, busy, onName, onTick, onHold, onRelease, onPay }) {
   const { emp, md, pay } = r;
   const [showDays, setShowDays] = useState(false);
   const isPaid = !!md.payment, isTicked = !!md.approved, isHeld = !!md.hold;
@@ -134,7 +170,10 @@ function OwnerRow({ r, busy, onName, onTick, onHold, onRelease }) {
           <div className="font-bold text-red-700">{rupee(isPaid ? md.payment.net : (isTicked ? md.approvedNet : pay.net))}</div>
           {isHeld ? <button disabled={busy} onClick={onRelease} className="text-[11px] text-red-600 underline">🚫 hold · release</button>
             : isPaid ? <span className="text-[11px] text-green-700 font-medium">✓ PAID ({md.payment.mode})</span>
-            : isTicked ? <button disabled={busy} onClick={onTick} className="text-[11px] text-amber-700 underline">ticked · undo</button>
+            : isTicked ? <div className="flex gap-1 justify-end items-center">
+                <button disabled={busy} onClick={onPay} className="text-xs bg-green-700 text-white rounded-lg px-3 py-1.5 font-medium disabled:opacity-50">💵 Pay</button>
+                <button disabled={busy} onClick={onTick} className="text-[11px] text-amber-700 underline">undo</button>
+              </div>
             : <div className="flex gap-1 justify-end">
                 <button disabled={busy} onClick={onTick} className="text-xs bg-red-700 text-white rounded-lg px-3 py-1.5 font-medium disabled:opacity-50">✓ Tick</button>
                 <button disabled={busy} onClick={onHold} title="Hold salary" className="text-xs border border-gray-300 text-gray-500 rounded-lg px-2 py-1.5 disabled:opacity-50">🚫</button>
