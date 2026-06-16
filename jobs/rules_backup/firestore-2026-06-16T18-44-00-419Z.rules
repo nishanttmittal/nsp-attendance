@@ -52,25 +52,17 @@ match /att_daily_stats/{d} { allow read: if request.auth != null; allow write: i
     function pPath() { return /databases/$(database)/documents/apps/platingjobwork/users/$(tEmail()); }
     function pExists() { return tEmail() != '' && exists(pPath()); }
     function pOwner() { return signedIn() && (bootstrapOwner() || (pExists() && get(pPath()).data.role == 'owner' && get(pPath()).data.active == true)); }
-    function pUser() { return signedIn() && (bootstrapOwner() || (pExists() && get(pPath()).data.active == true)); }
 
-    // ---- Plating Job Work (allowlist-locked: only active users-doc emails + bootstrap owner) ----
-    match /apps/platingjobwork/challans/{id} { allow read, write: if pUser(); }
-    match /apps/platingjobwork/logs/{id}     { allow read, write: if pUser(); }
-    match /apps/platingjobwork/meta/{id}     { allow read, write: if pUser(); }
-    match /apps/platingjobwork/incoming/{id} { allow read, write: if pUser(); }
+    // ---- Plating Job Work (role-based on users only) ----
+    match /apps/platingjobwork/challans/{id} { allow read, write: if signedIn(); }
+    match /apps/platingjobwork/logs/{id}     { allow read, write: if signedIn(); }
+    match /apps/platingjobwork/meta/{id}     { allow read, write: if signedIn(); }
+    match /apps/platingjobwork/incoming/{id} { allow read, write: if signedIn(); }
     match /apps/platingjobwork/users/{id}    { allow read: if signedIn(); allow write: if pOwner(); }
 
-    // ---- fitting role helpers ----
-    function fPath() { return /databases/$(database)/documents/apps/fitting/users/$(tEmail()); }
-    function fExists() { return tEmail() != '' && exists(fPath()); }
-    function fOwner() { return signedIn() && (bootstrapOwner() || (fExists() && get(fPath()).data.role == 'owner' && get(fPath()).data.active == true)); }
-    function fUser() { return signedIn() && (bootstrapOwner() || (fExists() && get(fPath()).data.active == true)); }
-
-    // ---- Fitting (allowlist-locked: only active users-doc emails + bootstrap owner) ----
-    match /apps/fitting/users/{id} { allow read: if signedIn(); allow write: if fOwner(); }
-    match /apps/fitting/{collection}/{docId} { allow read, write: if fUser() && collection != 'users'; }
-    match /apps/fitting { allow read, write: if fUser(); }
+    // ---- Fitting (LIVE — unchanged) ----
+    match /apps/fitting/{collection}/{docId} { allow read, write: if signedIn(); }
+    match /apps/fitting { allow read, write: if signedIn(); }
 
     // ---- Orders (allowlist-locked: only Google users added in Admin → Users) ----
     function oPath()  { return /databases/$(database)/documents/apps/orders/users/$(tEmail()); }
