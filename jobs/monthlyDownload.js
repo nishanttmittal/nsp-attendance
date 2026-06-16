@@ -1,25 +1,17 @@
-// Monthly attendance download from the V26 portal (ERP_NewMonthly.aspx).
+// Monthly attendance download — works on EITHER portal (vendor flip-flops old <-> V26).
 //   MONTH=0|1|2   (0=current month-to-date, 1=last month, 2=two months ago)
 //   SCOPE=all | dept:<DEPARTMENT NAME> | emp:<EMP CODE>
 //   REPORT=Button10|summary (default) | Button15|inout | Button8|ot | Button13|late | perfbtn|performance
 //   FROM/TO=dd/MM/yyyy optional custom range. DRY=true prepares only.
 const path = require('path');
 const fs = require('fs');
-const { session, selectFewEmployee, setField } = require('./lib/realtime');
+const { session, selectFewEmployee, setField, downloadMonthly } = require('./lib/realtime');
 
-const URL = 'https://onlinerealsoft.com/ERP_NewMonthly.aspx';   // V26 (was NewMonthly.aspx)
 const OUT_DIR = path.resolve(__dirname, 'downloads');
 const MONTH = parseInt(process.env.MONTH || '0', 10);
 const SCOPE = process.env.SCOPE || 'all';
 const REPORT = process.env.REPORT || 'Button10';
 const DRY = process.env.DRY === 'true';
-
-// Direct-download reports → their V26 LinkButton id.
-const LINK = { Button10: 'LinkButton21', summary: 'LinkButton21', Button15: 'LinkButton22', inout: 'LinkButton22',
-  Btn_MonthlyMusterBookReport: 'LinkButton17', muster: 'LinkButton17', Btn_MonthlyInOutReport: 'LinkButton27' };
-// Viewer reports → the CboReportFormat option text (rendered via "Show Report", then SSRS export).
-const VIEWER = { perfbtn: 'Performence', performance: 'Performence', Button8: 'OT Summary', ot: 'OT Summary',
-  Button13: 'Late Arrival', late: 'Late Arrival' };
 
 const pad = (n) => String(n).padStart(2, '0');
 const fmt = (d) => `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()}`;
@@ -31,49 +23,61 @@ function monthRange(offset) {
   return { from: first, to, label: `${first.getFullYear()}-${pad(first.getMonth() + 1)}` };
 }
 
+// Which kind of report is REPORT? direct-download (summary/inout) reuse the dual downloadMonthly helper.
+const DIRECT = { Button10: 'summary', summary: 'summary', Button15: 'inout', inout: 'inout' };
+// Viewer reports → CboReportFormat option text (V26) / the old #MainContent_<id> button.
+const VIEWER_FMT = { perfbtn: 'Performence', performance: 'Performence', Button8: 'OT Summary', ot: 'OT Summary', Button13: 'Late Arrival', late: 'Late Arrival' };
+const VIEWER_OLD_BTN = { perfbtn: 'perfbtn', performance: 'perfbtn', Button8: 'Button8', ot: 'Button8', Button13: 'Button13', late: 'Button13' };
+
 (async () => {
   if (!fs.existsSync(OUT_DIR)) fs.mkdirSync(OUT_DIR, { recursive: true });
   const { browser, page } = await session();
   try {
-    await page.goto(URL, { waitUntil: 'domcontentloaded' }); await page.waitForTimeout(1800);
     const { from, to, label } = monthRange(MONTH);
-    await setField(page, '#txtdate', process.env.FROM || fmt(from));     // V26 ids
-    await setField(page, '#txtdateto', process.env.TO || fmt(to));
+    const F = process.env.FROM || fmt(from), T = process.env.TO || fmt(to);
+    const scopeTag = SCOPE.startsWith('emp:') ? 'emp-' + SCOPE.slice(4) : SCOPE.startsWith('dept:') ? 'dept-' + SCOPE.slice(5).replace(/\s+/g, '_') : 'all';
 
-    let scopeTag = 'all';
-    if (SCOPE.startsWith('emp:')) {
-      const sel = await selectFewEmployee(page, SCOPE.slice(4));         // V26 LstEmployee picker
-      console.log('  picked employee:', sel.label, '(checked:', sel.checkedCount + ')'); scopeTag = 'emp-' + SCOPE.slice(4);
-    } else if (SCOPE.startsWith('dept:')) {
-      // best-effort: filter the list by department name, then Apply Filter
-      const dept = SCOPE.slice(5);
-      await setField(page, '#TextBox1', dept).catch(() => {});
-      await page.click('#Filter').catch(() => {});
-      await page.waitForTimeout(1500);
-      scopeTag = 'dept-' + dept.replace(/\s+/g, '_');
-    }
-
-    console.log(`Month ${label}  range ${process.env.FROM || fmt(from)}..${process.env.TO || fmt(to)}  scope=${SCOPE}  report=${REPORT}`);
-    if (DRY) { console.log('=> DRY: prepared only'); return; }
-
-    let outName = `monthly_${label}_${scopeTag}.xls`;
-    let outPath = path.join(OUT_DIR, outName);
-
-    if (LINK[REPORT]) {
-      // direct file download
-      const [dl] = await Promise.all([page.waitForEvent('download', { timeout: 45000 }), page.click('#' + LINK[REPORT])]);
+    // DIRECT reports + whole-company scope → the dual helper handles portal + dates + button.
+    if (DIRECT[REPORT] && SCOPE === 'all') {
+      if (DRY) { console.log(`DRY: ${label} ${F}..${T} ${DIRECT[REPORT]} all`); return; }
+      const dl = await downloadMonthly(page, F, T, DIRECT[REPORT]);
+      const outPath = path.join(OUT_DIR, `monthly_${label}_all.xls`);
       await dl.saveAs(outPath);
-      console.log(`=> DOWNLOADED ${outName} (${fs.statSync(outPath).size} bytes) suggested="${dl.suggestedFilename()}"`);
+      console.log(`=> DOWNLOADED ${path.basename(outPath)} (${fs.statSync(outPath).size} bytes)`);
       return;
     }
 
-    // viewer report: pick the format, render, then export to PDF
-    const fmtName = VIEWER[REPORT] || 'Performence';
-    await page.selectOption('#CboReportFormat', { label: fmtName }).catch(async () => {
-      await page.selectOption('#CboReportFormat', { value: fmtName }).catch(() => {});
-    });
-    await page.waitForTimeout(500);
-    await Promise.all([page.waitForLoadState('networkidle', { timeout: 60000 }).catch(() => {}), page.click('#showreport')]);
+    // Otherwise navigate the monthly page directly (detect portal for ids).
+    await page.goto('https://onlinerealsoft.com/NewMonthly.aspx', { waitUntil: 'domcontentloaded' }); await page.waitForTimeout(1300);
+    const isOld = await page.locator('#MainContent_txtdate').count().catch(() => 0);
+    if (!isOld) { await page.goto('https://onlinerealsoft.com/ERP_NewMonthly.aspx', { waitUntil: 'domcontentloaded' }); await page.waitForTimeout(1500); }
+    if (isOld && await page.locator('#MainContent_chknewwindow').isChecked().catch(() => false)) await page.uncheck('#MainContent_chknewwindow').catch(() => {});
+    await setField(page, isOld ? '#MainContent_txtdate' : '#txtdate', F);
+    await setField(page, isOld ? '#MainContent_txttodate' : '#txtdateto', T);
+
+    if (SCOPE.startsWith('emp:')) { const sel = await selectFewEmployee(page, SCOPE.slice(4)); console.log('  picked:', sel.label, '(checked', sel.checkedCount + ')'); }
+    else if (SCOPE.startsWith('dept:')) { await setField(page, isOld ? '#MainContent_TextBox1' : '#TextBox1', SCOPE.slice(5)).catch(() => {}); await page.click(isOld ? '#MainContent_Filter' : '#Filter').catch(() => {}); await page.waitForTimeout(1500); }
+
+    console.log(`Month ${label} ${F}..${T} scope=${SCOPE} report=${REPORT} portal=${isOld ? 'old' : 'V26'}`);
+    if (DRY) { console.log('=> DRY: prepared only'); return; }
+
+    let outName, outPath;
+    if (DIRECT[REPORT]) {            // direct download with a scope selected
+      const btn = isOld ? (DIRECT[REPORT] === 'inout' ? '#MainContent_Button15' : '#MainContent_Button10') : (DIRECT[REPORT] === 'inout' ? '#LinkButton22' : '#LinkButton21');
+      outName = `monthly_${label}_${scopeTag}.xls`; outPath = path.join(OUT_DIR, outName);
+      const [dl] = await Promise.all([page.waitForEvent('download', { timeout: 45000 }), page.click(btn)]);
+      await dl.saveAs(outPath);
+      console.log(`=> DOWNLOADED ${outName} (${fs.statSync(outPath).size} bytes)`);
+      return;
+    }
+
+    // Viewer report (performance/ot/late): render then SSRS Export → PDF.
+    if (isOld) { await page.click('#MainContent_' + (VIEWER_OLD_BTN[REPORT] || 'perfbtn')).catch(() => {}); }
+    else {
+      await page.selectOption('#CboReportFormat', { label: VIEWER_FMT[REPORT] || 'Performence' }).catch(() => {});
+      await page.waitForTimeout(500);
+      await page.click('#showreport').catch(() => {});
+    }
     await page.waitForTimeout(2500);
     try {
       const exportBtn = page.locator('a[title="Export"]').first();
@@ -81,14 +85,13 @@ function monthRange(offset) {
       await exportBtn.click();
       const pdfLink = page.locator('a[title="PDF"]').first();
       await pdfLink.waitFor({ state: 'visible', timeout: 10000 });
-      outName = `report_${REPORT}_${label}_${scopeTag}.pdf`;
-      outPath = path.join(OUT_DIR, outName);
+      outName = `report_${REPORT}_${label}_${scopeTag}.pdf`; outPath = path.join(OUT_DIR, outName);
       const [dl] = await Promise.all([page.waitForEvent('download', { timeout: 90000 }), pdfLink.click()]);
       await dl.saveAs(outPath);
       console.log(`=> DOWNLOADED ${outName} (${fs.statSync(outPath).size} bytes) via viewer-export`);
     } catch (e2) {
       await page.screenshot({ path: path.join(OUT_DIR, 'monthly_after_click.png'), fullPage: true }).catch(() => {});
-      console.log(`=> NO DOWNLOAD (viewer-export: ${e2.message.split('\n')[0]}). Screenshot saved.`);
+      console.log(`=> NO DOWNLOAD (viewer-export: ${e2.message.split('\n')[0]}).`);
     }
   } finally { await browser.close(); }
 })();

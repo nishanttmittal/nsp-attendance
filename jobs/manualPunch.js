@@ -26,21 +26,26 @@ function bad(msg) { console.error('ERROR: ' + msg); process.exit(1); }
 
   const { browser, page } = await session();
   try {
-    await page.goto(URL, { waitUntil: 'domcontentloaded' });
-    await page.waitForTimeout(1800);
+    // dual-portal: OLD Manual_Punch.aspx (#MainContent_ + #cmdsave) or V26 ERP_ManualEntry (# + #BtnAdd1)
+    await page.goto('https://onlinerealsoft.com/Manual_Punch.aspx', { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(1500);
+    const isOld = await page.locator('#MainContent_TxtPunchDate').count().catch(() => 0);
+    if (!isOld) { await page.goto('https://onlinerealsoft.com/ERP_ManualEntry.aspx', { waitUntil: 'domcontentloaded' }); await page.waitForTimeout(1800); }
+    const P = isOld ? '#MainContent_' : '#';
+    const insertBtn = isOld ? '#MainContent_cmdsave' : '#BtnAdd1';
 
     const sel = await selectFewEmployee(page, EMP);
     if (sel.checkedCount !== 1) bad(`SAFETY ABORT: ${sel.checkedCount} employees selected (expected 1) — NOT inserting`);
     const who = sel.label;
-    await setField(page, '#TxtPunchDate', DATE);       // V26 ids (dropped #MainContent_ prefix)
-    await setField(page, '#Txtdateto', DATE);          // V26: single day = same from/to
-    if (IN) await setField(page, '#txttime', IN);
-    if (OUT) await setField(page, '#TxtOutTime', OUT);
-    await setField(page, '#txtremark', REMARK);
+    await setField(page, P + 'TxtPunchDate', DATE);
+    if (!isOld) await setField(page, '#Txtdateto', DATE);   // V26 also has a to-date (single day = same)
+    if (IN) await setField(page, P + 'txttime', IN);
+    if (OUT) await setField(page, P + 'TxtOutTime', OUT);
+    await setField(page, P + 'txtremark', REMARK);
 
-    console.log(`Employee: ${who}`);
+    console.log(`Employee: ${who} (portal: ${isOld ? 'old' : 'V26'}, checked: ${sel.checkedCount})`);
     console.log(`Date ${DATE}  IN ${IN || '—'}  OUT ${OUT || '—'}  remark="${REMARK}"`);
-    console.log(`Verify -> date="${await page.locator('#TxtPunchDate').inputValue()}" in="${await page.locator('#txttime').inputValue()}" out="${await page.locator('#TxtOutTime').inputValue()}"`);
+    console.log(`Verify -> date="${await page.locator(P + 'TxtPunchDate').inputValue()}" in="${await page.locator(P + 'txttime').inputValue()}" out="${await page.locator(P + 'TxtOutTime').inputValue()}"`);
     await page.screenshot({ path: path.join(OUT_DIR, 'manualpunch_prepared.png'), fullPage: true });
 
     if (DRY) { console.log('=> DRY: not inserted'); return; }
@@ -48,7 +53,7 @@ function bad(msg) { console.error('ERROR: ' + msg); process.exit(1); }
     const dialogs = []; page.on('dialog', d => { dialogs.push(d.message()); d.accept().catch(() => {}); });
     await Promise.all([
       page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {}),
-      page.click('#BtnAdd1'),    // V26: "Insert Manual Attendance" (was #MainContent_cmdsave)
+      page.click(insertBtn),
     ]);
     await page.waitForTimeout(2000);
     const dialogText = dialogs.join(' | ');

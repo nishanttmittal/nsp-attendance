@@ -81,18 +81,34 @@ async function readGrid(page) {
 // not unchecking the rest.) Returns { label, checkedCount }; callers MUST verify checkedCount===1
 // before any write (insert). Was: optFewEmployee radio + chkemployeelist on the old portal.
 async function selectFewEmployee(page, code) {
-  await page.waitForSelector('input[id^="LstEmployee_"]', { timeout: 30000 }).catch(() => {});
+  const isV26 = await page.locator('input[id^="LstEmployee_"]').count().catch(() => 0);
+  if (isV26) {
+    // V26: the LstEmployee list DEFAULTS ALL-CHECKED → uncheck everything, then check only the target.
+    const res = await page.evaluate((c) => {
+      const boxes = Array.from(document.querySelectorAll('input[id^="LstEmployee_"]'));
+      const rowText = cb => { const r = cb.closest('tr') || cb.parentElement; return (r && r.innerText ? r.innerText : '').replace(/\s+/g, ' ').trim(); };
+      boxes.forEach(cb => { if (cb.checked) { cb.checked = false; cb.dispatchEvent(new Event('click', { bubbles: true })); cb.dispatchEvent(new Event('change', { bubbles: true })); } });
+      const target = boxes.find(cb => rowText(cb).includes(c));
+      if (!target) return { ok: false, count: boxes.length };
+      target.checked = true; target.dispatchEvent(new Event('click', { bubbles: true })); target.dispatchEvent(new Event('change', { bubbles: true }));
+      return { ok: true, label: rowText(target), checkedCount: boxes.filter(b => b.checked).length };
+    }, code);
+    if (!res.ok) throw new Error(`Employee ${code} not found among ${res.count}`);
+    return res;
+  }
+  // OLD portal: "Few Employee" radio (AutoPostBack loads the checkbox list), then tick the one whose label has the code.
+  const clickRadio = () => page.locator('#optFewEmployee').evaluate(r => { if (!r.checked) r.click(); }).catch(() => {});
+  const waitList = () => page.waitForSelector('input[id^="chkemployeelist_"]', { timeout: 30000 }).then(() => true).catch(() => false);
+  await clickRadio();
+  if (!(await waitList())) { await clickRadio(); await waitList(); }
+  await page.waitForLoadState('networkidle', { timeout: 20000 }).catch(() => {});
   const res = await page.evaluate((c) => {
-    const boxes = Array.from(document.querySelectorAll('input[id^="LstEmployee_"]'));
-    const rowText = cb => { const r = cb.closest('tr') || cb.parentElement; return (r && r.innerText ? r.innerText : '').replace(/\s+/g, ' ').trim(); };
-    // 1) uncheck ALL (synthetic 'click' fires handlers WITHOUT toggling .checked, so set then fire change)
-    boxes.forEach(cb => { if (cb.checked) { cb.checked = false; cb.dispatchEvent(new Event('click', { bubbles: true })); cb.dispatchEvent(new Event('change', { bubbles: true })); } });
-    // 2) check ONLY the target
-    const target = boxes.find(cb => rowText(cb).includes(c));
+    const boxes = Array.from(document.querySelectorAll('input[id^="chkemployeelist_"]'));
+    const labelOf = cb => { const l = document.querySelector(`label[for="${cb.id}"]`); return (l ? l.innerText : (cb.parentElement ? cb.parentElement.innerText : '')).trim(); };
+    const target = boxes.find(cb => labelOf(cb).includes(c));
     if (!target) return { ok: false, count: boxes.length };
-    target.checked = true; target.dispatchEvent(new Event('click', { bubbles: true })); target.dispatchEvent(new Event('change', { bubbles: true }));
-    const checkedCount = boxes.filter(b => b.checked).length;
-    return { ok: true, label: rowText(target), checkedCount };
+    if (!target.checked) target.click();
+    return { ok: true, label: labelOf(target), checkedCount: boxes.filter(b => b.checked).length };
   }, code);
   if (!res.ok) throw new Error(`Employee ${code} not found among ${res.count}`);
   return res;   // { label, checkedCount }
@@ -108,16 +124,18 @@ async function setField(page, sel, value) {
   }, value);
 }
 
-// Reprocess a date range for all employees (recomputes attendance under current rules).
+// Reprocess a date range for all employees (recomputes attendance). Works on EITHER portal.
 async function reprocessRange(page, fromDdmmyyyy, toDdmmyyyy) {
-  await page.goto('https://onlinerealsoft.com/ERP_ManualProcess.aspx', { waitUntil: 'domcontentloaded' });   // V26 portal
-  await page.waitForTimeout(1500);
-  await setField(page, '#txtdate', fromDdmmyyyy);      // V26: was #MainContent_txtdate
-  await setField(page, '#txtdateto', toDdmmyyyy);      // V26: was #MainContent_txttodate
-  await Promise.all([
-    page.waitForLoadState('networkidle', { timeout: 90000 }).catch(() => {}),
-    page.click('#cmdShowReport'),                      // V26: "Process Data" (was #MainContent_cmdShowReport)
-  ]);
+  await page.goto('https://onlinerealsoft.com/ManualProcess.aspx', { waitUntil: 'domcontentloaded' });   // OLD portal
+  await page.waitForTimeout(1300);
+  const isOld = await page.locator('#MainContent_txtdate').count().catch(() => 0);
+  if (!isOld) { await page.goto('https://onlinerealsoft.com/ERP_ManualProcess.aspx', { waitUntil: 'domcontentloaded' }); await page.waitForTimeout(1500); }
+  const dFrom = isOld ? '#MainContent_txtdate' : '#txtdate';
+  const dTo = isOld ? '#MainContent_txttodate' : '#txtdateto';
+  const btn = isOld ? '#MainContent_cmdShowReport' : '#cmdShowReport';   // "Process Data"
+  await setField(page, dFrom, fromDdmmyyyy);
+  await setField(page, dTo, toDdmmyyyy);
+  await Promise.all([page.waitForLoadState('networkidle', { timeout: 90000 }).catch(() => {}), page.click(btn)]);
   await page.waitForTimeout(3000);
 }
 const reprocessDay = (page, ddmmyyyy) => reprocessRange(page, ddmmyyyy, ddmmyyyy);
