@@ -6,6 +6,13 @@ on:
   repository_dispatch:       # external pinger heartbeat (GitHub cron is unreliable)
     types: [heartbeat]
 
+# Only ONE worker at a time. Multiple concurrent workers all log into the SINGLE Realtime
+# session and collide (caused mass manual-punch failures 2026-06-14 when a heartbeat backlog
+# ran ~6 workers at once). Queue extra runs instead of cancelling (never kill a run mid-insert).
+concurrency:
+  group: nsp-queue-worker
+  cancel-in-progress: false
+
 jobs:
   worker:
     runs-on: ubuntu-latest
