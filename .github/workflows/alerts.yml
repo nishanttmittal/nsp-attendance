@@ -5,7 +5,7 @@ on:
     - cron: '0 16 * * *'    # 21:30 IST — evening missed-punch (no OUT)
     - cron: '30 4 * * *'    # 10:00 IST — morning missed-punch (yesterday)
     - cron: '30 3 * * *'    # 09:00 IST — long absence (>4 days)
-    - cron: '0 5 * * *'     # 10:30 IST — morning attendance summary + understaffed
+    - cron: '0 7 * * *'     # 12:30 IST — morning attendance summary (after portal rolls to today; also date-guarded)
     - cron: '30 1 * * *'    # 07:00 IST — reprocess yesterday
     - cron: '45 1 * * *'    # 07:15 IST — publish salary attendance (att_attendance)
     - cron: '0 2 * * 0'     # Sun 07:30 IST — weekly backup
@@ -47,7 +47,7 @@ jobs:
             "headcount"|"10 12 * * *")   node eveningHeadcount.js ;;
             "evening-miss"|"0 16 * * *")  MODE=evening node missedPunch.js ;;
             "morning-miss"|"30 4 * * *")  MODE=morning node missedPunch.js ;;
-            "morning-summary"|"0 5 * * *") node morningSummary.js ;;
+            "morning-summary"|"0 7 * * *") node morningSummary.js ;;
             "long-absence"|"30 3 * * *")  THRESHOLD=4 node longAbsence.js ;;
             "reprocess"|"30 1 * * *")     node dailyReprocess.js ;;
             "salary-data"|"45 1 * * *")   node publishSalaryData.js ;;
