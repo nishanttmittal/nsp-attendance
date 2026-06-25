@@ -20,7 +20,28 @@ async function recipients() {
   return [...set];
 }
 
+// Mirror every alert into the WhatsApp outbox (`wa_outbox`) so the WhatsApp
+// bridge — the only process logged into WhatsApp — can also deliver it to the
+// owner's phone. Best-effort and awaited (so the write flushes before a short-
+// lived GitHub Actions run exits); a Firestore error here must NEVER block the
+// Telegram alert, which is the reliable channel.
+async function enqueueWhatsApp(text) {
+  try {
+    const { db, FieldValue } = require('./firestore');
+    await db().collection('wa_outbox').add({
+      text,
+      status: 'pending',
+      channel: 'staff',
+      createdAt: FieldValue.serverTimestamp(),
+      createdAtMs: Date.now(),
+    });
+  } catch (e) {
+    console.error('wa_outbox enqueue failed (non-fatal):', e.message);
+  }
+}
+
 async function sendTelegram(text) {
+  await enqueueWhatsApp(text); // also deliver on WhatsApp (best-effort, never throws)
   if (!TOKEN) { console.log('[DRY notify — no token] would send:\n' + text); return { dry: true }; }
   const rcpts = await recipients();
   if (!rcpts.length) { console.log('[DRY notify — no chat id] would send:\n' + text); return { dry: true }; }
