@@ -137,6 +137,8 @@ match /att_daily_stats/{d} { allow read: if nonAnon(); allow write: if false; }
     match /laser_sync_state/{id} { allow read: if laserUser(); allow write: if false; }
     // Owner-editable: maps a machine file name to its real size (Fix-sizes screen).
     match /laser_size_map/{id}   { allow read: if laserUser(); allow write: if laserUser(); }
+    // Daily meter readings entered in-app by staff/owner (the only client-writable laser data).
+    match /laser_meter/{id}      { allow read: if laserUser(); allow write: if laserUser(); }
     // Allowlist: any signed-in user may READ (to resolve their own access at login); owner writes.
     match /apps/laser/users/{id} { allow read: if nonAnon(); allow write: if bootstrapOwner(); }
 
