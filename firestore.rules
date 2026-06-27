@@ -137,6 +137,8 @@ match /att_daily_stats/{d} { allow read: if nonAnon(); allow write: if false; }
     match /laser_jobs/{id}       { allow read: if laserUser(); allow write: if false; }
     // Cost rates (₹/min, salaries, rent, electricity…) — owner-editable via the in-app rate editor.
     match /laser_config/{id}     { allow read: if laserUser(); allow write: if laserOwner(); }
+    // Audit log of rate edits (who/when/old->new). Owner-written, append-only in practice.
+    match /laser_config_log/{id} { allow read: if laserUser(); allow write: if laserOwner(); }
     match /laser_sync_state/{id} { allow read: if laserUser(); allow write: if false; }
     // Owner-editable: maps a machine file name to its real size (Fix-sizes screen).
     match /laser_size_map/{id}   { allow read: if laserUser(); allow write: if laserUser(); }
