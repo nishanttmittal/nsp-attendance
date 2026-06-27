@@ -130,31 +130,15 @@ match /att_daily_stats/{d} { allow read: if nonAnon(); allow write: if false; }
     // emails in apps/laser/users). Costing/margins are competitively sensitive — no anon reads.
     function laserPath() { return /databases/$(database)/documents/apps/laser/users/$(tEmail()); }
     function laserUser() { return nonAnon() && (bootstrapOwner() || (tEmail() != '' && exists(laserPath()) && get(laserPath()).data.active == true)); }
-    // Owner = bootstrap, or an active allowlisted user whose role is 'owner' (not a 'meter' staff).
-    function laserOwner() { return nonAnon() && (bootstrapOwner() || (tEmail() != '' && exists(laserPath()) && get(laserPath()).data.active == true && get(laserPath()).data.role == 'owner')); }
     match /laser_meta/{id}       { allow read: if laserUser(); allow write: if false; }
     match /laser_days/{id}       { allow read: if laserUser(); allow write: if false; }
     match /laser_jobs/{id}       { allow read: if laserUser(); allow write: if false; }
-    // Cost rates (₹/min, salaries, rent, electricity…) — owner-editable via the in-app rate editor.
-    match /laser_config/{id}     { allow read: if laserUser(); allow write: if laserOwner(); }
+    match /laser_config/{id}     { allow read: if laserUser(); allow write: if false; }
     match /laser_sync_state/{id} { allow read: if laserUser(); allow write: if false; }
     // Owner-editable: maps a machine file name to its real size (Fix-sizes screen).
     match /laser_size_map/{id}   { allow read: if laserUser(); allow write: if laserUser(); }
-    // Daily meter readings entered in-app by staff/owner (the only client-writable laser data).
-    match /laser_meter/{id}      { allow read: if laserUser(); allow write: if laserUser(); }
-    // Job catalog (name + photo, optional file link) — staff/owner add for recall.
-    match /laser_job_catalog/{id} { allow read: if laserUser(); allow write: if laserUser(); }
     // Allowlist: any signed-in user may READ (to resolve their own access at login); owner writes.
     match /apps/laser/users/{id} { allow read: if nonAnon(); allow write: if bootstrapOwner(); }
-
-    // ---- Inbound leads (IndiaMART + WhatsApp) — read-only command-center feed.
-    // Written ONLY by the lead pollers (Admin SDK). Buyer phone numbers = PII, so
-    // restrict reads to the non-anonymous bootstrap owner (the CEO dashboard login).
-    match /indiamart_leads/{id} { allow read: if nonAnon() && bootstrapOwner(); allow write: if false; }
-    match /whatsapp_leads/{id}  { allow read: if nonAnon() && bootstrapOwner(); allow write: if false; }
-    // Owner-only triage flags (followup / scrap). Kept SEPARATE from the captured
-    // lead data above so the dashboard never mutates the source feed.
-    match /lead_status/{id}     { allow read, write: if nonAnon() && bootstrapOwner(); }
 
     // Lock everything else.
     match /{document=**} { allow read, write: if false; }
