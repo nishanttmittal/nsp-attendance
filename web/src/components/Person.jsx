@@ -54,8 +54,8 @@ export default function Person({ code, mk, user, onBack }) {
         {pay.fines > 0 && <Row k="− Fine" v={rupee(pay.fines)} />}
         {pay.loanInstallment > 0 && <Row k="− Loan" v={rupee(pay.loanInstallment)} />}
         {pay.advanceRecovered > 0 && <Row k="− Advance" v={rupee(pay.advanceRecovered)} />}
-        <div className="flex justify-between mt-1 pt-1.5 border-t font-bold"><span>This month ({mk})</span><span className="text-red-700">{rupee(locked ? md.payment.net : pay.net)}</span></div>
-        {locked && <p className="text-xs text-green-700 mt-1">✓ Paid {md.payment.date} ({md.payment.mode})</p>}
+        <div className="flex justify-between mt-1 pt-1.5 border-t font-bold"><span>This month ({mk})</span><span className="text-red-700">{rupee(locked && md.payment ? md.payment.net : pay.net)}</span></div>
+        {md.payment && <p className="text-xs text-green-700 mt-1">✓ Paid {md.payment.date} ({md.payment.mode})</p>}
         {pay.advanceBalanceCarried > 0 && <p className="text-xs text-amber-700 mt-1">Still owes {rupee(pay.advanceBalanceCarried)} advance — carries forward.</p>}
         <div className="grid grid-cols-3 gap-2 mt-3">
           <button onClick={() => sharePdf(payslipOnePdf(emp, pay, mk), `payslip-${code}-${mk}.pdf`)} className="border border-gray-300 rounded-lg py-2 text-sm font-medium">📄 PDF</button>

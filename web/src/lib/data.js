@@ -383,7 +383,11 @@ export async function loadAbsenceDockTasks(month) {
   const sal = {}; salSnap.forEach(d => { sal[d.id] = d.data(); });
   const staff = [];
   attSnap.forEach(d => {
-    const absent = Number(d.data().absentDays) || 0;
+    // read the SELECTED month's absences (months[mk]), not the top-level value
+    // (which is only the current month) — else past-month review shows wrong docks.
+    const ad = d.data();
+    const rec = ad.months?.[mk] || (ad.month === mk ? ad : null);
+    const absent = Number(rec?.absentDays) || 0;
     const docks = Math.floor(absent / 3);
     const s = sal[d.id];
     if (docks < 1 || !s || !(s.amount || s.wage)) return;
