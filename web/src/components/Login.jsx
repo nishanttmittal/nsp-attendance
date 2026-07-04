@@ -15,6 +15,7 @@ export default function Login() {
   return (
     <div className="min-h-full grid place-items-center p-6">
       <div className="w-full max-w-sm bg-white rounded-xl shadow p-6 text-center">
+        <img src={`${import.meta.env.BASE_URL}unico-logo.png`} alt="UNICO" className="h-14 mx-auto mb-3 object-contain" />
         <h1 className="text-xl font-bold text-red-700">NSP Attendance</h1>
         <p className="text-sm text-gray-500 mb-5">Sign in to continue</p>
 
