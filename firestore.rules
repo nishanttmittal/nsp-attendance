@@ -193,12 +193,15 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
     function tfIsGaadiwala() { return signedIn() && tfExists() && tfData().role == 'gaadiwala' && tfData().active == true; }
     function tfMyTid() { return tfExists() ? tfData().transporterId : ''; }
 
-    // Reads require a NON-anonymous (Google) login — an anon device opening the
-    // link must not read the access-email list, gaadiwala names/phones, or
-    // destination masters (PII). The app resolves role only after Google sign-in.
+    // Reads require a NON-anonymous (Google) login. Gaadiwala names/phones and
+    // destination masters are restricted to app MEMBERS (manager/gaadiwala) — a
+    // random signed-in Google account that isn't in the app can't read them
+    // (P1-1). users stays nonAnon-read (role resolution reads the collection;
+    // own-doc-only is a deferred AuthGate refactor). The app resolves role only
+    // after Google sign-in; the bootstrap owner is covered by tfIsManager().
     match /apps/transportfreight/users/{id}        { allow read: if nonAnon(); allow write: if tfIsOwner(); }
-    match /apps/transportfreight/transporters/{id} { allow read: if nonAnon(); allow write: if tfIsManager(); }
-    match /apps/transportfreight/destinations/{id} { allow read: if nonAnon(); allow write: if tfIsManager(); }
+    match /apps/transportfreight/transporters/{id} { allow read: if tfIsManager() || tfIsGaadiwala(); allow write: if tfIsManager(); }
+    match /apps/transportfreight/destinations/{id} { allow read: if tfIsManager() || tfIsGaadiwala(); allow write: if tfIsManager(); }
     match /apps/transportfreight/meta/{id}         { allow read, write: if tfIsManager(); }
     match /apps/transportfreight/logs/{id}         { allow read: if tfIsManager(); allow create: if nonAnon(); }
     match /apps/transportfreight/entries/{id} {
