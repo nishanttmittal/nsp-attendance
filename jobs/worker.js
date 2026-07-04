@@ -122,6 +122,10 @@ async function handle(type, p) {
     const e = snap.data();
     const md = (e.months || {})[p.month] || {};
     if (!md.approved) throw new Error('not approved yet');
+    // Already-paid guard: a second mark_paid (double-tap / duplicate job / owner+manager
+    // both pay) must NOT silently overwrite the recorded payment and destroy its audit.
+    // A settlement re-open (md.payment.settlement) is the only legitimate re-pay.
+    if (md.payment && !md.payment.settlement) return `already paid on ${md.payment.date} (₹${md.payment.net}) — ignored`;
     const due = Number(md.approvedNet || 0);
     const paidNet = p.amount != null ? Number(p.amount) : due;   // actual amount handed over
     const extra = Math.max(0, paidNet - due);                     // paid more than earned → advance

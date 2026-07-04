@@ -44,9 +44,15 @@ const ok = (name, cond, detail = '') => { (cond ? pass++ : fail++); console.log(
     ok('Telegram fired once', sent.length === 1);
     ok('Telegram line includes amount, mode, remark + who', /14,200/.test(sent[0]) && /bank/.test(sent[0]) && /paid at gate/.test(sent[0]) && /by sim-manager/.test(sent[0]), sent[0]);
 
-    // --- B) pay WITHOUT a remark (optional field empty) ---
+    // --- A2) SAFETY: a second mark_paid on an already-paid month is ignored (no overwrite) ---
+    sent.length = 0;
+    const r2 = await handle('mark_paid', { code: CODE, month: MK, mode: 'cash', _by: 'sim-manager' });
+    ok('re-pay of an already-paid month is ignored', /already paid/.test(r2), r2);
+    ok('original payment record preserved (bank/₹14200)', (await sal.get()).data().months[MK].payment.net === 14200);
+
+    // --- B) pay WITHOUT a remark (optional field empty) — fresh unpaid month (full reset clears A's payment) ---
     console.log('\nB. Pay with NO remark (optional) — Cash');
-    await sal.set({ months: { [MK]: { approved: { by: 'sim-owner', at: new Date().toISOString() }, approvedNet: 9000, approvedCarry: 0 } } }, { merge: true });
+    await sal.set({ name: 'TEST Payflow', months: { [MK]: { approved: { by: 'sim-owner', at: new Date().toISOString() }, approvedNet: 9000, approvedCarry: 0 } } });
     sent.length = 0;
     await handle('mark_paid', { code: CODE, month: MK, mode: 'cash', remark: '', _by: 'sim-manager' });
     const b = (await sal.get()).data().months[MK].payment;

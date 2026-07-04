@@ -23,22 +23,25 @@ async function drainSelfPunch() {
     const emp = await fdb.collection('att_salary').doc(code).get();
     const want = emp.exists ? emp.data().selfPunchToken : null;
     const valid = taps.filter(t => want && t.token === want);
-    // drop everything for this code (valid ones get applied below; invalid are ignored)
-    await Promise.all(taps.map(t => t.ref.delete()));
-    if (!valid.length) continue;
 
-    const punchDoc = fdb.collection('att_punch').doc(code);
-    const cur = (await punchDoc.get()).data() || {};
-    const days = { ...(cur.days || {}) };
-    for (const t of valid) {
-      const day = days[t.date] || (days[t.date] = {});
-      if (t.dir === 'in') day.in = day.in && day.in < t.localTime ? day.in : t.localTime;   // earliest IN
-      else day.out = day.out && day.out > t.localTime ? day.out : t.localTime;              // latest OUT
+    if (valid.length) {
+      const punchDoc = fdb.collection('att_punch').doc(code);
+      const cur = (await punchDoc.get()).data() || {};
+      const days = { ...(cur.days || {}) };
+      for (const t of valid) {
+        const day = days[t.date] || (days[t.date] = {});
+        if (t.dir === 'in') day.in = day.in && day.in < t.localTime ? day.in : t.localTime;   // earliest IN
+        else day.out = day.out && day.out > t.localTime ? day.out : t.localTime;              // latest OUT
+      }
+      await punchDoc.set({
+        name: emp.data().name || '', standardHours: emp.data().standardHours || '', days,
+      }, { merge: true });
+      applied += valid.length;
     }
-    await punchDoc.set({
-      name: emp.data().name || '', standardHours: emp.data().standardHours || '', days,
-    }, { merge: true });
-    applied += valid.length;
+    // Delete taps ONLY AFTER att_punch is safely written (write-before-delete): a crash
+    // before this leaves the taps for the next cycle → no lost punch. Re-applying is safe
+    // (earliest-IN / latest-OUT is idempotent). Invalid/forged taps are dropped here too.
+    await Promise.all(taps.map(t => t.ref.delete()));
   }
   return applied;
 }
