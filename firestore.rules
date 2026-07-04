@@ -200,7 +200,7 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
     match /apps/transportfreight/transporters/{id} { allow read: if nonAnon(); allow write: if tfIsManager(); }
     match /apps/transportfreight/destinations/{id} { allow read: if nonAnon(); allow write: if tfIsManager(); }
     match /apps/transportfreight/meta/{id}         { allow read, write: if tfIsManager(); }
-    match /apps/transportfreight/logs/{id}         { allow read: if tfIsManager(); allow create: if signedIn(); }
+    match /apps/transportfreight/logs/{id}         { allow read: if tfIsManager(); allow create: if nonAnon(); }
     match /apps/transportfreight/entries/{id} {
       allow read:   if tfIsManager() || (tfIsGaadiwala() && resource.data.transporterId == tfMyTid());
       // gaadiwala may only submit HIS OWN pending trip, with no challan/approval injected
