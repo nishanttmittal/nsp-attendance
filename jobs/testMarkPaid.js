@@ -40,7 +40,7 @@ const ok = (name, cond, detail = '') => { (cond ? pass++ : fail++); console.log(
     ok('remark stored on payment record', pay.remark === 'paid at gate', `remark="${pay.remark}"`);
     ok('mode/net/by recorded correctly', pay.mode === 'bank' && pay.net === 14200 && pay.by === 'sim-manager', `${pay.mode}/₹${pay.net}/${pay.by}`);
     ok('month locked after pay', after.months[MK].locked === true);
-    ok('advance carry rolled into next month', after.months[NEXT].advanceBalanceIn === 800, `₹${after.months[NEXT].advanceBalanceIn}`);
+    ok('mark_paid does NOT carry advance (finalize_hisab does that now — owner 2026-06-15)', after.months[NEXT] === undefined);
     ok('Telegram fired once', sent.length === 1);
     ok('Telegram line includes amount, mode, remark + who', /14,200/.test(sent[0]) && /bank/.test(sent[0]) && /paid at gate/.test(sent[0]) && /by sim-manager/.test(sent[0]), sent[0]);
 

@@ -12,6 +12,30 @@ const { runDueTasks } = require('./scheduler');
 
 const DL = path.resolve(__dirname, 'downloads');
 
+// ── Job authorization (P1-1) ────────────────────────────────────────────────
+// The queue runs with Admin SDK, so a job request is a PRIVILEGED API call — it
+// must be authorized here, not just by Firestore create rules. `requestedBy` is
+// the signed-in email the PWA stamped on the job.
+const BOOTSTRAP_OWNER = 'nspenterprises24@gmail.com';   // same as ADMIN_EMAILS / isAttAdmin
+// Money/identity-changing jobs only the OWNER may run.
+const OWNER_ONLY = new Set(['finalize_hisab', 'resign_employee', 'reprocess_period', 'monthly_download', 'payslip', 'backup', 'onboard_employee', 'push_employee_edit', 'weeklyoff_audit']);
+// Everything the worker knows how to do — unknown types are rejected outright.
+const KNOWN_TYPES = new Set(['manual_punch', 'backup', 'onboard_employee', 'push_employee_edit', 'resign_employee', 'reprocess_period', 'weeklyoff_audit', 'scan_missed', 'mark_paid', 'finalize_hisab', 'add_advance', 'monthly_download', 'payslip']);
+
+async function authorizeJob(requestedBy, type) {
+  if (!KNOWN_TYPES.has(type)) return { ok: false, reason: `unknown job type '${type}'` };
+  const email = String(requestedBy || '').trim().toLowerCase();
+  if (!email) return { ok: false, reason: 'no requestedBy' };
+  if (email === BOOTSTRAP_OWNER) return { ok: true };            // owner short-circuit — never needs an att_users doc
+  // otherwise must be an ACTIVE att_users/{email} manager/owner
+  const snap = await db().collection('att_users').doc(email).get();
+  const u = snap.exists ? snap.data() : null;
+  const activeStaff = !!u && u.active !== false && ['manager', 'admin', 'owner'].includes(u.role);
+  if (!activeStaff) return { ok: false, reason: `not an authorized user (${email})` };
+  if (OWNER_ONLY.has(type)) return { ok: false, reason: `'${type}' is owner-only` };
+  return { ok: true };
+}
+
 function run(file, env) {
   return execFileSync('node', [path.resolve(__dirname, file)], {
     env: { ...process.env, ...env }, encoding: 'utf8', timeout: 260000, stdio: ['ignore', 'pipe', 'pipe'],
@@ -109,9 +133,15 @@ async function handle(type, p) {
     const [y, m] = p.month.split('-').map(Number);
     const next = m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`;
     const patch = { months };
-    // overpayment → record as a NEXT-MONTH advance entry (carried forward, recovered next month)
+    // overpayment → record as a NEXT-MONTH advance entry (carried forward, recovered next month).
+    // IDEMPOTENT: keyed by a deterministic id so re-running this job (double-click / retry / a
+    // crash after the write but before status='done') can never append the advance twice.
     if (extra > 0) {
-      patch.advances = [...(e.advances || []), { date: `${next}-01`, amount: extra, mode: p.mode || 'cash', remark: `extra paid with ${p.month} salary`, paidBy: p._by || 'manager' }];
+      const advId = `extra-${p.month}`;
+      const already = (e.advances || []).some(a => a.id === advId);
+      if (!already) {
+        patch.advances = [...(e.advances || []), { id: advId, date: `${next}-01`, amount: extra, mode: p.mode || 'cash', remark: `extra paid with ${p.month} salary`, paidBy: p._by || 'manager' }];
+      }
     }
     await ref.set(patch, { merge: true });
     // DURABLE monthly salary register (owner 2026-06-15): snapshot each payment into
@@ -137,9 +167,9 @@ async function handle(type, p) {
     const sal = await db().collection('att_salary').get();
     let batch = db().batch(), n = 0, locked = 0, total = 0;
     const reg = { month: mk, byCode: {} };
-    sal.forEach((d) => {
+    for (const d of sal.docs) {
       const e = d.data(); const md = (e.months || {})[mk];
-      if (!md || !md.approved) return;            // only finalize TICKED people
+      if (!md || !md.approved) continue;          // only finalize TICKED people
       const months = { ...(e.months || {}) };
       months[mk] = { ...md, hisabFinalized: true, locked: true, finalizedAt: new Date().toISOString(), finalizedBy: p._by || 'owner' };
       // carry the LEFTOVER advance forward — ONLY now, at finalize
@@ -148,8 +178,8 @@ async function handle(type, p) {
       const net = Number(md.payment ? md.payment.net : md.approvedNet || 0);
       reg.byCode[d.id] = { name: e.name || d.id, dept: e.dept || '', net, carry: Number(md.approvedCarry || 0), paid: !!md.payment };
       total += net; locked++;
-      if (++n >= 400) { batch.commit(); batch = db().batch(); n = 0; }
-    });
+      if (++n >= 400) { await batch.commit(); batch = db().batch(); n = 0; }   // await every chunk — never a fire-and-forget payroll write
+    }
     if (n) await batch.commit();
     reg.total = total; reg.count = locked; reg.finalizedAt = new Date().toISOString(); reg.finalizedBy = p._by || 'owner';
     await db().collection('att_meta').doc('hisab_' + mk).set(reg);   // durable monthly hisab register
@@ -272,10 +302,25 @@ async function main() {
     }
   } catch (e) { console.error('weekly-off audit failed:', e.message); }
 
-  const snap = await db().collection('att_job_requests').where('status', '==', 'pending').limit(10).get();
-  if (snap.empty) { console.log('no pending jobs'); return; }
-  for (const doc of snap.docs) {
+  // Pending jobs + any job STUCK in 'running' past a safe timeout (GitHub Actions
+  // killed mid-run would otherwise sit 'running' forever) — P2-6 stale recovery.
+  const pend = await db().collection('att_job_requests').where('status', '==', 'pending').limit(10).get();
+  const runningSnap = await db().collection('att_job_requests').where('status', '==', 'running').limit(10).get();
+  const STALE_MS = 15 * 60 * 1000;
+  const now = Date.now();
+  const stale = runningSnap.docs.filter(d => now - Date.parse(d.data().startedAt || 0) > STALE_MS);
+  const docs = [...pend.docs, ...stale];
+  if (!docs.length) { console.log('no pending jobs'); return; }
+  for (const doc of docs) {
     const { type, payload, requestedBy } = doc.data();
+    // AUTHORIZE before doing anything privileged (P1-1).
+    const auth = await authorizeJob(requestedBy, type);
+    if (!auth.ok) {
+      await doc.ref.update({ status: 'error', error: 'unauthorized: ' + auth.reason, finishedAt: new Date().toISOString() });
+      await sendTelegram(`🚫 Rejected job <b>${type}</b> from ${requestedBy || '?'} — ${auth.reason}`).catch(() => {});
+      console.log(`[rejected] ${type}: ${auth.reason}`);
+      continue;
+    }
     await doc.ref.update({ status: 'running', startedAt: new Date().toISOString() });
     try {
       const result = await handle(type, { ...(payload || {}), _by: requestedBy || '' });
@@ -303,4 +348,4 @@ async function main() {
 // only run the queue loop when executed directly (node worker.js / GitHub Actions);
 // when required by a test we just expose handle() so it can be driven in isolation.
 if (require.main === module) main();
-module.exports = { handle, main };
+module.exports = { handle, main, authorizeJob };

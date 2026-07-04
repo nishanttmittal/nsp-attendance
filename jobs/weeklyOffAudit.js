@@ -67,11 +67,11 @@ async function audit(offset = 0) {
     // write months[label].unpaidWorkedSat for EVERY employee (0 clears any stale value)
     const all = await db().collection('att_attendance').get();
     let batch = db().batch(), n = 0, flagged = 0;
-    all.forEach(d => {
+    for (const d of all.docs) {
       const v = unpaid[d.id] || 0; if (v) flagged++;
       batch.set(d.ref, { months: { [label]: { unpaidWorkedSat: v } } }, { merge: true });
-      if (++n >= 400) { batch.commit(); batch = db().batch(); n = 0; }
-    });
+      if (++n >= 400) { await batch.commit(); batch = db().batch(); n = 0; }   // await every chunk
+    }
     if (n) await batch.commit();
     console.log(`weekly-off audit ${label}: ${flagged} employee(s) with an unearned worked Saturday`, JSON.stringify(unpaid));
     return { label, unpaid, flagged };
