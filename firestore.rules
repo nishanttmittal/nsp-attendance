@@ -139,7 +139,13 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
     match /apps/plasticjobwork/issues/{id}     { allow read, write: if plUser(); }
     match /apps/plasticjobwork/returns/{id}    { allow read, write: if plUser(); }
     match /apps/plasticjobwork/logs/{id}       { allow read, write: if plUser(); }
-    match /apps/plasticjobwork/meta/{id}       { allow read, write: if plUser(); }
+    // meta = masters/rates/products/moulders/lot-locks: staff READ, OWNER-only WRITE
+    // (a manager must not be able to silently change rates, recipes or lock state).
+    match /apps/plasticjobwork/meta/{id}       { allow read: if plUser(); allow write: if plOwner(); }
+    // EXCEPTION: the entry-number counter is bumped by every production save (a
+    // Firestore transaction), so staff MUST keep write here. Overlapping matches
+    // OR in Firestore, so this grants counter-write on top of the owner-only meta.
+    match /apps/plasticjobwork/meta/counter    { allow read, write: if plUser(); }
     match /apps/plasticjobwork/purchases/{id}  { allow read, write: if plOwner(); }
     match /apps/plasticjobwork/payments/{id}   { allow read, write: if plOwner(); }
     match /apps/plasticjobwork/users/{id}      { allow read: if nonAnon(); allow write: if plOwner(); }
