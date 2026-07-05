@@ -192,32 +192,40 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
     function tfIsManager() { return signedIn() && (tfIsOwner() || (tfExists() && tfData().role == 'manager' && tfData().active == true)); }
     function tfIsGaadiwala() { return signedIn() && tfExists() && tfData().role == 'gaadiwala' && tfData().active == true; }
     function tfMyTid() { return tfExists() ? tfData().transporterId : ''; }
+    // Entry charge fields must never be negative (a negative freight would reduce
+    // the payable) — the DB backstop for the app-layer dropError() check (P1-2).
+    function tfNonNegMoney(d) { return d.get('freight', 0) >= 0 && d.get('lrCharge', 0) >= 0 && d.get('unloading', 0) >= 0 && d.get('misc', 0) >= 0 && d.get('extraPoint', 0) >= 0 && d.get('bags', 0) >= 0; }
 
     // Reads require a NON-anonymous (Google) login. Gaadiwala names/phones and
     // destination masters are restricted to app MEMBERS (manager/gaadiwala) — a
     // random signed-in Google account that isn't in the app can't read them
-    // (P1-1). users stays nonAnon-read (role resolution reads the collection;
-    // own-doc-only is a deferred AuthGate refactor). The app resolves role only
-    // after Google sign-in; the bootstrap owner is covered by tfIsManager().
-    match /apps/transportfreight/users/{id}        { allow read: if nonAnon(); allow write: if tfIsOwner(); }
+    // (P1-1). users: each account reads only its OWN doc (role resolution) unless
+    // it's a manager/owner (Admin/login management). The app resolves role from
+    // the own users/{email} doc; the bootstrap owner is covered by tfIsManager().
+    // Entry charge fields must be non-negative (tfNonNegMoney) so no write can
+    // slip a negative freight past the app-layer block (P1-2).
+    match /apps/transportfreight/users/{id}        { allow read: if tEmail() == id || tfIsManager(); allow write: if tfIsOwner(); }
     match /apps/transportfreight/transporters/{id} { allow read: if tfIsManager() || tfIsGaadiwala(); allow write: if tfIsManager(); }
     match /apps/transportfreight/destinations/{id} { allow read: if tfIsManager() || tfIsGaadiwala(); allow write: if tfIsManager(); }
     match /apps/transportfreight/meta/{id}         { allow read, write: if tfIsManager(); }
     match /apps/transportfreight/logs/{id}         { allow read: if tfIsManager(); allow create: if nonAnon(); }
     match /apps/transportfreight/entries/{id} {
       allow read:   if tfIsManager() || (tfIsGaadiwala() && resource.data.transporterId == tfMyTid());
-      // gaadiwala may only submit HIS OWN pending trip, with no challan/approval injected
-      allow create: if tfIsManager() || (tfIsGaadiwala()
+      // gaadiwala may only submit HIS OWN pending trip, with no challan/approval injected.
+      // Every entry write (manager or gaadiwala) must have non-negative charges (P1-2).
+      allow create: if (tfIsManager() || (tfIsGaadiwala()
                        && request.resource.data.transporterId == tfMyTid()
                        && request.resource.data.status == 'pending'
                        && request.resource.data.get('challanNo', 0) == 0
-                       && request.resource.data.get('approvedBy', '') == '');
-      allow update: if tfIsManager() || (tfIsGaadiwala()
+                       && request.resource.data.get('approvedBy', '') == ''))
+                       && tfNonNegMoney(request.resource.data);
+      allow update: if (tfIsManager() || (tfIsGaadiwala()
                        && resource.data.transporterId == tfMyTid()
                        && request.resource.data.transporterId == tfMyTid()
                        && resource.data.status in ['pending','needs_correction']
                        && request.resource.data.status in ['pending','needs_correction']
-                       && request.resource.data.get('challanNo', 0) == 0);
+                       && request.resource.data.get('challanNo', 0) == 0))
+                       && tfNonNegMoney(request.resource.data);
       allow delete: if false; // financial record — never hard-deleted (cancel = status; withdraw = deleted flag via update)
     }
     match /apps/transportfreight/advances/{id} {
