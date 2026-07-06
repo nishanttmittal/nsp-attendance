@@ -2,7 +2,8 @@ name: Scheduled alerts & maintenance
 on:
   schedule:
     - cron: '10 12 * * *'   # 17:40 IST — food headcount
-    - cron: '0 16 * * *'    # 21:30 IST — evening missed-punch (no OUT)
+    # evening missed-punch (21:30 IST) REMOVED 2026-07-06 — real-time read was inaccurate
+    # (out-punches not yet synced + workers still on floor). Morning alert (yesterday, accurate) kept.
     - cron: '30 4 * * *'    # 10:00 IST — morning missed-punch (yesterday)
     - cron: '30 3 * * *'    # 09:00 IST — long absence (>4 days)
     - cron: '0 7 * * *'     # 12:30 IST — morning attendance summary (after portal rolls to today; also date-guarded)
@@ -46,7 +47,7 @@ jobs:
         run: |
           case "${TASK:-$SCHED}" in
             "headcount"|"10 12 * * *")   node eveningHeadcount.js ;;
-            "evening-miss"|"0 16 * * *")  MODE=evening node missedPunch.js ;;
+            "evening-miss")  MODE=evening node missedPunch.js ;;   # manual only (no schedule)
             "morning-miss"|"30 4 * * *")  MODE=morning node missedPunch.js ;;
             "morning-summary"|"0 7 * * *") node morningSummary.js ;;
             "long-absence"|"30 3 * * *")  THRESHOLD=4 node longAbsence.js ;;
