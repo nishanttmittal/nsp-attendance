@@ -27,10 +27,12 @@ const OUT_DIR = path.resolve(__dirname, 'downloads');
     const fdb = db();
     let batch = fdb.batch(), n = 0, written = 0;
     for (const e of emps) {
+      // merge:true is LOAD-BEARING — without it this full-replaces the doc and WIPES the
+      // months{} map (past-month attendance = the salary source), which broke June 2026-07-09.
       batch.set(fdb.collection('att_attendance').doc(e.code), {
         month: label, presentDays: e.presentDays, absentDays: e.absentDays,
         otHrs: e.otHrs, lateHrs: e.lateHrs, earlyHrs: e.earlyHrs, updatedAt: new Date().toISOString(),
-      });
+      }, { merge: true });
       if (++n >= 400) { await batch.commit(); written += n; batch = fdb.batch(); n = 0; }
     }
     if (n) { await batch.commit(); written += n; }
