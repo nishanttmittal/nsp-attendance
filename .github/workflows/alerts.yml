@@ -10,7 +10,7 @@ on:
     - cron: '30 1 * * *'    # 07:00 IST — reprocess yesterday
     - cron: '45 1 * * *'    # 07:15 IST — publish salary attendance (att_attendance)
     - cron: '0 2 * * 0'     # Sun 07:30 IST — weekly backup
-    - cron: '30 2 * * 0'    # Sun 08:00 IST — sync employee list (att_salary)
+    - cron: '15 2 * * *'    # 07:45 IST daily — sync employee names/dept from Realtime portal (att_salary)
     - cron: '30 14 * * *'   # 20:00 IST — welder daily production summary
     - cron: '35 14 * * *'   # 20:05 IST — plating daily summary
     - cron: '40 14 * * *'   # 20:10 IST — transport freight balance alerts (gaadiwala owed too much)
@@ -54,7 +54,7 @@ jobs:
             "reprocess"|"30 1 * * *")     node dailyReprocess.js ;;
             "salary-data"|"45 1 * * *")   node publishSalaryData.js ;;
             "backup"|"0 2 * * 0")         node backup.js ;;
-            "sync-employees"|"30 2 * * 0") node syncEmployees.js ;;
+            "sync-employees"|"15 2 * * *") node syncEmployees.js ;;
             "welder-production"|"30 14 * * *") node welderProduction.js ;;
             "plating-summary"|"35 14 * * *")  node platingSummary.js ;;
             "freight-alerts"|"40 14 * * *")   node freightAlerts.js ;;
