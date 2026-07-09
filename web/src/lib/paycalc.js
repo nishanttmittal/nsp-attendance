@@ -32,14 +32,17 @@ export function monthCtx(mk) {
 export const nextMonthKey = (mk) => { const [y, m] = mk.split('-').map(Number); return m === 12 ? `${y + 1}-01` : `${y}-${pad(m + 1)}`; };
 
 const ZERO_ATT = { presentDays: 0, absentDays: 0, otHrs: 0, lateHrs: 0, earlyHrs: 0 };
+// noRecord marks a month the worker has NO attendance for (e.g. joined later) — must pay 0,
+// NOT a full month. Without this, "0 absent" reads as "present all month" and overpays new joiners.
+const NO_RECORD = { ...ZERO_ATT, noRecord: true };
 
 export function attFor(emp, attMap, mk) {
   if (emp.appOnly) return dailyAtt(emp, mk);
   const a = attMap[emp.code];
-  if (!a) return ZERO_ATT;
+  if (!a) return NO_RECORD;
   if (a.months && a.months[mk]) return a.months[mk];
   if (a.month === mk) return a;
-  return ZERO_ATT;
+  return NO_RECORD;
 }
 
 // Everything about one person's money in one month.

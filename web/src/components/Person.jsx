@@ -39,6 +39,7 @@ export default function Person({ code, mk, user, onBack }) {
           present {presentPct}% · late {att.lateDays || 0}× · OT {pay.otHrsNet}h
         </div>
         {md.approved && !md.payment && <p className="text-xs bg-amber-50 border border-amber-200 text-amber-800 rounded p-1.5 mb-2">🔒 Ticked — figures frozen at {rupee(md.approvedNet)}. Undo the tick in the list to edit.</p>}
+        {pay.noAttendance && <p className="text-xs bg-blue-50 border border-blue-200 text-blue-800 rounded p-1.5 mb-2">ℹ️ No attendance for {mk} — not employed this month (joined later). Pays ₹0; old months don't apply.</p>}
         <Row k="Days" v={`present ${pay.presentDays} · absent ${pay.absentDays}`} />
         {(() => {
           const unpaid = pay.unpaidWorkedSat || 0;

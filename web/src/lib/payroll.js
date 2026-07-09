@@ -41,6 +41,7 @@ export function computePay({ emp, att, daysInMonth, elapsedDays, fullMonth, adva
   // machine daily-wage: wage × present days. monthly: prorated, deduct absences + unpaid worked Sats.
   const base = emp.type === 'daily'
     ? (emp.appOnly ? rate * (att.equivalentDays || 0) : rate * (att.presentDays || 0))
+    : att.noRecord ? 0                                    // no attendance this month (joined later) -> pay 0, never a full month
     : perDay * Math.max(0, effElapsed - (att.absentDays || 0) - unpaidSat);
 
   // Net OT = raw OT − late − early, floored at 0 (lateness is also handled by the penalty tab)
@@ -96,7 +97,7 @@ export function computePay({ emp, att, daysInMonth, elapsedDays, fullMonth, adva
     : round(present + weeklyOffAll + holiday - unpaidSat);  // monthly: paid Saturdays minus those worked in an unearned week (OT only)
 
   return {
-    type: emp.type, effectiveRate: rate, effectiveRemark: eff.remark, perDay: round(perDay),
+    type: emp.type, effectiveRate: rate, effectiveRemark: eff.remark, perDay: round(perDay), noAttendance: !!att.noRecord,
     payableDays: effElapsed, presentDays: att.presentDays || 0, absentDays: att.absentDays || 0,
     weeklyOff, weeklyOffPresent, weeklyOffAll, holiday, paidDays, unpaidWorkedSat: unpaidSat,
     saturdaysInPeriod, saturdaysCut,
