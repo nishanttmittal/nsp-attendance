@@ -118,6 +118,13 @@ export async function loadAllAttendance() {
   const snap = await getDocs(collection(db, 'att_attendance'));
   return Object.fromEntries(snap.docs.map(d => [d.id, d.data()]));
 }
+
+// Raw daily in/out punches (att_punches) — feeds the app-side attendance engine (Shadow view).
+export async function loadAllPunches() {
+  if (!isConfigured || !db) return {};
+  const snap = await getDocs(collection(db, 'att_punches'));
+  return Object.fromEntries(snap.docs.map(d => [d.id, d.data()]));
+}
 export async function addDailyHours(code, month, entry) {
   const e = await loadEmployee(code);
   const log = { ...(e.attendanceLog || {}) };

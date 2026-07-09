@@ -27,16 +27,19 @@ export function payslipOnePdf(emp, pay, monthLabel) {
   doc.text(`Type: ${emp.appOnly ? 'Daily-wager' : (emp.type || '-')}`, 130, 44);
   doc.text(`Present / Absent: ${pay.presentDays} / ${pay.absentDays}`, 14, 50);
   doc.text(`OT (net): ${pay.otHrsNet} h`, 130, 50);
+  if (!emp.appOnly && pay.saturdaysInPeriod > 0)
+    doc.text(`Saturdays: ${pay.weeklyOff} paid / ${pay.weeklyOffPresent} worked / ${pay.saturdaysCut} cut (of ${pay.saturdaysInPeriod})`, 14, 56);
   const body = [
     ['Base', rs(pay.base)],
     ['Overtime', rs(pay.otPay)],
     ['Attendance bonus', rs(pay.perfectBonus)],
+    ...(pay.restoreSaturdayPay > 0 ? [[`${pay.restoreSaturdayDays} Saturday goodwill`, rs(pay.restoreSaturdayPay)]] : []),
     ['Bonus', rs(pay.bonus)],
     ['Fine', '- ' + rs(pay.fines)],
     ['Loan installment', '- ' + rs(pay.loanInstallment)],
     ['Advance recovered', '- ' + rs(pay.advanceRecovered)],
   ];
-  autoTable(doc, { startY: 58, head: [['Component', 'Amount']], body, theme: 'grid', styles: { fontSize: 10 } });
+  autoTable(doc, { startY: 62, head: [['Component', 'Amount']], body, theme: 'grid', styles: { fontSize: 10 } });
   let y = (doc.lastAutoTable?.finalY || 110) + 10;
   doc.setFontSize(14); doc.text('NET PAY:  ' + rs(pay.net), 14, y);
   if (pay.advanceBalanceCarried > 0) { y += 8; doc.setFontSize(9); doc.text('Advance balance carried forward: ' + rs(pay.advanceBalanceCarried), 14, y); }

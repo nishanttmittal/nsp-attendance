@@ -19,7 +19,7 @@ export function effectiveAmount(emp, toDate) {
 }
 
 // One employee's pay for the period. att = {presentDays,absentDays,otHrs,lateHrs,earlyHrs}.
-export function computePay({ emp, att, daysInMonth, elapsedDays, fullMonth, advancesThisMonth = 0, advanceBalanceIn = 0, advanceRecover = 0, fines = 0, loanInstallment = 0, bonus = 0, latePenaltyDays = 0, weeklyOffDockDays = 0, monthStart, toDate }) {
+export function computePay({ emp, att, daysInMonth, elapsedDays, fullMonth, advancesThisMonth = 0, advanceBalanceIn = 0, advanceRecover = 0, fines = 0, loanInstallment = 0, bonus = 0, restoreSaturdayDays = 0, latePenaltyDays = 0, weeklyOffDockDays = 0, monthStart, toDate }) {
   const eff = effectiveAmount(emp, toDate);
   const rate = eff.amount;
   const perDay = emp.type === 'daily' ? rate : rate / daysInMonth;
@@ -57,7 +57,11 @@ export function computePay({ emp, att, daysInMonth, elapsedDays, fullMonth, adva
   // weekly-off dock: every 3 absences = 1 Saturday cut (owner-set; 0 if Realtime already did it)
   const weeklyOffDock = round(perDay * Number(weeklyOffDockDays || 0));
   const suggestedDockDays = Math.floor((att.absentDays || 0) / 3);
-  const earnings = base + otPay + perfectBonus + Number(bonus || 0);
+  // Goodwill "give back Saturday" — owner leniently pays back N cut Saturdays at one day's pay each.
+  // Additive earning only (monthly staff); does NOT touch attendance, paidDays, or the cut count.
+  const restoreSatDays = emp.type === 'daily' ? 0 : Number(restoreSaturdayDays || 0);
+  const restoreSaturdayPay = round(perDay * restoreSatDays);
+  const earnings = base + otPay + perfectBonus + restoreSaturdayPay + Number(bonus || 0);
   const fixed = Number(fines || 0) + Number(loanInstallment || 0) + latePenalty + weeklyOffDock;
   const avail = Math.max(0, earnings - fixed);
   const advanceDue = Number(advancesThisMonth || 0) + Number(advanceBalanceIn || 0);
@@ -73,15 +77,27 @@ export function computePay({ emp, att, daysInMonth, elapsedDays, fullMonth, adva
   const weeklyOff = att.weeklyOff || 0;
   const weeklyOffPresent = att.weeklyOffPresent || 0;
   const holiday = att.holiday || 0;
-  const weeklyOffAll = weeklyOff + weeklyOffPresent;        // total Saturdays in the period (off + worked)
+  const weeklyOffAll = weeklyOff + weeklyOffPresent;        // Saturdays the worker got CREDIT for (paid rest + worked)
+  // Saturdays CUT = calendar Saturdays in the period the worker did NOT earn (low attendance).
+  // Purely informational for the salary slip — these days already sit inside absentDays, so this
+  // does NOT change any pay figure. Only meaningful for monthly staff (daily wagers: Saturdays never paid).
+  let saturdaysInPeriod = 0;
+  if (monthStart && toDate) {
+    for (const d = new Date(monthStart); d <= toDate; d.setUTCDate(d.getUTCDate() + 1)) {
+      if (d.getUTCDay() === 6) saturdaysInPeriod++;
+    }
+  }
+  const saturdaysCut = emp.type === 'daily' ? 0 : Math.max(0, round(saturdaysInPeriod - weeklyOffAll));
   const paidDays = emp.type === 'daily'
     ? round(present)                                        // daily: only worked weekdays; off/holiday → OT, not paid days
     : round(present + weeklyOffAll + holiday - unpaidSat);  // monthly: paid Saturdays minus those worked in an unearned week (OT only)
 
   return {
-    type: emp.type, effectiveRate: rate, effectiveRemark: eff.remark,
+    type: emp.type, effectiveRate: rate, effectiveRemark: eff.remark, perDay: round(perDay),
     payableDays: effElapsed, presentDays: att.presentDays || 0, absentDays: att.absentDays || 0,
     weeklyOff, weeklyOffPresent, weeklyOffAll, holiday, paidDays, unpaidWorkedSat: unpaidSat,
+    saturdaysInPeriod, saturdaysCut,
+    restoreSaturdayDays: restoreSatDays, restoreSaturdayPay: round(restoreSaturdayPay),
     otHrs: round(att.otHrs || 0), otHrsNet: round(netOtHrs),
     base: round(base), otPay: round(otPay), perfectBonus: round(perfectBonus), bonus: round(Number(bonus || 0)),
     fines: round(Number(fines || 0)), loanInstallment: round(Number(loanInstallment || 0)),

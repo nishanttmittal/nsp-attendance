@@ -45,7 +45,6 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
     // a user may read only their OWN user doc (login role resolution); staff read all; owner writes.
     match /att_users/{u} { allow read: if attStaff() || (nonAnon() && u == request.auth.token.email); allow write: if isAttAdmin(); }
     match /att_attendance/{d} { allow read: if isAttAdmin(); allow write: if false; }
-    match /att_punches/{d} { allow read: if isAttAdmin(); allow write: if false; }
     match /att_salary/{d} { allow read, write: if isAttAdmin(); }
     match /att_archive/{d} { allow read: if isAttAdmin(); allow write: if false; }
     match /att_advances/{d} { allow read, write: if isAttAdmin(); }
@@ -140,13 +139,7 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
     match /apps/plasticjobwork/issues/{id}     { allow read, write: if plUser(); }
     match /apps/plasticjobwork/returns/{id}    { allow read, write: if plUser(); }
     match /apps/plasticjobwork/logs/{id}       { allow read, write: if plUser(); }
-    // meta = masters/rates/products/moulders/lot-locks: staff READ, OWNER-only WRITE
-    // (a manager must not be able to silently change rates, recipes or lock state).
-    match /apps/plasticjobwork/meta/{id}       { allow read: if plUser(); allow write: if plOwner(); }
-    // EXCEPTION: the entry-number counter is bumped by every production save (a
-    // Firestore transaction), so staff MUST keep write here. Overlapping matches
-    // OR in Firestore, so this grants counter-write on top of the owner-only meta.
-    match /apps/plasticjobwork/meta/counter    { allow read, write: if plUser(); }
+    match /apps/plasticjobwork/meta/{id}       { allow read, write: if plUser(); }
     match /apps/plasticjobwork/purchases/{id}  { allow read, write: if plOwner(); }
     match /apps/plasticjobwork/payments/{id}   { allow read, write: if plOwner(); }
     match /apps/plasticjobwork/users/{id}      { allow read: if nonAnon(); allow write: if plOwner(); }
@@ -199,40 +192,29 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
     function tfIsManager() { return signedIn() && (tfIsOwner() || (tfExists() && tfData().role == 'manager' && tfData().active == true)); }
     function tfIsGaadiwala() { return signedIn() && tfExists() && tfData().role == 'gaadiwala' && tfData().active == true; }
     function tfMyTid() { return tfExists() ? tfData().transporterId : ''; }
-    // Entry charge fields must never be negative (a negative freight would reduce
-    // the payable) — the DB backstop for the app-layer dropError() check (P1-2).
-    function tfNonNegMoney(d) { return d.get('freight', 0) >= 0 && d.get('lrCharge', 0) >= 0 && d.get('unloading', 0) >= 0 && d.get('misc', 0) >= 0 && d.get('extraPoint', 0) >= 0 && d.get('bags', 0) >= 0; }
 
-    // Reads require a NON-anonymous (Google) login. Gaadiwala names/phones and
-    // destination masters are restricted to app MEMBERS (manager/gaadiwala) — a
-    // random signed-in Google account that isn't in the app can't read them
-    // (P1-1). users: each account reads only its OWN doc (role resolution) unless
-    // it's a manager/owner (Admin/login management). The app resolves role from
-    // the own users/{email} doc; the bootstrap owner is covered by tfIsManager().
-    // Entry charge fields must be non-negative (tfNonNegMoney) so no write can
-    // slip a negative freight past the app-layer block (P1-2).
-    match /apps/transportfreight/users/{id}        { allow read: if tEmail() == id || tfIsManager(); allow write: if tfIsOwner(); }
-    match /apps/transportfreight/transporters/{id} { allow read: if tfIsManager() || (tfIsGaadiwala() && id == tfMyTid()); allow write: if tfIsManager(); }
-    match /apps/transportfreight/destinations/{id} { allow read: if tfIsManager() || tfIsGaadiwala(); allow write: if tfIsManager(); }
+    // Reads require a NON-anonymous (Google) login — an anon device opening the
+    // link must not read the access-email list, gaadiwala names/phones, or
+    // destination masters (PII). The app resolves role only after Google sign-in.
+    match /apps/transportfreight/users/{id}        { allow read: if nonAnon(); allow write: if tfIsOwner(); }
+    match /apps/transportfreight/transporters/{id} { allow read: if nonAnon(); allow write: if tfIsManager(); }
+    match /apps/transportfreight/destinations/{id} { allow read: if nonAnon(); allow write: if tfIsManager(); }
     match /apps/transportfreight/meta/{id}         { allow read, write: if tfIsManager(); }
-    match /apps/transportfreight/logs/{id}         { allow read: if tfIsManager(); allow create: if nonAnon(); }
+    match /apps/transportfreight/logs/{id}         { allow read: if tfIsManager(); allow create: if signedIn(); }
     match /apps/transportfreight/entries/{id} {
       allow read:   if tfIsManager() || (tfIsGaadiwala() && resource.data.transporterId == tfMyTid());
-      // gaadiwala may only submit HIS OWN pending trip, with no challan/approval injected.
-      // Every entry write (manager or gaadiwala) must have non-negative charges (P1-2).
-      allow create: if (tfIsManager() || (tfIsGaadiwala()
+      // gaadiwala may only submit HIS OWN pending trip, with no challan/approval injected
+      allow create: if tfIsManager() || (tfIsGaadiwala()
                        && request.resource.data.transporterId == tfMyTid()
                        && request.resource.data.status == 'pending'
                        && request.resource.data.get('challanNo', 0) == 0
-                       && request.resource.data.get('approvedBy', '') == ''))
-                       && tfNonNegMoney(request.resource.data);
-      allow update: if (tfIsManager() || (tfIsGaadiwala()
+                       && request.resource.data.get('approvedBy', '') == '');
+      allow update: if tfIsManager() || (tfIsGaadiwala()
                        && resource.data.transporterId == tfMyTid()
                        && request.resource.data.transporterId == tfMyTid()
                        && resource.data.status in ['pending','needs_correction']
                        && request.resource.data.status in ['pending','needs_correction']
-                       && request.resource.data.get('challanNo', 0) == 0))
-                       && tfNonNegMoney(request.resource.data);
+                       && request.resource.data.get('challanNo', 0) == 0);
       allow delete: if false; // financial record — never hard-deleted (cancel = status; withdraw = deleted flag via update)
     }
     match /apps/transportfreight/advances/{id} {

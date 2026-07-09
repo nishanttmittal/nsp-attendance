@@ -17,5 +17,6 @@ const yesterday = `${pad(y.getUTCDate())}/${pad(y.getUTCMonth() + 1)}/${y.getUTC
 
 run('reprocessRange.js', { FROM: yesterday, TO: today });
 run('publishMonthly.js', { MONTHS: '0,1' });
+try { run('publishPunches.js', { MONTHS: '0,1' }); } catch (e) { console.error('publishPunches failed:', e.message); } // raw punches for the app-side engine (Shadow)
 try { run('missedPunchScan.js'); } catch (e) { console.error('missed scan failed:', e.message); }
 console.log('processData complete');

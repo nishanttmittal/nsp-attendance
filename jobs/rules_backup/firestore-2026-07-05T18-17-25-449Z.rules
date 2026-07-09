@@ -45,7 +45,6 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
     // a user may read only their OWN user doc (login role resolution); staff read all; owner writes.
     match /att_users/{u} { allow read: if attStaff() || (nonAnon() && u == request.auth.token.email); allow write: if isAttAdmin(); }
     match /att_attendance/{d} { allow read: if isAttAdmin(); allow write: if false; }
-    match /att_punches/{d} { allow read: if isAttAdmin(); allow write: if false; }
     match /att_salary/{d} { allow read, write: if isAttAdmin(); }
     match /att_archive/{d} { allow read: if isAttAdmin(); allow write: if false; }
     match /att_advances/{d} { allow read, write: if isAttAdmin(); }

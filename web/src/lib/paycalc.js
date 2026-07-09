@@ -54,6 +54,7 @@ export function payFor(emp, attMap, mk, ctx) {
     emp, att, ...ctx,
     advancesThisMonth, advanceBalanceIn, advanceRecover,
     fines: Number(md.fine || 0), loanInstallment: Number(md.loanInstallment || 0), bonus: Number(md.bonus || 0),
+    restoreSaturdayDays: Number(md.restoreSaturdays || 0),
     latePenaltyDays: 0, weeklyOffDockDays: 0, // the machine applies late/weekly-off rules
   });
   return { att, md, advs, advancesThisMonth, pay };

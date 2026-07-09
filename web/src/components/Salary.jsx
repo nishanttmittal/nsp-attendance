@@ -225,12 +225,15 @@ function DaysBreakdown({ pay }) {
         </div>
       ))}
       {pay.absentDays > 0 && <div className="flex justify-between"><span>Absent</span><span className="text-red-500">−{pay.absentDays}d</span></div>}
+      {!daily && pay.saturdaysCut > 0 && <div className="flex justify-between"><span>Saturdays cut (low attendance)</span><span className="text-red-500">{pay.saturdaysCut} of {pay.saturdaysInPeriod}</span></div>}
       <div className="flex justify-between border-t border-gray-200 pt-0.5 mt-0.5 font-semibold text-gray-800"><span>Paid days</span><span>{pay.paidDays}d</span></div>
       {pay.otHrsNet > 0 && <div className="flex justify-between text-blue-700"><span>Overtime{pay.weeklyOffPresent > 0 ? ` (incl. ${pay.weeklyOffPresent} Sat worked)` : ''}</span><span>{pay.otHrsNet}h</span></div>}
       <div className="text-gray-400 pt-0.5 leading-snug">
         {daily
           ? 'Daily wage: only worked days are paid. Saturdays & holidays are unpaid — working one earns OT, not a paid day.'
-          : 'All Saturdays are paid for monthly staff. Working a Saturday earns overtime on top — not an extra day.'}
+          : pay.saturdaysCut > 0
+            ? `A Saturday is paid only when that week's attendance earns it. ${pay.saturdaysCut} of ${pay.saturdaysInPeriod} Saturday${pay.saturdaysInPeriod > 1 ? 's' : ''} were cut for low attendance. Working a Saturday earns overtime on top — not an extra day.`
+            : 'Saturdays are paid when the week\'s attendance earns them. Working a Saturday earns overtime on top — not an extra day.'}
       </div>
     </div>
   );
