@@ -43,7 +43,7 @@ export function attFor(emp, attMap, mk) {
 }
 
 // Everything about one person's money in one month.
-export function payFor(emp, attMap, mk, ctx) {
+export function payFor(emp, attMap, mk, ctx, graceDelta = 0) {
   const att = attFor(emp, attMap, mk);
   const md = monthData(emp, mk);
   const advs = (emp.advances || []).filter((a) => (a.date || '').startsWith(mk));
@@ -55,6 +55,7 @@ export function payFor(emp, attMap, mk, ctx) {
     advancesThisMonth, advanceBalanceIn, advanceRecover,
     fines: Number(md.fine || 0), loanInstallment: Number(md.loanInstallment || 0), bonus: Number(md.bonus || 0),
     restoreSaturdayDays: Number(md.restoreSaturdays || 0),
+    graceDays: md.gracePaid ? Number(graceDelta || 0) : 0,   // owner opted in for this worker/month
     latePenaltyDays: 0, weeklyOffDockDays: 0, // the machine applies late/weekly-off rules
   });
   return { att, md, advs, advancesThisMonth, pay };

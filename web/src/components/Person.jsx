@@ -1,24 +1,27 @@
 import { useEffect, useMemo, useState } from 'react';
-import { loadEmployee, loadAllAttendance, saveEmployee, saveMonth, addAdvance, addIncrement, resignEmployee, settleAndResign, checkActionPassword, queueJob, editNameDept } from '../lib/data';
+import { loadEmployee, loadAllAttendance, loadPunchDoc, saveEmployee, saveMonth, addAdvance, addIncrement, resignEmployee, settleAndResign, checkActionPassword, queueJob, editNameDept, istMonth } from '../lib/data';
 import { monthCtx, payFor, rupee } from '../lib/paycalc';
 import { payslipOnePdf, sharePdf } from '../lib/salaryPdf';
+import { graceDeltaDays } from '../lib/attendanceEngine';
 
 // One person, one page: this month's money, their ledger, their settings.
 export default function Person({ code, mk, user, onBack }) {
   const [emp, setEmp] = useState(null);
   const [attMap, setAttMap] = useState({});
+  const [punchDoc, setPunchDoc] = useState(null);
   const [busy, setBusy] = useState(false);
   const ctx = useMemo(() => monthCtx(mk), [mk]);
+  const graceDelta = useMemo(() => (emp ? graceDeltaDays(emp.shift, punchDoc, mk, istMonth()) : 0), [emp, punchDoc, mk]);
 
   async function reload() {
-    const [e, am] = await Promise.all([loadEmployee(code), loadAllAttendance()]);
-    setEmp(e); setAttMap(am);
+    const [e, am, pd] = await Promise.all([loadEmployee(code), loadAllAttendance(), loadPunchDoc(code)]);
+    setEmp(e); setAttMap(am); setPunchDoc(pd);
   }
   useEffect(() => { reload(); }, [code]);
   const act = async (fn) => { setBusy(true); try { await fn(); await reload(); } finally { setBusy(false); } };
 
   if (!emp) return <p className="text-gray-500">Loading…</p>;
-  const { att, md, pay } = payFor(emp, attMap, mk, ctx);
+  const { att, md, pay } = payFor(emp, attMap, mk, ctx, graceDelta);
   // freeze on tick: once approved, nothing about this month can be edited (undo tick to reopen)
   const locked = !!md.payment || !!md.approved;
   const today = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
@@ -50,6 +53,7 @@ export default function Person({ code, mk, user, onBack }) {
         <Row k="Base pay" v={rupee(pay.base)} />
         <Row k="+ Overtime" v={rupee(pay.otPay)} />
         {pay.perfectBonus > 0 && <Row k="+ Full-attendance bonus" v={rupee(pay.perfectBonus)} />}
+        {pay.gracePay > 0 && <Row k={`+ 15-min grace (${pay.graceDays} day)`} v={rupee(pay.gracePay)} />}
         {pay.restoreSaturdayPay > 0 && <Row k={`+ ${pay.restoreSaturdayDays} Saturday${pay.restoreSaturdayDays > 1 ? 's' : ''} (goodwill)`} v={rupee(pay.restoreSaturdayPay)} />}
         {pay.bonus > 0 && <Row k="+ Bonus" v={rupee(pay.bonus)} />}
         {pay.fines > 0 && <Row k="− Fine" v={rupee(pay.fines)} />}
@@ -63,7 +67,7 @@ export default function Person({ code, mk, user, onBack }) {
           <button onClick={() => {
             const sat = (att.weeklyOff || 0) + (att.weeklyOffPresent || 0);
             const L = [`*NSP — Salary ${mk}*`, `${emp.name || code}`, `Days: ${pay.presentDays} present / ${pay.absentDays} absent` + (sat ? ` / ${sat} weekly-off (paid)` : '') + (pay.saturdaysCut ? ` / ${pay.saturdaysCut} Sat cut` : ''), `OT: ${pay.otHrsNet}h`,
-              `Base ₹${pay.base}` + (pay.otPay ? ` + OT ₹${pay.otPay}` : '') + (pay.perfectBonus ? ` + bonus ₹${pay.perfectBonus}` : '') + (pay.restoreSaturdayPay ? ` + ${pay.restoreSaturdayDays} Sat goodwill ₹${pay.restoreSaturdayPay}` : '') + (pay.bonus ? ` + bonus ₹${pay.bonus}` : ''),
+              `Base ₹${pay.base}` + (pay.otPay ? ` + OT ₹${pay.otPay}` : '') + (pay.perfectBonus ? ` + bonus ₹${pay.perfectBonus}` : '') + (pay.gracePay ? ` + grace ₹${pay.gracePay}` : '') + (pay.restoreSaturdayPay ? ` + ${pay.restoreSaturdayDays} Sat goodwill ₹${pay.restoreSaturdayPay}` : '') + (pay.bonus ? ` + bonus ₹${pay.bonus}` : ''),
               ...(pay.fines ? [`Fine −₹${pay.fines}`] : []), ...(pay.loanInstallment ? [`Loan −₹${pay.loanInstallment}`] : []), ...(pay.advanceRecovered ? [`Advance −₹${pay.advanceRecovered}`] : []),
               `*NET: ₹${(locked && md.payment ? md.payment.net : pay.net).toLocaleString('en-IN')}*`];
             const phone = (emp.phone || '').replace(/\D/g, '');
@@ -76,6 +80,12 @@ export default function Person({ code, mk, user, onBack }) {
       {!locked && (
         <div className="bg-white rounded-xl shadow p-3 space-y-1">
           <div className="text-sm font-semibold text-gray-700">Adjust this month</div>
+          {pay.type !== 'daily' && graceDelta > 0 && (
+            <label className="flex items-center justify-between py-1">
+              <span className="text-sm">⏱ Pay 15-min grace <span className="text-gray-500">(+{graceDelta} day = {rupee(pay.perDay * graceDelta)})</span></span>
+              <input type="checkbox" className="w-5 h-5" checked={!!md.gracePaid} disabled={busy} onChange={(e) => act(() => saveMonth(code, mk, { gracePaid: e.target.checked }))} />
+            </label>
+          )}
           {pay.type !== 'daily' && <NumRow label={`Give back Saturdays${pay.saturdaysCut > 0 ? ` (${pay.saturdaysCut} cut · ${rupee(pay.perDay)}/day)` : ` (${rupee(pay.perDay)}/day)`}`} val={md.restoreSaturdays} disabled={busy} onSave={(v) => act(() => saveMonth(code, mk, { restoreSaturdays: v }))} />}
           <NumRow label="Bonus ₹" val={md.bonus} disabled={busy} onSave={(v) => act(() => saveMonth(code, mk, { bonus: v }))} />
           <NumRow label="Fine ₹" val={md.fine} disabled={busy} onSave={(v) => act(() => saveMonth(code, mk, { fine: v }))} />

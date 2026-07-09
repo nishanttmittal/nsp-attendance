@@ -19,7 +19,7 @@ export function effectiveAmount(emp, toDate) {
 }
 
 // One employee's pay for the period. att = {presentDays,absentDays,otHrs,lateHrs,earlyHrs}.
-export function computePay({ emp, att, daysInMonth, elapsedDays, fullMonth, advancesThisMonth = 0, advanceBalanceIn = 0, advanceRecover = 0, fines = 0, loanInstallment = 0, bonus = 0, restoreSaturdayDays = 0, latePenaltyDays = 0, weeklyOffDockDays = 0, monthStart, toDate }) {
+export function computePay({ emp, att, daysInMonth, elapsedDays, fullMonth, advancesThisMonth = 0, advanceBalanceIn = 0, advanceRecover = 0, fines = 0, loanInstallment = 0, bonus = 0, restoreSaturdayDays = 0, graceDays = 0, latePenaltyDays = 0, weeklyOffDockDays = 0, monthStart, toDate }) {
   const eff = effectiveAmount(emp, toDate);
   const rate = eff.amount;
   const perDay = emp.type === 'daily' ? rate : rate / daysInMonth;
@@ -61,7 +61,10 @@ export function computePay({ emp, att, daysInMonth, elapsedDays, fullMonth, adva
   // Additive earning only (monthly staff); does NOT touch attendance, paidDays, or the cut count.
   const restoreSatDays = emp.type === 'daily' ? 0 : Number(restoreSaturdayDays || 0);
   const restoreSaturdayPay = round(perDay * restoreSatDays);
-  const earnings = base + otPay + perfectBonus + restoreSaturdayPay + Number(bonus || 0);
+  // 15-min grace top-up: extra present days the grace earns this worker (owner opts in per person).
+  const graceDaysN = emp.type === 'daily' ? 0 : Number(graceDays || 0);
+  const gracePay = round(perDay * graceDaysN);
+  const earnings = base + otPay + perfectBonus + restoreSaturdayPay + gracePay + Number(bonus || 0);
   const fixed = Number(fines || 0) + Number(loanInstallment || 0) + latePenalty + weeklyOffDock;
   const avail = Math.max(0, earnings - fixed);
   const advanceDue = Number(advancesThisMonth || 0) + Number(advanceBalanceIn || 0);
@@ -98,6 +101,7 @@ export function computePay({ emp, att, daysInMonth, elapsedDays, fullMonth, adva
     weeklyOff, weeklyOffPresent, weeklyOffAll, holiday, paidDays, unpaidWorkedSat: unpaidSat,
     saturdaysInPeriod, saturdaysCut,
     restoreSaturdayDays: restoreSatDays, restoreSaturdayPay: round(restoreSaturdayPay),
+    graceDays: graceDaysN, gracePay: round(gracePay),
     otHrs: round(att.otHrs || 0), otHrsNet: round(netOtHrs),
     base: round(base), otPay: round(otPay), perfectBonus: round(perfectBonus), bonus: round(Number(bonus || 0)),
     fines: round(Number(fines || 0)), loanInstallment: round(Number(loanInstallment || 0)),

@@ -72,3 +72,26 @@ export function computeMonth(shift, punchesByDate, window, opts = {}) {
   const r2 = n => Math.round(n * 100) / 100;
   return { present: r2(present), absent: r2(absent), half, weeklyOff, weeklyOffPresent, detail: detail.sort((a, b) => a.ymd.localeCompare(b.ymd)) };
 }
+
+// --- helpers to drive the engine from an att_punches doc for a given month ---
+const prevMonthKey = (mk) => { const [y, m] = mk.split('-').map(Number); return m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, '0')}`; };
+export function punchesByDateFor(punchDoc, mk) {
+  const months = (punchDoc && punchDoc.months) || {};
+  const out = {};
+  for (const key of [prevMonthKey(mk), mk]) { const days = months[key] || {}; for (const dd of Object.keys(days)) out[`${key}-${dd}`] = days[dd]; }
+  return out;
+}
+export function monthWindow(mk, curMonth) {
+  const [y, m] = mk.split('-').map(Number);
+  const start = `${mk}-01`;
+  if (mk === curMonth) { const nowIst = new Date(Date.now() + 5.5 * 3600 * 1000); const yest = new Date(Date.UTC(y, m - 1, nowIst.getUTCDate() - 1)); return { start, to: yest.toISOString().slice(0, 10) }; }
+  const last = new Date(Date.UTC(y, m, 0)); return { start, to: last.toISOString().slice(0, 10) };
+}
+// extra PRESENT days a worker gains from the 15-min grace this month (0 if no punches / no near-miss)
+export function graceDeltaDays(shift, punchDoc, mk, curMonth) {
+  if (!punchDoc) return 0;
+  const pbd = punchesByDateFor(punchDoc, mk), win = monthWindow(mk, curMonth);
+  const on = computeMonth(shift || 'GEN', pbd, win, { grace: true }).present;
+  const off = computeMonth(shift || 'GEN', pbd, win, { grace: false }).present;
+  return Math.round((on - off) * 100) / 100;
+}

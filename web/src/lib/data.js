@@ -125,6 +125,11 @@ export async function loadAllPunches() {
   const snap = await getDocs(collection(db, 'att_punches'));
   return Object.fromEntries(snap.docs.map(d => [d.id, d.data()]));
 }
+export async function loadPunchDoc(code) {
+  if (!isConfigured || !db) return null;
+  const d = await getDoc(doc(db, 'att_punches', code));
+  return d.exists() ? d.data() : null;
+}
 export async function addDailyHours(code, month, entry) {
   const e = await loadEmployee(code);
   const log = { ...(e.attendanceLog || {}) };

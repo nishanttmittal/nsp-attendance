@@ -56,6 +56,7 @@ export function payslipOnePdf(emp, pay, monthLabel) {
     ['Base', rs(pay.base)],
     ['Overtime', rs(pay.otPay)],
     ['Attendance bonus', rs(pay.perfectBonus)],
+    ...(pay.gracePay > 0 ? [[`15-min grace (${pay.graceDays} day)`, rs(pay.gracePay)]] : []),
     ...(pay.restoreSaturdayPay > 0 ? [[`${pay.restoreSaturdayDays} Saturday goodwill`, rs(pay.restoreSaturdayPay)]] : []),
     ['Bonus', rs(pay.bonus)],
     ['Fine', '- ' + rs(pay.fines)],
