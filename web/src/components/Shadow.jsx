@@ -57,16 +57,18 @@ export default function Shadow() {
       const appOff = computeMonth(e.shift || 'GEN', pbd, win, { grace: false });
       const app = grace ? appOn : appOff;
       const graceDelta = Math.round((appOn.present - appOff.present) * 100) / 100;   // extra present days grace gives
+      const missed = app.detail.filter((d) => (d.in && !d.out) || (!d.in && d.out)).length;  // one punch only = forgot in/out
       const pm = (portal[e.code]?.months || {})[mk] || {};
       const pP = pm.presentDays, pA = pm.absentDays;
       const match = pP != null && Math.abs(app.present - (pP || 0)) < 0.01 && Math.abs(app.absent - (pA || 0)) < 0.01;
-      return { e, app, graceDelta, portal: { present: pP, absent: pA, weeklyOff: pm.weeklyOff, weeklyOffPresent: pm.weeklyOffPresent }, match, hasPortal: pP != null };
-    }).sort((a, b) => (b.graceDelta - a.graceDelta) || (a.match === b.match ? 0 : a.match ? 1 : -1));
+      return { e, app, graceDelta, missed, portal: { present: pP, absent: pA, weeklyOff: pm.weeklyOff, weeklyOffPresent: pm.weeklyOffPresent }, match, hasPortal: pP != null };
+    }).sort((a, b) => (b.graceDelta - a.graceDelta) || (b.missed - a.missed) || (a.match === b.match ? 0 : a.match ? 1 : -1));
   }, [emps, portal, punches, mk, grace]);
 
   const nMatch = rows.filter((r) => r.match).length;
   const nDiff = rows.filter((r) => r.hasPortal && !r.match).length;
   const nGrace = rows.filter((r) => r.graceDelta > 0).length;
+  const nMissed = rows.reduce((s, r) => s + r.missed, 0);
 
   if (loading) return <div className="text-gray-500 text-sm">Loading punches…</div>;
 
@@ -85,7 +87,7 @@ export default function Shadow() {
         <label className="text-sm flex items-center gap-1.5">
           <input type="checkbox" checked={grace} onChange={(e) => setGrace(e.target.checked)} /> 15-min grace
         </label>
-        <span className="text-[12px] text-gray-500 ml-auto">{nMatch} match · <span className="text-red-600">{nDiff} differ</span> · <span className="text-indigo-600">{nGrace} grace</span></span>
+        <span className="text-[12px] text-gray-500 ml-auto"><span className="text-indigo-600">{nGrace} grace</span> · <span className="text-orange-600">{nMissed} missed</span> · <span className="text-red-600">{nDiff} differ</span></span>
       </div>
 
       <div className="bg-white rounded-xl shadow divide-y">
@@ -97,7 +99,8 @@ export default function Shadow() {
             <button onClick={() => setOpen(open === r.e.code ? null : r.e.code)}
               className="w-full grid grid-cols-[1fr_auto_auto] gap-2 px-3 py-2 text-left items-center">
               <span className="text-sm truncate">{r.match ? '' : '⚠️ '}{r.e.name || r.e.code}
-                {r.graceDelta > 0 && <span className="ml-1 text-[10px] bg-indigo-100 text-indigo-700 rounded px-1 py-0.5 whitespace-nowrap">⏱ +{r.graceDelta}d grace</span>}</span>
+                {r.graceDelta > 0 && <span className="ml-1 text-[10px] bg-indigo-100 text-indigo-700 rounded px-1 py-0.5 whitespace-nowrap">⏱ +{r.graceDelta}d grace</span>}
+                {r.missed > 0 && <span className="ml-1 text-[10px] bg-orange-100 text-orange-700 rounded px-1 py-0.5 whitespace-nowrap">📌 {r.missed} missed</span>}</span>
               <span className={`text-right text-sm tabular-nums ${r.match ? 'text-gray-800' : 'text-red-700 font-medium'}`}>
                 {r.app.present} / {r.app.absent} / {r.app.half} / {r.app.weeklyOff}{r.app.weeklyOffPresent ? `+${r.app.weeklyOffPresent}` : ''}
               </span>
