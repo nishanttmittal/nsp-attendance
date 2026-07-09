@@ -16,6 +16,29 @@ export function advanceSplit(advances = []) {
   return { bank, cash };
 }
 
+// Monthly attendance detail (in/out per day) — hand a worker their full month's timings.
+const DOW_PDF = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const RESULT_PDF = { full: 'Full', half: 'Half', absent: 'Absent', 'weekly-off': 'Weekly-off', 'sat-worked': 'Sat worked (OT)', 'sat-absent': 'Sat cut' };
+export function attendanceDetailPdf(emp, monthLabel, app, grace) {
+  const doc = new jsPDF();
+  doc.setFontSize(16); doc.text('NSP ENTERPRISES', 14, 18);
+  doc.setFontSize(12); doc.text('Attendance Detail  ' + monthLabel, 14, 26);
+  doc.setFontSize(10);
+  doc.text(`Name: ${emp.name || emp.code}`, 14, 36);
+  doc.text(`Code: ${emp.code}`, 130, 36);
+  doc.text(`Shift: ${emp.shift || 'GEN'}`, 14, 42);
+  doc.text(`Grace: ${grace ? '15 min' : 'off'}`, 130, 42);
+  doc.text(`Present ${app.present}  |  Absent ${app.absent}  |  Half ${app.half}  |  Weekly-off ${app.weeklyOff}${app.weeklyOffPresent ? ` (+${app.weeklyOffPresent} worked)` : ''}`, 14, 50);
+  const body = (app.detail || []).map((d) => {
+    const dt = new Date(d.ymd + 'T00:00:00');
+    const hrs = d.worked != null ? d.worked.toFixed(2) + 'h' : (d.single ? 'single' : '');
+    return [d.ymd.slice(8) + '/' + d.ymd.slice(5, 7), DOW_PDF[dt.getDay()], d.in || '-', d.out || (d.in ? 'no out' : '-'), hrs, RESULT_PDF[d.kind] || d.kind];
+  });
+  autoTable(doc, { startY: 56, head: [['Date', 'Day', 'In', 'Out', 'Hours', 'Result']], body, theme: 'grid', styles: { fontSize: 9 }, headStyles: { fillColor: [185, 28, 28] } });
+  doc.setFontSize(8); doc.text('Computed by NSP Attendance from biometric punches. In = first punch, Out = last punch.', 14, 288);
+  return doc;
+}
+
 export function payslipOnePdf(emp, pay, monthLabel) {
   const doc = new jsPDF();
   doc.setFontSize(16); doc.text('NSP ENTERPRISES', 14, 18);

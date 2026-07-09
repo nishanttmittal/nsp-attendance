@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { loadEmployees, loadAllAttendance, loadAllPunches, istMonth } from '../lib/data';
 import { computeMonth } from '../lib/attendanceEngine';
+import { attendanceDetailPdf, sharePdf } from '../lib/salaryPdf';
 
 // SHADOW view (owner-only): the app computes present/half/absent/weekly-off from RAW punches with
 // the clean rules, shown next to the portal's published numbers. Read-only — changes no pay.
@@ -101,6 +102,8 @@ export default function Shadow() {
             </button>
             {open === r.e.code && (
               <div className="px-3 pb-2 bg-gray-50 text-[12px] text-gray-600 space-y-0.5">
+                <button onClick={() => sharePdf(attendanceDetailPdf(r.e, mk, r.app, grace), `attendance-${r.e.code}-${mk}.pdf`)}
+                  className="mb-1.5 border border-gray-300 rounded-lg px-3 py-1.5 text-[12px] font-medium bg-white">📄 Print / PDF this month</button>
                 <div className="grid grid-cols-[auto_1fr_auto] gap-x-3 gap-y-0.5 items-baseline">
                   {r.app.detail.map((d) => (
                     <div key={d.ymd} className="contents">
