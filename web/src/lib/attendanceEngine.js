@@ -55,16 +55,17 @@ export function computeMonth(shift, punchesByDate, window, opts = {}) {
       if (ymd < start || ymd > to) continue;               // count only in-window days
       const isSat = new Date(ymd + 'T00:00:00').getDay() === 6;
       const rec = punchesByDate[ymd];
+      const io = { in: (rec && rec.i) || null, out: (rec && rec.o) || null };
       if (isSat) {
-        if (rec && rec.i) { weeklyOffPresent += 1; detail.push({ ymd, kind: 'sat-worked', worked: rec.o ? workedHours(hoursOf(rec.i), hoursOf(rec.o)) : null }); }
-        else if (earned) { weeklyOff += 1; detail.push({ ymd, kind: 'weekly-off' }); }
-        else { absent += 1; detail.push({ ymd, kind: 'sat-absent' }); }
+        if (rec && rec.i) { weeklyOffPresent += 1; detail.push({ ymd, ...io, kind: 'sat-worked', worked: rec.o ? workedHours(hoursOf(rec.i), hoursOf(rec.o)) : null }); }
+        else if (earned) { weeklyOff += 1; detail.push({ ymd, ...io, kind: 'weekly-off' }); }
+        else { absent += 1; detail.push({ ymd, ...io, kind: 'sat-absent' }); }
       } else {
         const c = classifyDay(shift, rec, grace);
         if (c.status === 'full') present += 1;
         else if (c.status === 'half') { present += 0.5; absent += 0.5; half += 1; }
         else absent += 1;
-        detail.push({ ymd, kind: c.status, worked: c.worked, single: c.single });
+        detail.push({ ymd, ...io, kind: c.status, worked: c.worked, single: c.single });
       }
     }
   }

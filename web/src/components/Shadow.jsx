@@ -101,15 +101,17 @@ export default function Shadow() {
             </button>
             {open === r.e.code && (
               <div className="px-3 pb-2 bg-gray-50 text-[12px] text-gray-600 space-y-0.5">
-                {r.app.detail.map((d) => (
-                  <div key={d.ymd} className="flex justify-between">
-                    <span>{d.ymd.slice(5)}</span>
-                    <span className={d.kind === 'absent' || d.kind === 'sat-absent' ? 'text-red-500' : d.kind === 'half' ? 'text-amber-600' : 'text-gray-700'}>
-                      {d.worked != null ? `${d.worked.toFixed(2)}h → ` : d.single ? 'single punch → ' : ''}
-                      {LABEL[d.kind] || d.kind}
-                    </span>
-                  </div>
-                ))}
+                <div className="grid grid-cols-[auto_1fr_auto] gap-x-3 gap-y-0.5 items-baseline">
+                  {r.app.detail.map((d) => (
+                    <div key={d.ymd} className="contents">
+                      <span className="text-gray-500">{d.ymd.slice(5)} {DOW[new Date(d.ymd + 'T00:00:00').getDay()]}</span>
+                      <span className="tabular-nums text-gray-700">{d.in || '—'} <span className="text-gray-400">→</span> {d.out || (d.in ? 'no out' : '—')}</span>
+                      <span className={`text-right ${d.kind === 'absent' || d.kind === 'sat-absent' ? 'text-red-500' : d.kind === 'half' ? 'text-amber-600' : 'text-gray-700'}`}>
+                        {d.worked != null ? `${d.worked.toFixed(2)}h · ` : d.single ? 'single · ' : ''}{LABEL[d.kind] || d.kind}
+                      </span>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
           </div>
@@ -121,3 +123,4 @@ export default function Shadow() {
 }
 
 const LABEL = { full: 'Full', half: 'Half', absent: 'Absent', 'weekly-off': 'Weekly-off (paid)', 'sat-worked': 'Saturday worked (OT)', 'sat-absent': 'Saturday cut' };
+const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
