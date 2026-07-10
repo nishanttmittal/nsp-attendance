@@ -22,6 +22,7 @@ function OwnerSalary({ user }) {
   const [busy, setBusy] = useState('');
   const [payC, setPayC] = useState(null);   // owner pay&settle dialog: { r, mode, amount, remark }
   const [showRemoved, setShowRemoved] = useState(false);   // include resigned/removed (kept for costing)
+  const [pending, setPending] = useState({});   // code -> paidSoFar-before-tap; a payment is queued (5-min worker)
   const ctx = useMemo(() => monthCtx(mk), [mk]);
 
   async function reload() {
@@ -29,6 +30,19 @@ function OwnerSalary({ user }) {
     setEmps(list); setAttMap(am);
   }
   useEffect(() => { reload(); }, [showRemoved]);
+  useEffect(() => { setPending({}); }, [mk]);   // queued markers are per selected month
+  // clear a "queued" marker once the worker has applied it (fully paid, or paidSoFar advanced)
+  useEffect(() => {
+    if (!emps) return;
+    setPending((prev) => {
+      const next = { ...prev }; let changed = false;
+      for (const code of Object.keys(prev)) {
+        const md = (emps.find((x) => x.code === code)?.months || {})[mk] || {};
+        if (md.payment || Number(md.paidSoFar || 0) > prev[code]) { delete next[code]; changed = true; }
+      }
+      return changed ? next : prev;
+    });
+  }, [emps, mk]);
 
   if (openCode) return <Person code={openCode} mk={mk} user={user} onBack={() => { setOpenCode(''); reload(); }} />;
   if (emps === null) return <p className="text-gray-500">Loading…</p>;
@@ -65,11 +79,15 @@ function OwnerSalary({ user }) {
     try { await releaseSalary(r.emp.code, mk, user.email); await reload(); }
     finally { setBusy(''); }
   }
-  // owner pays & settles a ticked month (any month, incl. previous).
+  // owner pays & settles a ticked month (any month, incl. previous). Supports PART payments.
   async function doPay(r, mode, remark, amount) {
     setBusy(r.emp.code);
-    try { await queueMarkPaid(r.emp.code, mk, mode, user.email, remark, amount); setPayC(null); await reload(); }
-    finally { setBusy(''); }
+    const prevPaid = Number(r.md.paidSoFar || 0);
+    try {
+      await queueMarkPaid(r.emp.code, mk, mode, user.email, remark, amount);
+      setPending((p) => ({ ...p, [r.emp.code]: prevPaid }));   // ⏳ until the worker applies it
+      setPayC(null); await reload();
+    } finally { setBusy(''); }
   }
   // owner finalizes the whole month's hisab: locks ticked staff + carries each one's leftover
   // advance forward (advance carries ONLY now). Admin-password gated.
@@ -138,7 +156,9 @@ function OwnerSalary({ user }) {
 
       <div className="bg-white rounded-xl shadow divide-y divide-gray-100">
         {visible.length === 0 && <p className="p-4 text-sm text-gray-400">No one matches.</p>}
-        {visible.map((r) => <OwnerRow key={r.emp.code} r={r} busy={busy === r.emp.code} onName={() => setOpenCode(r.emp.code)} onTick={() => tick(r)} onHold={() => hold(r)} onRelease={() => release(r)} onPay={() => setPayC({ r, mode: 'cash', amount: String(r.md.approvedNet ?? r.pay.net), remark: '' })} />)}
+        {visible.map((r) => { const remaining = Math.max(0, Number(r.md.approvedNet ?? r.pay.net) - Number(r.md.paidSoFar || 0)); return (
+          <OwnerRow key={r.emp.code} r={r} busy={busy === r.emp.code} queued={pending[r.emp.code] != null} onName={() => setOpenCode(r.emp.code)} onTick={() => tick(r)} onHold={() => hold(r)} onRelease={() => release(r)} onPay={() => setPayC({ r, mode: 'cash', amount: String(remaining), remark: '' })} />
+        ); })}
       </div>
 
       <AdvanceCard user={user} />
@@ -146,19 +166,20 @@ function OwnerSalary({ user }) {
       {noSalary.length > 0 && <NoSalaryList list={noSalary} onSaved={reload} />}
       {showReport && <ReportModal user={user} mk={mk} rows={rows} onClose={() => setShowReport(false)} />}
 
-      {payC && (() => { const due = Number(payC.r.md.approvedNet ?? payC.r.pay.net) || 0; const amt = Number(payC.amount) || 0; return (
+      {payC && (() => { const due = Number(payC.r.md.approvedNet ?? payC.r.pay.net) || 0; const paidSoFar = Number(payC.r.md.paidSoFar || 0); const remaining = Math.max(0, due - paidSoFar); const amt = Number(payC.amount) || 0; const isPart = amt > 0 && amt < remaining - 0.5; return (
         <div className="fixed inset-0 z-50 bg-black/40 flex items-end sm:items-center justify-center p-4" onClick={() => busy ? null : setPayC(null)}>
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-5 space-y-4" onClick={(e) => e.stopPropagation()}>
             <div className="text-center">
               <div className="text-3xl mb-1">💵</div>
               <p className="font-bold text-gray-800 text-lg">{payC.r.emp.name || payC.r.emp.code}</p>
-              <p className="text-xs text-gray-500">Pay &amp; settle · Net due <b className="text-red-700">{rupee(due)}</b> · {monthOptions().find((m) => m.mk === mk)?.label || mk}</p>
+              <p className="text-xs text-gray-500">Pay &amp; settle · Net <b className="text-gray-700">{rupee(due)}</b>{paidSoFar > 0 ? <> · already paid <b className="text-green-700">{rupee(paidSoFar)}</b> · <b className="text-red-700">{rupee(remaining)}</b> left</> : <> · due <b className="text-red-700">{rupee(remaining)}</b></>} · {monthOptions().find((m) => m.mk === mk)?.label || mk}</p>
             </div>
-            <label className="block text-xs text-gray-500">Amount paid ₹
+            <label className="block text-xs text-gray-500">Amount paid now ₹
               <input type="number" value={payC.amount} onChange={(e) => setPayC({ ...payC, amount: e.target.value })}
                 className="mt-1 w-full border rounded-lg px-3 py-2 text-lg font-bold text-gray-800" />
             </label>
-            {amt > due && <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2">Paying {rupee(amt - due)} extra → recorded as an <b>advance carried forward</b> to next month.</p>}
+            {isPart && <p className="text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded-lg p-2">Part payment — <b>{rupee(remaining - amt)}</b> stays pending. His hisab stays <b>open</b> until fully paid (e.g. pay the account part next day).</p>}
+            {amt > remaining + 0.5 && <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2">Paying {rupee(amt - remaining)} extra → recorded as an <b>advance carried forward</b> to next month.</p>}
             <div className="grid grid-cols-2 gap-2">
               {['cash', 'bank'].map((m) => (
                 <button key={m} onClick={() => setPayC({ ...payC, mode: m })} className={`rounded-lg py-2 text-sm font-medium border ${payC.mode === m ? 'bg-gray-800 text-white border-gray-800' : 'border-gray-300 text-gray-600'}`}>{m === 'cash' ? '💵 Cash' : '🏦 Bank'}</button>
@@ -177,10 +198,14 @@ function OwnerSalary({ user }) {
   );
 }
 
-function OwnerRow({ r, busy, onName, onTick, onHold, onRelease, onPay }) {
+function OwnerRow({ r, busy, queued, onName, onTick, onHold, onRelease, onPay }) {
   const { emp, md, pay } = r;
   const [showDays, setShowDays] = useState(false);
   const isPaid = !!md.payment, isTicked = !!md.approved, isHeld = !!md.hold;
+  const due = Number(md.approvedNet ?? pay.net) || 0;
+  const paidSoFar = Number(md.paidSoFar || 0);
+  const remaining = Math.max(0, due - paidSoFar);
+  const isPartial = !isPaid && paidSoFar > 0;
   const sub2 = [
     pay.otHrsNet > 0 ? `OT ${pay.otHrsNet}h` : null,
     pay.advanceRecovered > 0 ? `adv −${rupee(pay.advanceRecovered)}` : null,
@@ -199,9 +224,14 @@ function OwnerRow({ r, busy, onName, onTick, onHold, onRelease, onPay }) {
           {showDays && <DaysBreakdown pay={pay} />}
         </div>
         <div className="text-right">
-          <div className="font-bold text-red-700">{rupee(isPaid ? md.payment.net : (isTicked ? md.approvedNet : pay.net))}</div>
+          <div className="font-bold text-red-700">{rupee(isPaid ? md.payment.net : (isPartial ? remaining : (isTicked ? md.approvedNet : pay.net)))}</div>
           {isHeld ? <button disabled={busy} onClick={onRelease} className="text-[11px] text-red-600 underline">🚫 hold · release</button>
-            : isPaid ? <span className="text-[11px] text-green-700 font-medium">✓ PAID ({md.payment.mode})</span>
+            : isPaid ? <span className="text-[11px] text-green-700 font-medium">✓ PAID ({md.payment.mode}{md.payment.parts > 1 ? `, ${md.payment.parts} parts` : ''})</span>
+            : queued ? <span className="text-[11px] text-amber-600 font-medium">⏳ payment queued… (updates in a few min)</span>
+            : isPartial ? <div className="flex flex-col items-end gap-0.5">
+                <span className="text-[11px] text-green-700">{rupee(paidSoFar)} paid · <b className="text-red-600">{rupee(remaining)}</b> left</span>
+                <button disabled={busy} onClick={onPay} className="text-xs bg-green-700 text-white rounded-lg px-3 py-1.5 font-medium disabled:opacity-50">💵 Pay rest</button>
+              </div>
             : isTicked ? <div className="flex gap-1 justify-end items-center">
                 <button disabled={busy} onClick={onPay} className="text-xs bg-green-700 text-white rounded-lg px-3 py-1.5 font-medium disabled:opacity-50">💵 Pay</button>
                 <button disabled={busy} onClick={onTick} className="text-[11px] text-amber-700 underline">undo</button>
@@ -282,17 +312,19 @@ function ManagerSalary({ user }) {
         {items.length === 0 && <p className="p-4 text-sm text-gray-400">Nothing approved for this month yet.</p>}
         {items.map((i) => {
           const paidMode = i.paid?.mode || done[i.code];
+          const remaining = Math.max(0, Number(i.net) - Number(i.paidSoFar || 0));
+          const isPartial = !i.paid && Number(i.paidSoFar || 0) > 0;
           return (
             <div key={i.code} className="flex items-center p-3 gap-2">
               <div className="flex-1">
                 <div className="font-medium text-gray-800">{i.name}{i.nickname ? <span className="text-gray-400 font-normal"> ({i.nickname})</span> : null}</div>
-                <div className="text-xs text-gray-500">{i.dept}</div>
+                <div className="text-xs text-gray-500">{i.dept}{isPartial ? <span className="text-blue-700"> · {rupee(Number(i.paidSoFar))} paid, {rupee(remaining)} left</span> : null}</div>
               </div>
-              <div className="font-bold text-red-700 mr-1">{rupee(i.net)}</div>
+              <div className="font-bold text-red-700 mr-1">{rupee(isPartial ? remaining : i.net)}</div>
               {paidMode ? <span className="text-xs text-green-700 font-medium">✓ {paidMode}</span> : (
                 <div className="flex gap-1">
-                  <button disabled={busy === i.code} onClick={() => setConfirm({ item: i, mode: 'cash', remark: '', amount: String(i.net) })} className="bg-green-700 text-white text-xs rounded-lg px-2.5 py-2 font-medium disabled:opacity-50">💵 Cash</button>
-                  <button disabled={busy === i.code} onClick={() => setConfirm({ item: i, mode: 'bank', remark: '', amount: String(i.net) })} className="bg-gray-800 text-white text-xs rounded-lg px-2.5 py-2 font-medium disabled:opacity-50">🏦 Bank</button>
+                  <button disabled={busy === i.code} onClick={() => setConfirm({ item: i, mode: 'cash', remark: '', amount: String(remaining) })} className="bg-green-700 text-white text-xs rounded-lg px-2.5 py-2 font-medium disabled:opacity-50">💵 Cash</button>
+                  <button disabled={busy === i.code} onClick={() => setConfirm({ item: i, mode: 'bank', remark: '', amount: String(remaining) })} className="bg-gray-800 text-white text-xs rounded-lg px-2.5 py-2 font-medium disabled:opacity-50">🏦 Bank</button>
                 </div>
               )}
             </div>
@@ -307,17 +339,18 @@ function ManagerSalary({ user }) {
               <div className="text-3xl mb-1">{confirm.mode === 'cash' ? '💵' : '🏦'}</div>
               <p className="text-gray-600 text-sm">Pay salary by {confirm.mode === 'cash' ? 'Cash' : 'Bank'}?</p>
               <p className="font-bold text-gray-800 text-lg mt-1">{confirm.item.name}</p>
-              <p className="text-xs text-gray-500">Net due: <b className="text-red-700">{rupee(confirm.item.net)}</b> · {monthOptions(3).find((m) => m.mk === mk)?.label || mk}</p>
+              {(() => { const rem = Math.max(0, Number(confirm.item.net) - Number(confirm.item.paidSoFar || 0)); return (
+                <p className="text-xs text-gray-500">{Number(confirm.item.paidSoFar || 0) > 0 ? <>{rupee(Number(confirm.item.paidSoFar))} paid · </> : null}Due: <b className="text-red-700">{rupee(rem)}</b> · {monthOptions(3).find((m) => m.mk === mk)?.label || mk}</p>
+              ); })()}
             </div>
-            <label className="block text-xs text-gray-500">Amount paid ₹
+            <label className="block text-xs text-gray-500">Amount paid now ₹
               <input type="number" value={confirm.amount} onChange={(e) => setConfirm({ ...confirm, amount: e.target.value })}
                 className="mt-1 w-full border rounded-lg px-3 py-2 text-lg font-bold text-gray-800" />
             </label>
-            {Number(confirm.amount) > confirm.item.net && (
-              <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2">
-                Paying {rupee(Number(confirm.amount) - confirm.item.net)} extra → recorded as an <b>advance carried forward</b> to next month.
-              </p>
-            )}
+            {(() => { const rem = Math.max(0, Number(confirm.item.net) - Number(confirm.item.paidSoFar || 0)); const amt = Number(confirm.amount) || 0; return (<>
+              {amt > 0 && amt < rem - 0.5 && <p className="text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded-lg p-2">Part payment — <b>{rupee(rem - amt)}</b> stays pending. Hisab stays open until fully paid.</p>}
+              {amt > rem + 0.5 && <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2">Paying {rupee(amt - rem)} extra → recorded as an <b>advance carried forward</b> to next month.</p>}
+            </>); })()}
             <input value={confirm.remark} onChange={(e) => setConfirm({ ...confirm, remark: e.target.value })} placeholder="Remark (optional)"
               className="w-full border rounded-lg px-3 py-2 text-sm" />
             <div className="flex gap-2">

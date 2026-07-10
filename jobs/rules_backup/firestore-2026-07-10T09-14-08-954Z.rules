@@ -213,7 +213,7 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
     // slip a negative freight past the app-layer block (P1-2).
     match /apps/transportfreight/users/{id}        { allow read: if tEmail() == id || tfIsManager(); allow write: if tfIsOwner(); }
     match /apps/transportfreight/transporters/{id} { allow read: if tfIsManager() || (tfIsGaadiwala() && id == tfMyTid()); allow write: if tfIsManager(); }
-    match /apps/transportfreight/destinations/{id} { allow read: if tfIsManager() || tfIsGaadiwala(); allow create: if tfIsManager() || tfIsGaadiwala(); allow update, delete: if tfIsManager(); }
+    match /apps/transportfreight/destinations/{id} { allow read: if tfIsManager() || tfIsGaadiwala(); allow write: if tfIsManager(); }
     match /apps/transportfreight/meta/{id}         { allow read, write: if tfIsManager(); }
     match /apps/transportfreight/logs/{id}         { allow read: if tfIsManager(); allow create: if nonAnon(); }
     match /apps/transportfreight/entries/{id} {

@@ -115,56 +115,73 @@ async function handle(type, p) {
     await sendTelegram(`🔍 Rescanned ${p.month || curMk}: ${n} missed punch(es) found — see the Problems tab.`);
     return `scanned ${p.month}: ${n}`;
   }
-  if (type === 'mark_paid') {    // manager marks an approved salary as handed over
+  if (type === 'mark_paid') {    // pay a salary — supports PART payments (e.g. cash today + bank next day)
     const ref = db().collection('att_salary').doc(p.code);
     const snap = await ref.get();
     if (!snap.exists) throw new Error('no employee ' + p.code);
     const e = snap.data();
     const md = (e.months || {})[p.month] || {};
     if (!md.approved) throw new Error('not approved yet');
-    // Already-paid guard: a second mark_paid (double-tap / duplicate job / owner+manager
-    // both pay) must NOT silently overwrite the recorded payment and destroy its audit.
+    // Already FULLY settled → ignore (double-tap / duplicate job / owner+manager both pay).
     // A settlement re-open (md.payment.settlement) is the only legitimate re-pay.
-    if (md.payment && !md.payment.settlement) return `already paid on ${md.payment.date} (₹${md.payment.net}) — ignored`;
+    if (md.payment && !md.payment.settlement) return `already fully paid on ${md.payment.date} (₹${md.payment.net}) — ignored`;
     const due = Number(md.approvedNet || 0);
-    const paidNet = p.amount != null ? Number(p.amount) : due;   // actual amount handed over
-    const extra = Math.max(0, paidNet - due);                     // paid more than earned → advance
+    const prevPayments = Array.isArray(md.payments) ? md.payments : [];
+    const paidBefore = prevPayments.reduce((s, x) => s + Number(x.amount || 0), 0);
+    // IDEMPOTENT part: every Pay tap carries a unique payId — a retried/duplicate job with the
+    // same id is a no-op, so a re-tap during the queue delay can never double-record a part.
+    const payId = p.payId || `pay-${p.month}-legacy`;
+    if (prevPayments.some(x => x.id === payId)) return `payment ${payId} already recorded — ignored`;
+    // amount handed over NOW (defaults to the whole remaining balance = classic one-tap full pay).
+    const thisAmt = p.amount != null ? Number(p.amount) : Math.max(0, due - paidBefore);
     const date = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
     const [y, m] = p.month.split('-').map(Number);
     const next = m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`;
+    const payments = [...prevPayments, { id: payId, date, mode: p.mode || 'cash', amount: thisAmt, by: p._by || 'manager', remark: p.remark || '' }];
+    const paidSoFar = payments.reduce((s, x) => s + Number(x.amount || 0), 0);
+    const fullyPaid = paidSoFar >= due - 0.5;   // ½-rupee tolerance
     const months = { ...(e.months || {}) };
-    // PER-WORKER hisab (owner 2026-07-10, supersedes the 2026-06-15 month-wide rule): paying a
-    // worker CLOSES his own hisab right away — lock him + carry his leftover advance forward now,
-    // so one still-pending worker (e.g. absent, unresolved) never holds up the rest of the month.
-    months[p.month] = { ...md, locked: true, hisabFinalized: true, finalizedAt: new Date().toISOString(), payment: { date, mode: p.mode || 'cash', net: paidNet, due, extra, by: p._by || 'manager', remark: p.remark || '' } };
-    months[next] = { ...(months[next] || {}), advanceBalanceIn: Number(md.approvedCarry || 0) };   // leftover advance → next month opening
     const patch = { months };
-    // overpayment → record as a NEXT-MONTH advance entry (carried forward, recovered next month).
-    // IDEMPOTENT: keyed by a deterministic id so re-running this job (double-click / retry / a
-    // crash after the write but before status='done') can never append the advance twice.
-    if (extra > 0) {
-      const advId = `extra-${p.month}`;
-      const already = (e.advances || []).some(a => a.id === advId);
-      if (!already) {
-        patch.advances = [...(e.advances || []), { id: advId, date: `${next}-01`, amount: extra, mode: p.mode || 'cash', remark: `extra paid with ${p.month} salary`, paidBy: p._by || 'manager' }];
+    if (fullyPaid) {
+      // FULLY paid now → close this worker's hisab (PER-WORKER rule, owner 2026-07-10): lock him +
+      // carry his leftover advance forward, so one still-pending worker never holds up the month.
+      const extra = Math.max(0, paidSoFar - due);
+      const mode = payments.length > 1 ? 'split' : (payments[0].mode || 'cash');
+      months[p.month] = { ...md, payments, paidSoFar, locked: true, hisabFinalized: true, finalizedAt: new Date().toISOString(),
+        payment: { date, mode, net: paidSoFar, due, extra, parts: payments.length, by: p._by || 'manager', remark: p.remark || '' } };
+      months[next] = { ...(months[next] || {}), advanceBalanceIn: Number(md.approvedCarry || 0) };   // leftover advance → next month opening
+      // overpayment → NEXT-MONTH advance entry (carried forward). IDEMPOTENT by a deterministic id.
+      if (extra > 0) {
+        const advId = `extra-${p.month}`;
+        if (!(e.advances || []).some(a => a.id === advId))
+          patch.advances = [...(e.advances || []), { id: advId, date: `${next}-01`, amount: extra, mode, remark: `extra paid with ${p.month} salary`, paidBy: p._by || 'manager' }];
       }
+    } else {
+      months[p.month] = { ...md, payments, paidSoFar };   // PART payment — hisab stays OPEN until fully paid
     }
     await ref.set(patch, { merge: true });
-    // DURABLE monthly salary register (owner 2026-06-15): snapshot each payment into
-    // att_meta/salary_register_{mk} so the month's total salary stays saved for product costing
-    // even if the employee is later removed from the machine/data. Immutable per month.
-    try {
-      const regRef = db().collection('att_meta').doc('salary_register_' + p.month);
-      const reg = (await regRef.get()).data() || { month: p.month, byCode: {} };
-      reg.byCode = reg.byCode || {};
-      reg.byCode[p.code] = { name: e.name || p.code, dept: e.dept || '', net: paidNet, mode: p.mode || 'cash', date, by: p._by || 'manager' };
-      reg.total = Object.values(reg.byCode).reduce((s, x) => s + Number(x.net || 0), 0);
-      reg.count = Object.keys(reg.byCode).length;
-      reg.updatedAt = new Date().toISOString();
-      await regRef.set(reg);
-    } catch (e2) { console.error('salary register write failed:', e2.message); }
-    await sendTelegram(`💵 Paid: <b>${e.name || p.code}</b> ₹${paidNet.toLocaleString('en-IN')} (${p.mode}) · ${p.month}${extra > 0 ? ` · ₹${extra.toLocaleString('en-IN')} extra → advance carried forward` : ''}${p.remark ? ` · ${p.remark}` : ''} · by ${p._by || 'manager'}`);
-    return extra > 0 ? `marked paid (₹${extra} extra → advance)` : 'marked paid';
+    // DURABLE monthly salary register (owner 2026-06-15) — snapshot ONLY once the month is fully
+    // settled (net = total actually paid), so the costing total stays accurate. Immutable per month.
+    if (fullyPaid) {
+      try {
+        const regRef = db().collection('att_meta').doc('salary_register_' + p.month);
+        const reg = (await regRef.get()).data() || { month: p.month, byCode: {} };
+        reg.byCode = reg.byCode || {};
+        reg.byCode[p.code] = { name: e.name || p.code, dept: e.dept || '', net: paidSoFar, mode: months[p.month].payment.mode, date, by: p._by || 'manager' };
+        reg.total = Object.values(reg.byCode).reduce((s, x) => s + Number(x.net || 0), 0);
+        reg.count = Object.keys(reg.byCode).length;
+        reg.updatedAt = new Date().toISOString();
+        await regRef.set(reg);
+      } catch (e2) { console.error('salary register write failed:', e2.message); }
+    }
+    const remaining = Math.max(0, due - paidSoFar);
+    if (fullyPaid) {
+      const extra = Math.max(0, paidSoFar - due);
+      await sendTelegram(`💵 Paid in full: <b>${e.name || p.code}</b> ₹${paidSoFar.toLocaleString('en-IN')} (${months[p.month].payment.mode}) · ${p.month}${extra > 0 ? ` · ₹${extra.toLocaleString('en-IN')} extra → advance carried forward` : ''}${payments.length > 1 ? ` · ${payments.length} parts` : ''}${p.remark ? ` · ${p.remark}` : ''} · by ${p._by || 'manager'}`);
+      return extra > 0 ? `paid in full (₹${extra} extra → advance)` : 'paid in full';
+    }
+    await sendTelegram(`💵 Part paid: <b>${e.name || p.code}</b> ₹${thisAmt.toLocaleString('en-IN')} (${p.mode || 'cash'}) · ${p.month} · ₹${remaining.toLocaleString('en-IN')} still pending${p.remark ? ` · ${p.remark}` : ''} · by ${p._by || 'manager'}`);
+    return `part paid ₹${thisAmt} · ₹${remaining} pending`;
   }
   if (type === 'finalize_hisab') {   // owner finalizes a whole month: lock + carry advances forward
     const mk = p.month;
@@ -278,7 +295,7 @@ async function main() {
       sal.forEach(d => {
         const md = (d.data().months || {})[mk];
         if (!md || !md.approved || md.hold) return;  // held salaries never reach the manager's pay list
-        items[d.id] = { name: d.data().name || d.id, nickname: d.data().nickname || '', dept: d.data().dept || '', net: Number(md.approvedNet || 0), paid: md.payment ? { mode: md.payment.mode, date: md.payment.date } : null };
+        items[d.id] = { name: d.data().name || d.id, nickname: d.data().nickname || '', dept: d.data().dept || '', net: Number(md.approvedNet || 0), paidSoFar: Number(md.paidSoFar || 0), paid: md.payment ? { mode: md.payment.mode, date: md.payment.date } : null };
       });
       await db().collection('att_meta').doc('payout_' + mk).set({ month: mk, items, updatedAt: new Date().toISOString() });
     }

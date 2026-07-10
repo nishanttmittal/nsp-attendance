@@ -375,8 +375,11 @@ export async function queueFinalizeHisab(month, by) {
 // Manager marks a person paid — applied by the worker with admin rights. `amount` = the actual
 // amount handed over (defaults to the net due); anything paid OVER the net becomes an advance
 // carried forward to next month.
-export async function queueMarkPaid(code, month, mode, by, remark, amount) {
-  return queueJob('mark_paid', { code, month, mode, remark: remark || '', amount: amount != null ? Number(amount) : null }, by);
+export async function queueMarkPaid(code, month, mode, by, remark, amount, payId) {
+  // Unique id per Pay tap → the worker dedupes on it, so a re-tap during the 5-min queue delay
+  // can never double-record a (part) payment.
+  const pid = payId || ('pay-' + month + '-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7));
+  return queueJob('mark_paid', { code, month, mode, remark: remark || '', amount: amount != null ? Number(amount) : null, payId: pid }, by);
 }
 
 // Resign prompts (set by publishMonthly when someone is absent a full month).
