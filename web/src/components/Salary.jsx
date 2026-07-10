@@ -129,9 +129,8 @@ function OwnerSalary({ user }) {
         {!ctx.fullMonth && <p className="text-xs text-gray-400">Running month — figures till yesterday.</p>}
         <label className="flex items-center gap-1.5 text-xs text-gray-500"><input type="checkbox" checked={showRemoved} onChange={(e) => setShowRemoved(e.target.checked)} /> Show removed/resigned staff (kept in the sheet for costing)</label>
         {(() => {
-          if (rows.some((r) => r.md.hisabFinalized)) return <p className="text-xs text-green-700 font-medium">🔒 {mk} hisab finalized — month locked, advances carried forward.</p>;
-          if (!ticked.length) return null;
-          return <button disabled={busy === 'hisab'} onClick={finalizeHisab} className="w-full bg-gray-800 text-white rounded-lg py-2.5 text-sm font-semibold disabled:opacity-50">🔒 Finalize hisab ({ticked.length} ticked) — lock month + carry advances</button>;
+          const closed = rows.filter((r) => r.md.payment).length;
+          return <p className="text-[11px] text-gray-500">🔒 Each worker's hisab closes when you <b>pay</b> him — his leftover advance carries to next month automatically. No month-end step needed.{closed > 0 ? ` (${closed} of ${rows.length} closed)` : ''}</p>;
         })()}
       </div>
 

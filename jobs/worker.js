@@ -130,12 +130,14 @@ async function handle(type, p) {
     const paidNet = p.amount != null ? Number(p.amount) : due;   // actual amount handed over
     const extra = Math.max(0, paidNet - due);                     // paid more than earned → advance
     const date = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
-    const months = { ...(e.months || {}) };
-    months[p.month] = { ...md, locked: true, payment: { date, mode: p.mode || 'cash', net: paidNet, due, extra, by: p._by || 'manager', remark: p.remark || '' } };
-    // NOTE: advance carry-forward now happens ONLY at month FINALIZE (hisab), not per-payment
-    // (owner 2026-06-15: "once its done only advance carry forward"). See 'finalize_hisab'.
     const [y, m] = p.month.split('-').map(Number);
     const next = m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`;
+    const months = { ...(e.months || {}) };
+    // PER-WORKER hisab (owner 2026-07-10, supersedes the 2026-06-15 month-wide rule): paying a
+    // worker CLOSES his own hisab right away — lock him + carry his leftover advance forward now,
+    // so one still-pending worker (e.g. absent, unresolved) never holds up the rest of the month.
+    months[p.month] = { ...md, locked: true, hisabFinalized: true, finalizedAt: new Date().toISOString(), payment: { date, mode: p.mode || 'cash', net: paidNet, due, extra, by: p._by || 'manager', remark: p.remark || '' } };
+    months[next] = { ...(months[next] || {}), advanceBalanceIn: Number(md.approvedCarry || 0) };   // leftover advance → next month opening
     const patch = { months };
     // overpayment → record as a NEXT-MONTH advance entry (carried forward, recovered next month).
     // IDEMPOTENT: keyed by a deterministic id so re-running this job (double-click / retry / a
@@ -173,7 +175,7 @@ async function handle(type, p) {
     const reg = { month: mk, byCode: {} };
     for (const d of sal.docs) {
       const e = d.data(); const md = (e.months || {})[mk];
-      if (!md || !md.approved) continue;          // only finalize TICKED people
+      if (!md || !md.payment) continue;           // per-worker rule: only close PAID people (never an unpaid straggler)
       const months = { ...(e.months || {}) };
       months[mk] = { ...md, hisabFinalized: true, locked: true, finalizedAt: new Date().toISOString(), finalizedBy: p._by || 'owner' };
       // carry the LEFTOVER advance forward — ONLY now, at finalize
