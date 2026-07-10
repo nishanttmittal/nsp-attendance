@@ -7,13 +7,14 @@ const pad = (n) => String(n).padStart(2, '0');
 
 export const rupee = (n) => '₹' + Number(n || 0).toLocaleString('en-IN');
 
+export const DATA_START = '2026-06';   // app runs from June 2026 onward — no data before this
 export function monthOptions(count = 6) {
   const now = new Date(Date.now() + 5.5 * 3600 * 1000);
   return Array.from({ length: count }, (_, i) => {
     const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1));
     const mk = `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}`;
     return { mk, label: d.toLocaleString('default', { month: 'long', year: 'numeric', timeZone: 'UTC' }) };
-  });
+  }).filter((m) => m.mk >= DATA_START);   // never offer pre-June months
 }
 
 export function monthCtx(mk) {

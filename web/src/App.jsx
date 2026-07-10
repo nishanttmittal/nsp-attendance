@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useAuth, canSee, signOut } from './lib/auth';
-import { loadMissedDoc, loadEmployees } from './lib/data';
+import { loadEmployees } from './lib/data';
 import Login from './components/Login.jsx';
 import Dashboard from './components/Dashboard.jsx';
 import Salary from './components/Salary.jsx';
@@ -26,18 +26,10 @@ export default function App() {
     if (!user?.role) return;
     (async () => {
       try {
-        const md = await loadMissedDoc();
-        let n = (md.entries || []).length;
-        if (user.role === 'admin') {
-          try {
-            const emps = await loadEmployees(true);
-            const mk = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 7);
-            const left = new Set(emps.flatMap((e) => ((e.missedLeave || {})[mk] || []).map((d) => e.code + '|' + d)));
-            n = (md.entries || []).filter((m) => !left.has(m.code + '|' + m.date)).length
-              + emps.filter((e) => e.resignPrompt?.status === 'pending' && e.active !== false).length;
-          } catch { /* ignore */ }
-        }
-        setBadge(n);
+        // Problems badge now counts pending resign prompts (missed punches moved to the Shadow tab).
+        if (user.role !== 'admin') { setBadge(0); return; }
+        const emps = await loadEmployees(true);
+        setBadge(emps.filter((e) => e.resignPrompt?.status === 'pending' && e.active !== false).length);
       } catch { /* ignore */ }
     })();
   }, [user]);

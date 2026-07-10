@@ -128,42 +128,23 @@ export default function Problems({ user }) {
         </Card>
       )}
 
-      {/* MONTH PICKER + RESCAN — governs all three lists below: missed punches, late marks, short days */}
+      {/* Month + Rescan for the Late list below. Missed punches & short days now live in the Shadow tab. */}
       <div className="bg-white rounded-xl shadow p-3">
-        <div className="flex items-center gap-2 mb-2">
-          <div className="font-semibold text-gray-800 text-sm flex-1">⏱ Missed punches</div>
+        <div className="flex items-center gap-2">
+          <div className="font-semibold text-gray-800 text-sm flex-1">📅 Month</div>
           <select value={mMonth} onChange={(e) => setMMonth(e.target.value)} className="border rounded-lg px-2 py-1 text-xs bg-white">
             {monthOptions(6).map((o) => <option key={o.mk} value={o.mk}>{o.label}</option>)}
           </select>
           <button disabled={busy === 'scan'} onClick={rescan} className="border border-gray-300 rounded-lg px-2.5 py-1 text-xs disabled:opacity-50">🔍 Rescan</button>
         </div>
-        <p className="text-[11px] text-gray-400 mb-1">Month + Rescan apply to all three lists below — missed punches, late marks & short days.</p>
-        {scanSt === 'queued' && <p className="text-xs text-blue-700 mb-1">Rescanning {monthLabel} (missed punches · late marks · short days) from the machine… refresh in a few minutes.</p>}
-        {scanSt === 'failed' && <p className="text-xs text-red-600 mb-1">Couldn't queue rescan — try again.</p>}
-        <p className="text-xs text-gray-400 mb-1">Each one asks you to confirm — fill the missing punch with shift time, mark overtime, or half-day if he left early.</p>
-        {visMissed.length === 0 && <p className="text-sm text-gray-400 py-1">No pending missed punches in {monthLabel} 🎉</p>}
-        {visMissed.map((m) => (
-          <MissedRow key={m.code + m.date} m={m} shiftHrs={shiftHrsOf(m.code)} busy={busy === m.code + m.date} isAdmin={isAdmin}
-            onApply={(payload) => act(m.code + m.date, () => applyPunch(m, payload))}
-            onLeave={isAdmin ? () => act(m.code + m.date, () => leaveMissedPunch(m.code, mMonth, m.date)) : undefined} />
-        ))}
+        {scanSt === 'queued' && <p className="text-xs text-blue-700 mt-1">Rescanning {monthLabel} from the machine… refresh in a few minutes.</p>}
+        {scanSt === 'failed' && <p className="text-xs text-red-600 mt-1">Couldn't queue rescan — try again.</p>}
+        <p className="text-[11px] text-gray-400 mt-1">Missed punches &amp; short days now show in the <b>Shadow</b> tab (with in/out times). To fix a punch, use “Add a punch manually” below.</p>
       </div>
 
       <Card title={`⏰ Late 3+ days (${late.length})`} sub={`Pay cuts happen by the machine rules automatically — this is just for your eye · ${monthLabel}.`}>
         {late.length === 0 && <p className="text-sm text-gray-400 py-1">No one with 3+ late days in {monthLabel} 🎉</p>}
         {late.map((l) => <LateRow key={l.code} l={l} />)}
-      </Card>
-
-      <Card title={`🕐 Short days (${short.length})`} sub={`Punched both times but worked less than the shift — ${monthLabel}.`}>
-        {short.length === 0 && <p className="text-sm text-gray-400 py-1">None this month</p>}
-        <div className="max-h-64 overflow-auto">
-          {short.map((s, i) => (
-            <div key={i} className="py-1.5 flex justify-between text-sm border-t border-gray-50 first:border-0">
-              <span>{s.name} <span className="text-gray-400 text-xs">{s.date}</span></span>
-              <span className="text-amber-700">{s.hours}h<span className="text-gray-400">/{s.need}h · {s.in}–{s.out}</span></span>
-            </div>
-          ))}
-        </div>
       </Card>
 
       {isAdmin && <ReprocessCard user={user} defaultMonth={mMonth} />}
