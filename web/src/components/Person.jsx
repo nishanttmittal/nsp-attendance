@@ -48,7 +48,7 @@ export default function Person({ code, mk, user, onBack }) {
           return <Row k="Weekly off (paid)" v={`${sat} Sat${att.weeklyOffPresent ? ` · worked ${att.weeklyOffPresent} → +OT` : ''}`} />;
         })()}
         {pay.unpaidWorkedSat > 0 && <Row k="Worked Sat (OT only)" v={`${pay.unpaidWorkedSat} — week not earned (4+ absences): day unpaid, OT kept`} />}
-        {emp.type !== 'daily' && <Row k="Paid days" v={`${Math.max(0, (pay.payableDays || 0) - (pay.absentDays || 0))} of ${ctx.daysInMonth} (weekly-offs included)`} />}
+        {emp.type !== 'daily' && !pay.noAttendance && <Row k="Paid days" v={`${Math.max(0, (pay.payableDays || 0) - (pay.absentDays || 0))} of ${ctx.daysInMonth} (weekly-offs included)`} />}
         <Row k="Overtime" v={`${pay.otHrs}h → pays ${pay.otHrsNet}h`} />
         <hr className="my-1.5" />
         <Row k="Base pay" v={rupee(pay.base)} />
