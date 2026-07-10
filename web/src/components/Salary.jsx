@@ -39,6 +39,10 @@ function OwnerSalary({ user }) {
   const held = rows.filter((r) => r.md.hold);
   const visible = rows.filter((r) => !q || (r.emp.name || '').toLowerCase().includes(q.toLowerCase()));
   const noSalary = emps.filter((e) => !(e.amount || e.wage));
+  // month payroll totals (approved figure once ticked, else the live computed net)
+  const totalNet = rows.reduce((s, r) => s + Number((r.md.approved ? r.md.approvedNet : r.pay.net) || 0), 0);
+  const paidNet = paid.reduce((s, r) => s + Number(r.md.payment?.net || 0), 0);
+  const pendingNet = Math.max(0, totalNet - paidNet);
 
   async function tick(r) {
     setBusy(r.emp.code);
@@ -112,6 +116,15 @@ function OwnerSalary({ user }) {
               {busy === 'all' ? 'Ticking…' : `✓ Tick all (${rows.filter((r) => !r.md.approved && !r.md.hold && r.pay.net > 0).length})`}
             </button>
           )}
+        </div>
+        <div className="flex items-baseline justify-between border-t border-gray-100 pt-2">
+          <span className="text-sm text-gray-600">Total payroll{ctx.fullMonth ? '' : ' (so far)'}</span>
+          <span className="text-xl font-bold text-red-700">{rupee(totalNet)}</span>
+        </div>
+        <div className="flex gap-4 text-xs text-gray-500 -mt-1">
+          <span>Paid <b className="text-green-700">{rupee(paidNet)}</b></span>
+          <span>Pending <b className="text-red-600">{rupee(pendingNet)}</b></span>
+          <span>{rows.length} staff</span>
         </div>
         {!ctx.fullMonth && <p className="text-xs text-gray-400">Running month — figures till yesterday.</p>}
         <label className="flex items-center gap-1.5 text-xs text-gray-500"><input type="checkbox" checked={showRemoved} onChange={(e) => setShowRemoved(e.target.checked)} /> Show removed/resigned staff (kept in the sheet for costing)</label>
