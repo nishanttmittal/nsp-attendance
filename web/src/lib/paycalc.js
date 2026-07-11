@@ -4,14 +4,6 @@ import { computePay } from './payroll';
 import { monthData, dailyAtt, istMonth } from './data';
 import { monthOt } from './attendanceEngine';
 
-// Owner-restored punches for missing-punch days (md.punchFix, keyed by day-of-month) merged over the
-// raw att_punches so app-OT counts fixed days. Survives nightly re-pull (lives on att_salary).
-export function mergePunchFix(punchDoc, md, mk) {
-  if (!punchDoc || !md || !md.punchFix || !Object.keys(md.punchFix).length) return punchDoc;
-  const days = { ...((punchDoc.months && punchDoc.months[mk]) || {}), ...md.punchFix };
-  return { ...punchDoc, months: { ...(punchDoc.months || {}), [mk]: days } };
-}
-
 const pad = (n) => String(n).padStart(2, '0');
 
 export const rupee = (n) => '₹' + Number(n || 0).toLocaleString('en-IN');
@@ -66,8 +58,9 @@ export function payFor(emp, attMap, mk, ctx, graceDelta = 0, punchDoc = null) {
   // OT source: PORTAL (att.otHrs, default) or APP (computed here from raw punches). Owner picks per
   // worker via md.otSource; app-OT is already net (worked − shift), so no late/early re-deduction.
   const portalOt = Number(att.otHrs || 0);
-  const effPunch = mergePunchFix(punchDoc, md, mk);        // apply owner's restored missing-punch days
-  const appOt = effPunch && !att.noRecord ? monthOt(emp.shift, effPunch, mk, istMonth()) : 0;
+  // OWNER RULE (2026-07-11): a missing/single punch is NEVER restored — compute OT from raw punches
+  // only, so incomplete days earn 0 OT.
+  const appOt = punchDoc && !att.noRecord ? monthOt(emp.shift, punchDoc, mk, istMonth()) : 0;
   const otSource = md.otSource === 'app' ? 'app' : 'portal';
   const otAtt = otSource === 'app' ? { ...att, otHrs: appOt, lateHrs: 0, earlyHrs: 0 } : att;
   const pay = computePay({
