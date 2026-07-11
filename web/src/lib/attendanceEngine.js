@@ -15,6 +15,8 @@ export const SHIFT_HOURS = { GEN: 8.5, '10H': 10.5, '12H': 12, wir: 10.5, DSG: 1
 export const WEEKLY_OFF_NEEDS = 4;
 
 const hoursOf = (hhmm) => { if (!hhmm || !/^\d/.test(hhmm)) return null; const [h, m] = String(hhmm).split(':').map(Number); return h + (m || 0) / 60; };
+export const hhmmOf = (h) => (h == null ? null : `${String(Math.floor(h)).padStart(2, '0')}:${String(Math.round((h - Math.floor(h)) * 60)).padStart(2, '0')}`);
+const median = (a) => { if (!a.length) return null; const s = [...a].sort((x, y) => x - y); const m = Math.floor(s.length / 2); return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
 export function workedHours(inH, outH) { let w = outH - inH; if (w < 0) w += 24; return w; } // cross-midnight
 
 function absLine(grace) { return grace ? 3.75 : 4; }
@@ -39,7 +41,16 @@ export function computeMonth(shift, punchesByDate, window, opts = {}) {
   const grace = opts.grace !== false;                      // default grace ON
   const start = window.start, to = window.to;
   const shiftHours = SHIFT_HOURS[shift] || 8.5;            // for app-side OT = worked − shift hours
+  const r2 = (n) => Math.round(n * 100) / 100;
   const dates = Object.keys(punchesByDate).sort();
+  // median in/out from complete weekday records — to estimate OT on missing-punch days
+  const insArr = [], outsArr = [];
+  for (const ymd of dates) {
+    if (new Date(ymd + 'T00:00:00').getDay() === 6) continue;
+    const r = punchesByDate[ymd]; const ih = hoursOf(r && r.i), oh = hoursOf(r && r.o);
+    if (ih != null && oh != null && ih < 14) { insArr.push(ih); outsArr.push(oh); }
+  }
+  const medIn = median(insArr), medOut = median(outsArr);
   // group all available dates by week so first-week earning can see the prior month
   const weeks = {};
   for (const ymd of dates) (weeks[wkKey(ymd)] = weeks[wkKey(ymd)] || []).push(ymd);
@@ -64,7 +75,13 @@ export function computeMonth(shift, punchesByDate, window, opts = {}) {
           weeklyOffPresent += 1;
           const w = rec.o ? workedHours(hoursOf(rec.i), hoursOf(rec.o)) : null;
           if (w != null) otHrs += w;                       // worked weekly-off: ALL hours are OT
-          detail.push({ ymd, ...io, kind: 'sat-worked', worked: w });
+          let missing = null, otIfFixed = 0;
+          if (w == null) {                                 // Saturday single punch
+            const t = hoursOf(rec.i);
+            if (t != null && t < 14 && medOut != null) { missing = 'out'; otIfFixed = workedHours(t, medOut); }
+            else if (t != null && medIn != null) { missing = 'in'; otIfFixed = workedHours(medIn, t); }
+          }
+          detail.push({ ymd, ...io, kind: 'sat-worked', worked: w, ot: r2(w || 0), missing, otIfFixed: r2(otIfFixed) });
         }
         else if (earned) { weeklyOff += 1; detail.push({ ymd, ...io, kind: 'weekly-off' }); }
         else { absent += 1; detail.push({ ymd, ...io, kind: 'sat-absent' }); }
@@ -73,12 +90,17 @@ export function computeMonth(shift, punchesByDate, window, opts = {}) {
         if (c.status === 'full') present += 1;
         else if (c.status === 'half') { present += 0.5; absent += 0.5; half += 1; }
         else absent += 1;
-        if (c.worked != null) { const d = c.worked - shiftHours; if (d > 0) otHrs += d; }  // weekday OT
-        detail.push({ ymd, ...io, kind: c.status, worked: c.worked, single: c.single });
+        let dayOt = 0, missing = null, otIfFixed = 0;
+        if (c.worked != null) { dayOt = Math.max(0, c.worked - shiftHours); otHrs += dayOt; }  // weekday OT
+        else if (rec && rec.i) {                           // single punch — one side missing
+          const t = hoursOf(rec.i);
+          if (t != null && t < 14 && medOut != null) { missing = 'out'; otIfFixed = Math.max(0, workedHours(t, medOut) - shiftHours); }
+          else if (t != null && medIn != null) { missing = 'in'; otIfFixed = Math.max(0, workedHours(medIn, t) - shiftHours); }
+        }
+        detail.push({ ymd, ...io, kind: c.status, worked: c.worked, single: c.single, ot: r2(dayOt), missing, otIfFixed: r2(otIfFixed), medIn: hhmmOf(medIn), medOut: hhmmOf(medOut) });
       }
     }
   }
-  const r2 = n => Math.round(n * 100) / 100;
   return { present: r2(present), absent: r2(absent), half, weeklyOff, weeklyOffPresent, otHrs: r2(otHrs), detail: detail.sort((a, b) => a.ymd.localeCompare(b.ymd)) };
 }
 
@@ -87,6 +109,12 @@ export function monthOt(shift, punchDoc, mk, curMonth) {
   if (!punchDoc) return 0;
   const pbd = punchesByDateFor(punchDoc, mk), win = monthWindow(mk, curMonth);
   return computeMonth(shift || 'GEN', pbd, win, { grace: true }).otHrs;
+}
+// Full per-day detail for a month (in/out/worked/ot + missing-punch flag with otIfFixed estimate).
+export function monthDetail(shift, punchDoc, mk, curMonth) {
+  if (!punchDoc) return { otHrs: 0, detail: [] };
+  const pbd = punchesByDateFor(punchDoc, mk), win = monthWindow(mk, curMonth);
+  return computeMonth(shift || 'GEN', pbd, win, { grace: true });
 }
 
 // --- helpers to drive the engine from an att_punches doc for a given month ---

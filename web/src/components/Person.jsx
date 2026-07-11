@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { loadEmployee, loadAllAttendance, loadPunchDoc, saveEmployee, saveMonth, addAdvance, addIncrement, resignEmployee, settleAndResign, checkActionPassword, queueJob, editNameDept, istMonth } from '../lib/data';
-import { monthCtx, payFor, rupee } from '../lib/paycalc';
+import { monthCtx, payFor, mergePunchFix, rupee } from '../lib/paycalc';
 import { payslipOnePdf, sharePdf } from '../lib/salaryPdf';
-import { graceDeltaDays } from '../lib/attendanceEngine';
+import { graceDeltaDays, monthDetail } from '../lib/attendanceEngine';
 
 // One person, one page: this month's money, their ledger, their settings.
 export default function Person({ code, mk, user, onBack }) {
@@ -21,9 +21,17 @@ export default function Person({ code, mk, user, onBack }) {
   const act = async (fn) => { setBusy(true); try { await fn(); await reload(); } finally { setBusy(false); } };
 
   if (!emp) return <p className="text-gray-500">Loading…</p>;
-  const { att, md, pay } = payFor(emp, attMap, mk, ctx, graceDelta);
+  const { att, md, pay, portalOt = 0, appOt = 0, otSource = 'portal' } = payFor(emp, attMap, mk, ctx, graceDelta, punchDoc);
   // freeze on tick: once approved, nothing about this month can be edited (undo tick to reopen)
   const locked = !!md.payment || !!md.approved;
+  // per-day in/out + OT + missing-punch detail (uses the owner's punch-fixes)
+  const otDetail = monthDetail(emp.shift, mergePunchFix(punchDoc, md, mk), mk, istMonth()).detail;
+  const fixDay = (d) => {
+    const dd = d.ymd.slice(8, 10);
+    const fix = d.missing === 'in' ? { i: d.medIn, o: d.in } : { i: d.in, o: d.medOut };
+    act(() => saveMonth(code, mk, { punchFix: { ...(md.punchFix || {}), [dd]: fix } }));
+  };
+  const unfixDay = (dd) => { const pf = { ...(md.punchFix || {}) }; delete pf[dd]; act(() => saveMonth(code, mk, { punchFix: pf })); };
   const today = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
   const presentPct = ctx.elapsedDays > 0 ? Math.round((pay.presentDays / ctx.elapsedDays) * 100) : 0;
 
@@ -49,7 +57,12 @@ export default function Person({ code, mk, user, onBack }) {
         })()}
         {pay.unpaidWorkedSat > 0 && <Row k="Worked Sat (OT only)" v={`${pay.unpaidWorkedSat} — week not earned (4+ absences): day unpaid, OT kept`} />}
         {emp.type !== 'daily' && !pay.noAttendance && <Row k="Paid days" v={`${Math.max(0, (pay.payableDays || 0) - (pay.absentDays || 0))} of ${ctx.daysInMonth} (weekly-offs included)`} />}
-        <Row k="Overtime" v={`${pay.otHrs}h → pays ${pay.otHrsNet}h`} />
+        <Row k="Overtime" v={`${pay.otHrsNet}h paid`} />
+        {(portalOt > 0 || appOt > 0) && emp.type !== 'daily' && (
+          <div className="flex justify-between text-xs py-0.5"><span className="text-gray-500">OT source</span>
+            <span className={otSource === 'app' ? 'text-gray-800' : 'text-gray-800'}>Portal {portalOt}h · App {appOt}h{Math.abs(portalOt - appOt) >= 0.5 ? <span className="text-amber-600"> ⚠ gap</span> : ''} <span className="text-gray-400">(paying {otSource})</span></span>
+          </div>
+        )}
         <hr className="my-1.5" />
         <Row k="Base pay" v={rupee(pay.base)} />
         <Row k="+ Overtime" v={rupee(pay.otPay)} />
@@ -77,6 +90,10 @@ export default function Person({ code, mk, user, onBack }) {
           <button onClick={async () => { await queueJob('payslip', { code, month: mk }, user.email); alert('Sent to Telegram.'); }} className="border border-gray-300 rounded-lg py-2 text-sm font-medium">✈️ Telegram</button>
         </div>
       </div>
+
+      {emp.type !== 'daily' && otDetail.length > 0 && (
+        <DaysOtCard detail={otDetail} punchFix={md.punchFix || {}} locked={locked} busy={busy} onFix={fixDay} onUnfix={unfixDay} />
+      )}
 
       {!locked && (
         <div className="bg-white rounded-xl shadow p-3 space-y-1">
@@ -134,6 +151,54 @@ export default function Person({ code, mk, user, onBack }) {
       ) : (
         <div className="text-center text-xs text-gray-400">
           Resigned {emp.resignedAt || emp.exitDate || ''}{md.payment?.settlement ? ` · final settled ${rupee(md.payment.net)}` : ''}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Per-day in/out + OT for the month. Missing-punch days are flagged with a one-tap Fix that restores
+// the worker's own median in/out for that day so its OT counts — owner sees exactly why OT is what it is.
+function DaysOtCard({ detail, punchFix, locked, busy, onFix, onUnfix }) {
+  const [open, setOpen] = useState(false);
+  const missing = detail.filter((d) => d.missing);
+  const totalOt = detail.reduce((s, d) => s + (d.ot || 0), 0);
+  const dayLabel = (ymd) => ymd.slice(8, 10) + '/' + ymd.slice(5, 7);
+  return (
+    <div className="bg-white rounded-xl shadow p-3">
+      <button onClick={() => setOpen(!open)} className="w-full flex justify-between items-center text-sm font-semibold text-gray-700">
+        <span>📅 Days &amp; overtime{missing.length ? <span className="text-amber-600 font-normal"> · {missing.length} missing punch{missing.length > 1 ? 'es' : ''}</span> : ''}</span>
+        <span className="text-gray-500 font-normal">{totalOt.toFixed(1)}h OT {open ? '▲' : '▼'}</span>
+      </button>
+      {open && (
+        <div className="mt-2 space-y-0.5">
+          {detail.map((d) => {
+            const dd = d.ymd.slice(8, 10);
+            const fixed = !!punchFix[dd];
+            if (d.missing) return (
+              <div key={d.ymd} className="bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5 text-xs">
+                <div className="flex items-center gap-2">
+                  <span className="w-11 font-semibold text-amber-800">{dayLabel(d.ymd)}</span>
+                  <span className="flex-1 text-amber-700">⚠ missing {d.missing === 'in' ? 'morning IN' : 'evening OUT'} · has {d.missing === 'in' ? 'out ' + d.in : 'in ' + d.in}</span>
+                  {!locked && <button disabled={busy} onClick={() => onFix(d)} className="bg-green-700 text-white rounded px-2 py-1 font-medium disabled:opacity-50 whitespace-nowrap">Fix +{d.otIfFixed}h</button>}
+                </div>
+                <div className="text-[10px] text-amber-600 mt-0.5 ml-11">restores {d.missing === 'in' ? `in ~${d.medIn}` : `out ~${d.medOut}`} → ≈ +{d.otIfFixed}h OT this day</div>
+              </div>
+            );
+            const isAbsent = d.kind === 'absent' || d.kind === 'sat-absent';
+            const isWeeklyOff = d.kind === 'weekly-off';
+            return (
+              <div key={d.ymd} className={`flex items-center gap-2 text-xs px-2 py-1 rounded ${fixed ? 'bg-green-50' : ''}`}>
+                <span className="w-11 text-gray-600">{dayLabel(d.ymd)}</span>
+                <span className="flex-1 text-gray-500">
+                  {isAbsent ? <span className="text-red-400">absent</span> : isWeeklyOff ? <span className="text-blue-400">weekly off</span> : `${d.in || '—'} → ${d.out || '—'}`}
+                  {fixed && <span className="text-green-700"> · ✓ fixed{!locked && <button onClick={() => onUnfix(dd)} className="text-gray-400 underline ml-1">undo</button>}</span>}
+                </span>
+                <span className={`w-14 text-right ${d.ot > 0 ? 'text-gray-800 font-medium' : 'text-gray-300'}`}>{d.ot > 0 ? '+' + d.ot + 'h' : '—'}</span>
+              </div>
+            );
+          })}
+          <div className="text-[10px] text-gray-400 pt-1 border-t border-gray-100 mt-1">OT = hours past shift; worked Saturday = all hours. Missing-punch days pay 0 OT until you tap Fix.</div>
         </div>
       )}
     </div>

@@ -57,7 +57,7 @@ export default function Shadow() {
       const appOff = computeMonth(e.shift || 'GEN', pbd, win, { grace: false });
       const app = grace ? appOn : appOff;
       const graceDelta = Math.round((appOn.present - appOff.present) * 100) / 100;   // extra present days grace gives
-      const missed = app.detail.filter((d) => (d.in && !d.out) || (!d.in && d.out)).length;  // one punch only = forgot in/out
+      const missed = app.detail.filter((d) => d.missing).length;  // single-punch day = a missing in/out
       const pm = (portal[e.code]?.months || {})[mk] || {};
       const pP = pm.presentDays, pA = pm.absentDays;
       const match = pP != null && Math.abs(app.present - (pP || 0)) < 0.01 && Math.abs(app.absent - (pA || 0)) < 0.01;
@@ -112,13 +112,15 @@ export default function Shadow() {
               <div className="px-3 pb-2 bg-gray-50 text-[12px] text-gray-600 space-y-0.5">
                 <button onClick={() => sharePdf(attendanceDetailPdf(r.e, mk, r.app, grace), `attendance-${r.e.code}-${mk}.pdf`)}
                   className="mb-1.5 border border-gray-300 rounded-lg px-3 py-1.5 text-[12px] font-medium bg-white">📄 Print / PDF this month</button>
+                <div className="font-medium text-gray-700 mb-1">App OT this month: {r.app.otHrs}h{r.missed > 0 ? <span className="text-amber-600"> · {r.missed} missing punch{r.missed > 1 ? 'es' : ''} (OT not counted until fixed in Pay)</span> : ''}</div>
                 <div className="grid grid-cols-[auto_1fr_auto] gap-x-3 gap-y-0.5 items-baseline">
                   {r.app.detail.map((d) => (
-                    <div key={d.ymd} className="contents">
-                      <span className="text-gray-500">{d.ymd.slice(5)} {DOW[new Date(d.ymd + 'T00:00:00').getDay()]}</span>
-                      <span className="tabular-nums text-gray-700">{d.in || '—'} <span className="text-gray-400">→</span> {d.out || (d.in ? 'no out' : '—')}</span>
-                      <span className={`text-right ${d.kind === 'absent' || d.kind === 'sat-absent' ? 'text-red-500' : d.kind === 'half' ? 'text-amber-600' : 'text-gray-700'}`}>
-                        {d.worked != null ? `${d.worked.toFixed(2)}h · ` : d.single ? 'single · ' : ''}{LABEL[d.kind] || d.kind}
+                    <div key={d.ymd} className={`contents ${d.missing ? 'font-medium' : ''}`}>
+                      <span className={d.missing ? 'text-amber-700' : 'text-gray-500'}>{d.ymd.slice(5)} {DOW[new Date(d.ymd + 'T00:00:00').getDay()]}</span>
+                      <span className="tabular-nums text-gray-700">{d.in || '—'} <span className="text-gray-400">→</span> {d.out || (d.in ? <span className="text-amber-600">no out</span> : '—')}</span>
+                      <span className={`text-right ${d.kind === 'absent' || d.kind === 'sat-absent' ? 'text-red-500' : d.missing ? 'text-amber-600' : d.kind === 'half' ? 'text-amber-600' : 'text-gray-700'}`}>
+                        {d.missing ? `⚠ no ${d.missing === 'in' ? 'IN' : 'OUT'} · ≈+${d.otIfFixed}h`
+                          : `${d.ot > 0 ? '+' + d.ot + 'h · ' : ''}${LABEL[d.kind] || d.kind}`}
                       </span>
                     </div>
                   ))}
@@ -128,7 +130,7 @@ export default function Shadow() {
           </div>
         ))}
       </div>
-      <p className="text-[11px] text-gray-400">Overtime still comes from the portal for now — day classification is what the app computes here.</p>
+      <p className="text-[11px] text-gray-400">App now computes OT too (hours past shift; worked Saturday = all hours). Fix a ⚠ missing punch in that person's Pay page to credit its OT.</p>
     </div>
   );
 }
