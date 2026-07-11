@@ -303,7 +303,7 @@ function SalaryEdit({ emp, onSave, onSaveNameDept, busy }) {
             </select>
             <input className="border rounded px-2 py-2 text-sm" type="number" value={f.amount || ''} onChange={(e) => setF({ ...f, amount: e.target.value })} />
             <select className="border rounded px-2 py-2 text-sm" value={f.shift} onChange={(e) => setF({ ...f, shift: e.target.value })}>
-              {['GEN', '10H', '12H', 'wir'].map((s) => <option key={s}>{s}</option>)}
+              {['GEN', '10H', '12H', 'wir', 'DSG'].map((s) => <option key={s}>{s}</option>)}
             </select>
             <input className="border rounded px-2 py-2 text-sm col-span-3" placeholder="Nickname (e.g. Raju Chrome line)" value={f.nickname} onChange={(e) => setF({ ...f, nickname: e.target.value })} />
             <input className="border rounded px-2 py-2 text-sm col-span-2" placeholder="📞 Phone" value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} />
