@@ -10,6 +10,8 @@
 //  • grace on: absent-line 4:00->3:45, full-line -15min per shift
 
 export const SHIFT_FULLCUT = { GEN: 7, '10H': 9, '12H': 10.5, wir: 9 };
+// Shift DURATION (gross span incl. lunch) — used for app-side OT = worked − shift hours.
+export const SHIFT_HOURS = { GEN: 8.5, '10H': 10.5, '12H': 12, wir: 10.5, DSG: 10 };
 export const WEEKLY_OFF_NEEDS = 4;
 
 const hoursOf = (hhmm) => { if (!hhmm || !/^\d/.test(hhmm)) return null; const [h, m] = String(hhmm).split(':').map(Number); return h + (m || 0) / 60; };
@@ -36,12 +38,13 @@ const wkKey = (ymd) => { const d = new Date(ymd + 'T00:00:00'); d.setDate(d.getD
 export function computeMonth(shift, punchesByDate, window, opts = {}) {
   const grace = opts.grace !== false;                      // default grace ON
   const start = window.start, to = window.to;
+  const shiftHours = SHIFT_HOURS[shift] || 8.5;            // for app-side OT = worked − shift hours
   const dates = Object.keys(punchesByDate).sort();
   // group all available dates by week so first-week earning can see the prior month
   const weeks = {};
   for (const ymd of dates) (weeks[wkKey(ymd)] = weeks[wkKey(ymd)] || []).push(ymd);
 
-  let present = 0, absent = 0, half = 0, weeklyOff = 0, weeklyOffPresent = 0;
+  let present = 0, absent = 0, half = 0, weeklyOff = 0, weeklyOffPresent = 0, otHrs = 0;
   const detail = [];
   for (const wk of Object.keys(weeks)) {
     let wdPresent = 0;                                      // full-week weekday presence -> earning
@@ -57,7 +60,12 @@ export function computeMonth(shift, punchesByDate, window, opts = {}) {
       const rec = punchesByDate[ymd];
       const io = { in: (rec && rec.i) || null, out: (rec && rec.o) || null };
       if (isSat) {
-        if (rec && rec.i) { weeklyOffPresent += 1; detail.push({ ymd, ...io, kind: 'sat-worked', worked: rec.o ? workedHours(hoursOf(rec.i), hoursOf(rec.o)) : null }); }
+        if (rec && rec.i) {
+          weeklyOffPresent += 1;
+          const w = rec.o ? workedHours(hoursOf(rec.i), hoursOf(rec.o)) : null;
+          if (w != null) otHrs += w;                       // worked weekly-off: ALL hours are OT
+          detail.push({ ymd, ...io, kind: 'sat-worked', worked: w });
+        }
         else if (earned) { weeklyOff += 1; detail.push({ ymd, ...io, kind: 'weekly-off' }); }
         else { absent += 1; detail.push({ ymd, ...io, kind: 'sat-absent' }); }
       } else {
@@ -65,12 +73,20 @@ export function computeMonth(shift, punchesByDate, window, opts = {}) {
         if (c.status === 'full') present += 1;
         else if (c.status === 'half') { present += 0.5; absent += 0.5; half += 1; }
         else absent += 1;
+        if (c.worked != null) { const d = c.worked - shiftHours; if (d > 0) otHrs += d; }  // weekday OT
         detail.push({ ymd, ...io, kind: c.status, worked: c.worked, single: c.single });
       }
     }
   }
   const r2 = n => Math.round(n * 100) / 100;
-  return { present: r2(present), absent: r2(absent), half, weeklyOff, weeklyOffPresent, detail: detail.sort((a, b) => a.ymd.localeCompare(b.ymd)) };
+  return { present: r2(present), absent: r2(absent), half, weeklyOff, weeklyOffPresent, otHrs: r2(otHrs), detail: detail.sort((a, b) => a.ymd.localeCompare(b.ymd)) };
+}
+
+// App-side OT for a month from an att_punches doc (worked − shift hours; worked Saturdays = all hours).
+export function monthOt(shift, punchDoc, mk, curMonth) {
+  if (!punchDoc) return 0;
+  const pbd = punchesByDateFor(punchDoc, mk), win = monthWindow(mk, curMonth);
+  return computeMonth(shift || 'GEN', pbd, win, { grace: true }).otHrs;
 }
 
 // --- helpers to drive the engine from an att_punches doc for a given month ---

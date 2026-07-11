@@ -222,6 +222,10 @@ export async function saveEmployee(code, patch) {
   if (isConfigured && db) { await setDoc(doc(db, 'att_salary', code), patch, { merge: true }); return; }
   const store = loadSal(); store[code] = { ...(store[code] || {}), ...patch }; saveSal(store);
 }
+// Owner picks which OT to pay (portal vs app-computed) for a worker's month. Deep-merges into months[mk].
+export async function setOtSource(code, mk, source) {
+  return saveEmployee(code, { months: { [mk]: { otSource: source === 'app' ? 'app' : 'portal' } } });
+}
 
 // Save a name/dept correction in the app AND push it to the Realtime machine (owner rule
 // 2026-06-14). Locks the field so machine-sync won't revert it. App-only staff aren't on the

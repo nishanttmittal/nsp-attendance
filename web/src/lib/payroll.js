@@ -4,7 +4,7 @@ const round = (n) => Math.round(n * 100) / 100;
 const DAY = 86400000;
 
 // Net work hours per shift (12H uses 12). Drives the 1× OT hourly rate.
-export const SHIFT_HOURS = { GEN: 8, '10H': 10, '12H': 12, wir: 10 };
+export const SHIFT_HOURS = { GEN: 8, '10H': 10, '12H': 12, wir: 10, DSG: 10 };
 // App-only daily-wagers: 11-hour standard day; pay prorates by hours worked.
 export const DAILY_WAGER_HOURS = 11;
 

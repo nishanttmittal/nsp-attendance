@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { loadEmployees, loadAllAttendance, saveEmployee, loadPayout, queueMarkPaid, queueAdvance, loadRoster, approveSalary, unapproveSalary, holdSalary, releaseSalary, ensureApprovalBackup, istMonth, queueJob, queueFinalizeHisab, checkActionPassword } from '../lib/data';
+import { loadEmployees, loadAllAttendance, loadAllPunches, setOtSource, saveEmployee, loadPayout, queueMarkPaid, queueAdvance, loadRoster, approveSalary, unapproveSalary, holdSalary, releaseSalary, ensureApprovalBackup, istMonth, queueJob, queueFinalizeHisab, checkActionPassword } from '../lib/data';
 import { monthOptions, monthCtx, payFor, rupee } from '../lib/paycalc';
 import Person from './Person.jsx';
 import SelfPunchCard from './SelfPunchCard.jsx';
@@ -16,6 +16,7 @@ function OwnerSalary({ user }) {
   const [mk, setMk] = useState(istMonth());
   const [emps, setEmps] = useState(null);
   const [attMap, setAttMap] = useState({});
+  const [punches, setPunches] = useState({});
   const [q, setQ] = useState('');
   const [openCode, setOpenCode] = useState('');
   const [showReport, setShowReport] = useState(false);
@@ -26,8 +27,8 @@ function OwnerSalary({ user }) {
   const ctx = useMemo(() => monthCtx(mk), [mk]);
 
   async function reload() {
-    const [list, am] = await Promise.all([loadEmployees(showRemoved), loadAllAttendance()]);
-    setEmps(list); setAttMap(am);
+    const [list, am, pu] = await Promise.all([loadEmployees(showRemoved), loadAllAttendance(), loadAllPunches()]);
+    setEmps(list); setAttMap(am); setPunches(pu);
   }
   useEffect(() => { reload(); }, [showRemoved]);
   useEffect(() => { setPending({}); }, [mk]);   // queued markers are per selected month
@@ -47,7 +48,7 @@ function OwnerSalary({ user }) {
   if (openCode) return <Person code={openCode} mk={mk} user={user} onBack={() => { setOpenCode(''); reload(); }} />;
   if (emps === null) return <p className="text-gray-500">Loading…</p>;
 
-  const rows = emps.filter((e) => e.amount || e.wage).map((e) => ({ emp: e, ...payFor(e, attMap, mk, ctx) }));
+  const rows = emps.filter((e) => e.amount || e.wage).map((e) => ({ emp: e, ...payFor(e, attMap, mk, ctx, 0, punches[e.code]) }));
   const ticked = rows.filter((r) => r.md.approved);
   const paid = ticked.filter((r) => r.md.payment);
   const held = rows.filter((r) => r.md.hold);
@@ -65,6 +66,13 @@ function OwnerSalary({ user }) {
       else { await ensureApprovalBackup(mk, user.email); await approveSalary(r.emp.code, mk, r.pay, user.email); }
       await reload();
     } finally { setBusy(''); }
+  }
+
+  // owner picks which OT to pay (portal vs app-computed) — locks in when the row is ticked/paid
+  async function chooseOt(r, source) {
+    setBusy(r.emp.code);
+    try { await setOtSource(r.emp.code, mk, source); await reload(); }
+    finally { setBusy(''); }
   }
 
   async function hold(r) {
@@ -157,7 +165,7 @@ function OwnerSalary({ user }) {
       <div className="bg-white rounded-xl shadow divide-y divide-gray-100">
         {visible.length === 0 && <p className="p-4 text-sm text-gray-400">No one matches.</p>}
         {visible.map((r) => { const remaining = Math.max(0, Number(r.md.approvedNet ?? r.pay.net) - Number(r.md.paidSoFar || 0)); return (
-          <OwnerRow key={r.emp.code} r={r} busy={busy === r.emp.code} queued={pending[r.emp.code] != null} onName={() => setOpenCode(r.emp.code)} onTick={() => tick(r)} onHold={() => hold(r)} onRelease={() => release(r)} onPay={() => setPayC({ r, mode: 'cash', amount: String(remaining), remark: '' })} />
+          <OwnerRow key={r.emp.code} r={r} busy={busy === r.emp.code} queued={pending[r.emp.code] != null} onName={() => setOpenCode(r.emp.code)} onTick={() => tick(r)} onHold={() => hold(r)} onRelease={() => release(r)} onChooseOt={(src) => chooseOt(r, src)} onPay={() => setPayC({ r, mode: 'cash', amount: String(remaining), remark: '' })} />
         ); })}
       </div>
 
@@ -198,14 +206,17 @@ function OwnerSalary({ user }) {
   );
 }
 
-function OwnerRow({ r, busy, queued, onName, onTick, onHold, onRelease, onPay }) {
-  const { emp, md, pay } = r;
+function OwnerRow({ r, busy, queued, onName, onTick, onHold, onRelease, onChooseOt, onPay }) {
+  const { emp, md, pay, portalOt = 0, appOt = 0, otSource = 'portal' } = r;
   const [showDays, setShowDays] = useState(false);
   const isPaid = !!md.payment, isTicked = !!md.approved, isHeld = !!md.hold;
   const due = Number(md.approvedNet ?? pay.net) || 0;
   const paidSoFar = Number(md.paidSoFar || 0);
   const remaining = Math.max(0, due - paidSoFar);
   const isPartial = !isPaid && paidSoFar > 0;
+  const otLocked = isPaid || isTicked || isHeld;                 // choice frozen once ticked/paid
+  const otDiffer = Math.abs(portalOt - appOt) >= 0.5;
+  const showOt = (portalOt > 0 || appOt > 0) && emp.type !== 'daily';
   const sub2 = [
     pay.otHrsNet > 0 ? `OT ${pay.otHrsNet}h` : null,
     pay.advanceRecovered > 0 ? `adv −${rupee(pay.advanceRecovered)}` : null,
@@ -221,6 +232,17 @@ function OwnerRow({ r, busy, queued, onName, onTick, onHold, onRelease, onPay })
             <button onClick={() => setShowDays((s) => !s)} className="text-blue-700 underline decoration-dotted underline-offset-2">{pay.paidDays}d paid {showDays ? '▾' : '▸'}</button>
             {sub2 ? ` · ${sub2}` : ''}
           </div>
+          {showOt && (
+            <div className="text-[11px] mt-1 flex items-center gap-1 flex-wrap">
+              <span className="text-gray-400">OT pay from</span>
+              <button disabled={busy || otLocked} onClick={() => onChooseOt('portal')}
+                className={`px-1.5 py-0.5 rounded ${otSource === 'portal' ? 'bg-red-700 text-white font-semibold' : 'text-gray-500 border border-gray-200'} disabled:opacity-60`}>Portal {portalOt}h</button>
+              <button disabled={busy || otLocked} onClick={() => onChooseOt('app')}
+                className={`px-1.5 py-0.5 rounded ${otSource === 'app' ? 'bg-red-700 text-white font-semibold' : 'text-gray-500 border border-gray-200'} disabled:opacity-60`}>App {appOt}h</button>
+              {otDiffer && <span className="text-amber-600" title="Portal and app OT differ">⚠ {Math.abs(portalOt - appOt).toFixed(1)}h gap</span>}
+              {otLocked && <span className="text-gray-400">· locked</span>}
+            </div>
+          )}
           {showDays && <DaysBreakdown pay={pay} />}
         </div>
         <div className="text-right">
