@@ -87,14 +87,18 @@ export function payFor(emp, attMap, mk, ctx, graceDelta = 0, punchDoc = null) {
   // OT source: PORTAL (att.otHrs, default) or APP (computed here from raw punches). Owner picks per
   // worker via md.otSource; app-OT is already net (worked − shift), so no late/early re-deduction.
   const portalOt = Number(att.otHrs || 0);
-  // OT from raw punches (missing/single punch = 0 OT, never restored) + per-day detail for overrides.
+  // OT from raw punches (a missing/single punch earns 0 OT by default — NOT auto-restored).
   const det = punchDoc && !att.noRecord ? monthDetail(emp.shift, punchDoc, mk, istMonth()) : { otHrs: 0, detail: [] };
   const appOt = det.otHrs;
   const otSource = md.otSource === 'app' ? 'app' : 'portal';
+  // Owner's MANUAL per-day OT credit for flaky-machine days (md.otCredits {ymd:hours}) — his tap only,
+  // added on top of the chosen OT. Off unless he credits a specific single-punch day.
+  const otCredit = Object.values(md.otCredits || {}).reduce((s, v) => s + Number(v || 0), 0);
+  const effOt = Math.round(((otSource === 'app' ? appOt : portalOt) + otCredit) * 100) / 100;
   // owner's per-day decisions → adjust days for pay: weekdays Full/Half/Absent, Saturdays pay/no-pay
   const presentAdjust = presentAdjustFrom(det.detail, md.dayOverrides);
   const satAdjust = saturdayAdjustFrom(det.detail, md.dayOverrides);
-  const otPart = otSource === 'app' ? { otHrs: appOt, lateHrs: 0, earlyHrs: 0 } : { otHrs: portalOt };
+  const otPart = otSource === 'app' ? { otHrs: effOt, lateHrs: 0, earlyHrs: 0 } : { otHrs: effOt };
   const otAtt = { ...att, ...otPart,
     presentDays: (att.presentDays || 0) + presentAdjust,
     weeklyOff: Math.max(0, (att.weeklyOff || 0) + satAdjust),
@@ -107,5 +111,5 @@ export function payFor(emp, attMap, mk, ctx, graceDelta = 0, punchDoc = null) {
     graceDays: md.gracePaid ? Number(graceDelta || 0) : 0,   // owner opted in for this worker/month
     latePenaltyDays: 0, weeklyOffDockDays: 0, // the machine applies late/weekly-off rules
   });
-  return { att, md, advs, advancesThisMonth, pay, portalOt, appOt, otSource, detail: det.detail, presentAdjust, satAdjust };
+  return { att, md, advs, advancesThisMonth, pay, portalOt, appOt, otSource, otCredit, detail: det.detail, presentAdjust, satAdjust };
 }

@@ -21,7 +21,7 @@ export default function Person({ code, mk, user, onBack }) {
   const act = async (fn) => { setBusy(true); try { await fn(); await reload(); } finally { setBusy(false); } };
 
   if (!emp) return <p className="text-gray-500">Loading…</p>;
-  const { att, md, pay, portalOt = 0, appOt = 0, otSource = 'portal', detail: otDetail = [], presentAdjust = 0, satAdjust = 0 } = payFor(emp, attMap, mk, ctx, graceDelta, punchDoc);
+  const { att, md, pay, portalOt = 0, appOt = 0, otSource = 'portal', otCredit = 0, detail: otDetail = [], presentAdjust = 0, satAdjust = 0 } = payFor(emp, attMap, mk, ctx, graceDelta, punchDoc);
   // freeze on tick: once approved, nothing about this month can be edited (undo tick to reopen)
   const locked = !!md.payment || !!md.approved;
   // owner decides a borderline weekday Full/Half/Absent at pay time (md.dayOverrides). null = clear.
@@ -29,6 +29,12 @@ export default function Person({ code, mk, user, onBack }) {
     const next = { ...(md.dayOverrides || {}) };
     if (value == null) delete next[ymd]; else next[ymd] = value;
     act(() => saveMonth(code, mk, { dayOverrides: next }));
+  };
+  // MANUAL OT credit for a flaky-machine single-punch day (owner's tap; hours=null to remove)
+  const creditOt = (ymd, hours) => {
+    const next = { ...(md.otCredits || {}) };
+    if (hours == null) delete next[ymd]; else next[ymd] = hours;
+    act(() => saveMonth(code, mk, { otCredits: next }));
   };
   const today = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
   const presentPct = ctx.elapsedDays > 0 ? Math.round((pay.presentDays / ctx.elapsedDays) * 100) : 0;
@@ -58,7 +64,7 @@ export default function Person({ code, mk, user, onBack }) {
         <Row k="Overtime" v={`${pay.otHrsNet}h paid`} />
         {(portalOt > 0 || appOt > 0) && emp.type !== 'daily' && (
           <div className="flex justify-between text-xs py-0.5"><span className="text-gray-500">OT source</span>
-            <span className={otSource === 'app' ? 'text-gray-800' : 'text-gray-800'}>Portal {portalOt}h · App {appOt}h{Math.abs(portalOt - appOt) >= 0.5 ? <span className="text-amber-600"> ⚠ gap</span> : ''} <span className="text-gray-400">(paying {otSource})</span></span>
+            <span className="text-gray-800">Portal {portalOt}h · App {appOt}h{Math.abs(portalOt - appOt) >= 0.5 ? <span className="text-amber-600"> ⚠ gap</span> : ''}{otCredit > 0 ? <span className="text-green-700"> +{otCredit}h credited</span> : ''} <span className="text-gray-400">(paying {otSource})</span></span>
           </div>
         )}
         <hr className="my-1.5" />
@@ -90,7 +96,7 @@ export default function Person({ code, mk, user, onBack }) {
       </div>
 
       {emp.type !== 'daily' && otDetail.length > 0 && (
-        <DaysOtCard detail={otDetail} overrides={md.dayOverrides || {}} presentAdjust={Math.round((presentAdjust + satAdjust) * 100) / 100} locked={locked} busy={busy} onSetDay={setDay} />
+        <DaysOtCard detail={otDetail} overrides={md.dayOverrides || {}} otCredits={md.otCredits || {}} presentAdjust={Math.round((presentAdjust + satAdjust) * 100) / 100} locked={locked} busy={busy} onSetDay={setDay} onCreditOt={creditOt} />
       )}
 
       {!locked && (
@@ -159,7 +165,7 @@ export default function Person({ code, mk, user, onBack }) {
 // borderline days at pay time (missing punch still earns 0 OT — never restored). Saturdays & OT unaffected.
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const dayDefault = (d) => (d.kind === 'half' ? 'half' : d.kind === 'absent' ? 'absent' : 'full');  // single = full
-function DaysOtCard({ detail, overrides = {}, presentAdjust = 0, locked, busy, onSetDay }) {
+function DaysOtCard({ detail, overrides = {}, otCredits = {}, presentAdjust = 0, locked, busy, onSetDay, onCreditOt }) {
   const [open, setOpen] = useState(false);
   const missing = detail.filter((d) => d.missing);
   const totalOt = detail.reduce((s, d) => s + (d.ot || 0), 0);
@@ -208,12 +214,17 @@ function DaysOtCard({ detail, overrides = {}, presentAdjust = 0, locked, busy, o
                   <span className={`w-12 text-right ${d.ot > 0 ? 'text-gray-800' : 'text-gray-300'}`}>{d.ot > 0 ? '+' + d.ot + 'h' : '—'}</span>
                 </div>
                 {hasPunch && (
-                  <div className="flex gap-1 mt-1 ml-16 items-center">
+                  <div className="flex gap-1 mt-1 ml-16 items-center flex-wrap">
                     {[['full', 'Full'], ['half', '½'], ['absent', 'Abs']].map(([v, t]) => (
                       <button key={v} disabled={busy || locked} onClick={() => onSetDay(d.ymd, cur === v ? null : v)}
                         className={`px-2 py-0.5 rounded text-[11px] ${cur === v ? 'bg-red-700 text-white font-semibold' : 'border border-gray-200 text-gray-500'} disabled:opacity-50`}>{t}</button>
                     ))}
                     {overridden && <span className="text-[10px] text-indigo-600">was {dayDefault(d)}</span>}
+                    {d.missing && d.otIfFixed > 0 && (() => { const credited = otCredits[d.ymd] != null; return (
+                      <button disabled={busy || locked} onClick={() => onCreditOt(d.ymd, credited ? null : d.otIfFixed)}
+                        className={`ml-1 px-2 py-0.5 rounded text-[11px] ${credited ? 'bg-green-700 text-white font-semibold' : 'border border-green-300 text-green-700'} disabled:opacity-50`}>
+                        {credited ? `✓ OT +${otCredits[d.ymd]}h` : `Credit OT +${d.otIfFixed}h`}</button>
+                    ); })()}
                   </div>
                 )}
               </div>
