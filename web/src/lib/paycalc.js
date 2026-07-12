@@ -18,6 +18,20 @@ export function presentAdjustFrom(detail, overrides) {
   }
   return Math.round(adj * 100) / 100;
 }
+// Owner's per-SATURDAY pay/no-pay override → net +/- paid Saturdays. Default paid = weekly-off (earned
+// rest) or a worked Saturday; default no-pay = an un-earned (cut) Saturday.
+export function saturdayAdjustFrom(detail, overrides) {
+  if (!overrides || !Object.keys(overrides).length) return 0;
+  let adj = 0;
+  for (const d of detail) {
+    if (!['weekly-off', 'sat-worked', 'sat-absent'].includes(d.kind)) continue;
+    const ov = overrides[d.ymd];
+    if (ov !== 'pay' && ov !== 'nopay') continue;
+    const defPaid = d.kind === 'sat-absent' ? 0 : 1;
+    adj += (ov === 'pay' ? 1 : 0) - defPaid;
+  }
+  return adj;
+}
 
 const pad = (n) => String(n).padStart(2, '0');
 
@@ -77,12 +91,14 @@ export function payFor(emp, attMap, mk, ctx, graceDelta = 0, punchDoc = null) {
   const det = punchDoc && !att.noRecord ? monthDetail(emp.shift, punchDoc, mk, istMonth()) : { otHrs: 0, detail: [] };
   const appOt = det.otHrs;
   const otSource = md.otSource === 'app' ? 'app' : 'portal';
-  // owner's per-day Full/Half/Absent decisions on borderline weekdays → adjust present/absent for pay
+  // owner's per-day decisions → adjust days for pay: weekdays Full/Half/Absent, Saturdays pay/no-pay
   const presentAdjust = presentAdjustFrom(det.detail, md.dayOverrides);
+  const satAdjust = saturdayAdjustFrom(det.detail, md.dayOverrides);
   const otPart = otSource === 'app' ? { otHrs: appOt, lateHrs: 0, earlyHrs: 0 } : { otHrs: portalOt };
   const otAtt = { ...att, ...otPart,
     presentDays: (att.presentDays || 0) + presentAdjust,
-    absentDays: Math.max(0, (att.absentDays || 0) - presentAdjust) };
+    weeklyOff: Math.max(0, (att.weeklyOff || 0) + satAdjust),
+    absentDays: Math.max(0, (att.absentDays || 0) - presentAdjust - satAdjust) };
   const pay = computePay({
     emp, att: otAtt, ...ctx,
     advancesThisMonth, advanceBalanceIn, advanceRecover,
@@ -91,5 +107,5 @@ export function payFor(emp, attMap, mk, ctx, graceDelta = 0, punchDoc = null) {
     graceDays: md.gracePaid ? Number(graceDelta || 0) : 0,   // owner opted in for this worker/month
     latePenaltyDays: 0, weeklyOffDockDays: 0, // the machine applies late/weekly-off rules
   });
-  return { att, md, advs, advancesThisMonth, pay, portalOt, appOt, otSource, detail: det.detail, presentAdjust };
+  return { att, md, advs, advancesThisMonth, pay, portalOt, appOt, otSource, detail: det.detail, presentAdjust, satAdjust };
 }

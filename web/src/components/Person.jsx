@@ -21,7 +21,7 @@ export default function Person({ code, mk, user, onBack }) {
   const act = async (fn) => { setBusy(true); try { await fn(); await reload(); } finally { setBusy(false); } };
 
   if (!emp) return <p className="text-gray-500">Loading…</p>;
-  const { att, md, pay, portalOt = 0, appOt = 0, otSource = 'portal', detail: otDetail = [], presentAdjust = 0 } = payFor(emp, attMap, mk, ctx, graceDelta, punchDoc);
+  const { att, md, pay, portalOt = 0, appOt = 0, otSource = 'portal', detail: otDetail = [], presentAdjust = 0, satAdjust = 0 } = payFor(emp, attMap, mk, ctx, graceDelta, punchDoc);
   // freeze on tick: once approved, nothing about this month can be edited (undo tick to reopen)
   const locked = !!md.payment || !!md.approved;
   // owner decides a borderline weekday Full/Half/Absent at pay time (md.dayOverrides). null = clear.
@@ -90,7 +90,7 @@ export default function Person({ code, mk, user, onBack }) {
       </div>
 
       {emp.type !== 'daily' && otDetail.length > 0 && (
-        <DaysOtCard detail={otDetail} overrides={md.dayOverrides || {}} presentAdjust={presentAdjust} locked={locked} busy={busy} onSetDay={setDay} />
+        <DaysOtCard detail={otDetail} overrides={md.dayOverrides || {}} presentAdjust={Math.round((presentAdjust + satAdjust) * 100) / 100} locked={locked} busy={busy} onSetDay={setDay} />
       )}
 
       {!locked && (
@@ -175,13 +175,28 @@ function DaysOtCard({ detail, overrides = {}, presentAdjust = 0, locked, busy, o
         <div className="mt-2 space-y-0.5">
           <p className="text-[10px] text-gray-400">Tap <b>Full / ½ / Abs</b> to set a working day for pay. Missing-punch days pay 0 OT. Saturdays follow the weekly-off rule.</p>
           {detail.map((d) => {
-            if (isSat(d)) return (
-              <div key={d.ymd} className="flex items-center gap-2 text-xs px-2 py-1 text-gray-400">
-                <span className="w-16">{lbl(d.ymd)}</span>
-                <span className="flex-1">{d.in ? `${d.in} → ${d.out || 'no out'} · ` : ''}{d.kind === 'sat-worked' ? 'Saturday worked (OT)' : d.kind === 'weekly-off' ? 'weekly off (paid)' : 'Saturday — cut'}</span>
-                <span className="w-12 text-right text-gray-500">{d.ot > 0 ? '+' + d.ot + 'h' : ''}</span>
-              </div>
-            );
+            if (isSat(d)) {
+              const defPaid = d.kind === 'sat-absent' ? 'nopay' : 'pay';
+              const cur = overrides[d.ymd] || defPaid;
+              const overridden = !!overrides[d.ymd];
+              const desc = d.kind === 'sat-worked' ? 'Sat worked (OT)' : d.kind === 'weekly-off' ? 'weekly off' : 'Sat — not earned';
+              return (
+                <div key={d.ymd} className={`text-xs px-2 py-1 rounded ${overridden ? 'bg-indigo-50' : ''}`}>
+                  <div className="flex items-center gap-2">
+                    <span className="w-16 text-blue-500">{lbl(d.ymd)}</span>
+                    <span className="flex-1 text-gray-400">{d.in ? `${d.in} → ${d.out || 'no out'} · ` : ''}{desc}</span>
+                    <span className="w-12 text-right text-gray-500">{d.ot > 0 ? '+' + d.ot + 'h' : ''}</span>
+                  </div>
+                  <div className="flex gap-1 mt-1 ml-16 items-center">
+                    {[['pay', 'Pay'], ['nopay', 'No pay']].map(([v, t]) => (
+                      <button key={v} disabled={busy || locked} onClick={() => onSetDay(d.ymd, cur === v ? null : v)}
+                        className={`px-2 py-0.5 rounded text-[11px] ${cur === v ? 'bg-blue-700 text-white font-semibold' : 'border border-gray-200 text-gray-500'} disabled:opacity-50`}>{t}</button>
+                    ))}
+                    {overridden && <span className="text-[10px] text-indigo-600">was {defPaid === 'pay' ? 'paid' : 'not paid'}</span>}
+                  </div>
+                </div>
+              );
+            }
             const hasPunch = !!(d.in || d.out);
             const cur = overrides[d.ymd] || dayDefault(d);
             const overridden = !!overrides[d.ymd];
