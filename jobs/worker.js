@@ -18,9 +18,9 @@ const DL = path.resolve(__dirname, 'downloads');
 // the signed-in email the PWA stamped on the job.
 const BOOTSTRAP_OWNER = 'nspenterprises24@gmail.com';   // same as ADMIN_EMAILS / isAttAdmin
 // Money/identity-changing jobs only the OWNER may run.
-const OWNER_ONLY = new Set(['finalize_hisab', 'resign_employee', 'reprocess_period', 'monthly_download', 'payslip', 'backup', 'onboard_employee', 'push_employee_edit', 'weeklyoff_audit']);
+const OWNER_ONLY = new Set(['finalize_hisab', 'lock_month', 'unlock_month', 'resign_employee', 'reprocess_period', 'monthly_download', 'payslip', 'backup', 'onboard_employee', 'push_employee_edit', 'weeklyoff_audit']);
 // Everything the worker knows how to do — unknown types are rejected outright.
-const KNOWN_TYPES = new Set(['manual_punch', 'backup', 'onboard_employee', 'push_employee_edit', 'resign_employee', 'reprocess_period', 'weeklyoff_audit', 'scan_missed', 'mark_paid', 'finalize_hisab', 'add_advance', 'monthly_download', 'payslip']);
+const KNOWN_TYPES = new Set(['manual_punch', 'backup', 'onboard_employee', 'push_employee_edit', 'resign_employee', 'reprocess_period', 'weeklyoff_audit', 'scan_missed', 'mark_paid', 'lock_month', 'unlock_month', 'finalize_hisab', 'add_advance', 'monthly_download', 'payslip']);
 
 async function authorizeJob(requestedBy, type) {
   if (!KNOWN_TYPES.has(type)) return { ok: false, reason: `unknown job type '${type}'` };
@@ -87,12 +87,11 @@ async function handle(type, p) {
     return 'name/dept pushed to machine';
   }
   if (type === 'resign_employee') {
-    // Owner rule (2026-06-15): NEVER delete from the machine — owner does that himself, and the
-    // att_salary record (incl. paid history) is KEPT in the salary sheet for product costing.
-    // We only archive a history snapshot (DRY=true skips the machine delete) + mark inactive.
-    run('archiveDelete.js', { CARD: p.code, BY: p._by || 'app', DRY: 'true' });
-    await sendTelegram(`👋 ${p.code} marked resigned (kept in salary sheet; machine removal is manual).`).catch(() => {});
-    return 'resigned: archived + kept in salary sheet (machine NOT touched)';
+    // Owner rule (2026-07-12): KEEP the worker's record INACTIVE with name + paid history so the owner
+    // can always look up whom he paid & when. NO att_archive snapshot (removed) — the live inactive
+    // record + the monthly salary_register ARE the permanent record. Machine removal stays manual.
+    await sendTelegram(`👋 ${p.code} marked resigned — kept inactive in the salary sheet (name + paid history retained). Machine removal is manual.`).catch(() => {});
+    return 'resigned: kept inactive in salary sheet (no archive; machine NOT touched)';
   }
   if (type === 'reprocess_period') {
     run('reprocessRange.js', { FROM: p.from, TO: p.to });
@@ -182,6 +181,51 @@ async function handle(type, p) {
     }
     await sendTelegram(`💵 Part paid: <b>${e.name || p.code}</b> ₹${thisAmt.toLocaleString('en-IN')} (${p.mode || 'cash'}) · ${p.month} · ₹${remaining.toLocaleString('en-IN')} still pending${p.remark ? ` · ${p.remark}` : ''} · by ${p._by || 'manager'}`);
     return `part paid ₹${thisAmt} · ₹${remaining} pending`;
+  }
+  if (type === 'lock_month') {   // CASHIER settle (owner 2026-07-12): record cash+account, freeze the
+    // month, carry the running balance (payable − paid) to next month. Replaces tick→pay for the owner.
+    const ref = db().collection('att_salary').doc(p.code);
+    const snap = await ref.get(); if (!snap.exists) throw new Error('no employee ' + p.code);
+    const e = snap.data(); const md = (e.months || {})[p.month] || {};
+    if (md.locked) return `already locked (${p.month})`;
+    const cash = Number(p.cash || 0), account = Number(p.account || 0), paid = cash + account;
+    const payable = Number(p.payable || 0);   // client-computed (net + opening balance)
+    const closing = Math.round((payable - paid) * 100) / 100;   // + = still owed to him, − = he owes
+    const date = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
+    const [y, m] = p.month.split('-').map(Number);
+    const next = m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`;
+    const months = { ...(e.months || {}) };
+    const prevNextOpening = Number((months[next] || {}).openingBalance || 0);   // to revert on unlock
+    months[p.month] = { ...md, locked: true, lockedAt: new Date().toISOString(),
+      payment: { cash, account, net: paid, payable, closing, date, mode: 'lock', prevNextOpening, by: p._by || 'owner', reason: p.reason || '' } };
+    months[next] = { ...(months[next] || {}), openingBalance: closing };
+    const entry = { at: new Date().toISOString(), by: p._by || 'owner', code: p.code, name: e.name || p.code, month: p.month, field: 'lock', from: `payable ₹${payable}`, to: `paid ₹${paid} (cash ${cash}+acct ${account}); carry ₹${closing}`, reason: p.reason || '' };
+    const patch = { months, decisions: [...(e.decisions || []), entry] };
+    await ref.set(patch, { merge: true });
+    try {   // durable salary register snapshot
+      const regRef = db().collection('att_meta').doc('salary_register_' + p.month);
+      const reg = (await regRef.get()).data() || { month: p.month, byCode: {} };
+      reg.byCode = reg.byCode || {};
+      reg.byCode[p.code] = { name: e.name || p.code, dept: e.dept || '', net: paid, cash, account, carry: closing, mode: 'lock', date, by: p._by || 'owner' };
+      reg.total = Object.values(reg.byCode).reduce((s, x) => s + Number(x.net || 0), 0);
+      reg.count = Object.keys(reg.byCode).length; reg.updatedAt = new Date().toISOString();
+      await regRef.set(reg);
+    } catch (e2) { console.error('register write failed:', e2.message); }
+    await sendTelegram(`🔒 Locked <b>${e.name || p.code}</b> ${p.month}: paid ₹${paid.toLocaleString('en-IN')} (cash ${cash} + acct ${account})${closing ? ` · carry ₹${closing.toLocaleString('en-IN')} → next month` : ''} · by ${p._by || 'owner'}${p.reason ? ` · ${p.reason}` : ''}`).catch(() => {});
+    return `locked ${p.month}: paid ${paid}, carry ${closing}`;
+  }
+  if (type === 'unlock_month') {   // reopen a locked month: clear the payment + revert the carried balance
+    const ref = db().collection('att_salary').doc(p.code);
+    const e = (await ref.get()).data(); const md = (e.months || {})[p.month] || {};
+    if (!md.locked) return `not locked (${p.month})`;
+    const [y, m] = p.month.split('-').map(Number);
+    const next = m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`;
+    const months = { ...(e.months || {}) };
+    months[p.month] = { ...md, locked: false, payment: null, unlockedAt: new Date().toISOString(), unlockedBy: p._by || 'owner' };
+    months[next] = { ...(months[next] || {}), openingBalance: Number(md.payment?.prevNextOpening || 0) };
+    const entry = { at: new Date().toISOString(), by: p._by || 'owner', code: p.code, name: e.name || p.code, month: p.month, field: 'unlock', from: 'locked', to: 'reopened', reason: p.reason || '' };
+    await ref.set({ months, decisions: [...(e.decisions || []), entry] }, { merge: true });
+    return `unlocked ${p.month}`;
   }
   if (type === 'finalize_hisab') {   // owner finalizes a whole month: lock + carry advances forward
     const mk = p.month;

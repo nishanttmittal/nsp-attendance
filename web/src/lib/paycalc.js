@@ -110,6 +110,7 @@ export function payFor(emp, attMap, mk, ctx, graceDelta = 0, punchDoc = null) {
     restoreSaturdayDays: Number(md.restoreSaturdays || 0),
     graceDays: md.gracePaid ? Number(graceDelta || 0) : 0,   // owner opted in for this worker/month
     latePenaltyDays: 0, weeklyOffDockDays: 0, // the machine applies late/weekly-off rules
+    openingBalance: Number(md.openingBalance || 0),          // running balance carried from last month
   });
   return { att, md, advs, advancesThisMonth, pay, portalOt, appOt, otSource, otCredit, detail: det.detail, presentAdjust, satAdjust };
 }

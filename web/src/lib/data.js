@@ -379,6 +379,14 @@ export async function queueFinalizeHisab(month, by) {
 // Manager marks a person paid — applied by the worker with admin rights. `amount` = the actual
 // amount handed over (defaults to the net due); anything paid OVER the net becomes an advance
 // carried forward to next month.
+// Cashier settle: record cash+account, freeze the month, carry the running balance. payable = the
+// client-computed net + opening balance (what to settle). Applied by the worker with admin rights.
+export async function queueLock(code, month, { cash, account, payable, reason }, by) {
+  return queueJob('lock_month', { code, month, cash: Number(cash || 0), account: Number(account || 0), payable: Number(payable || 0), reason: reason || '' }, by);
+}
+export async function queueUnlock(code, month, reason, by) {
+  return queueJob('unlock_month', { code, month, reason: reason || '' }, by);
+}
 export async function queueMarkPaid(code, month, mode, by, remark, amount, payId) {
   // Unique id per Pay tap → the worker dedupes on it, so a re-tap during the 5-min queue delay
   // can never double-record a (part) payment.

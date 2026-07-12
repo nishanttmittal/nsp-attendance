@@ -19,7 +19,7 @@ export function effectiveAmount(emp, toDate) {
 }
 
 // One employee's pay for the period. att = {presentDays,absentDays,otHrs,lateHrs,earlyHrs}.
-export function computePay({ emp, att, daysInMonth, elapsedDays, fullMonth, advancesThisMonth = 0, advanceBalanceIn = 0, advanceRecover = 0, fines = 0, loanInstallment = 0, bonus = 0, restoreSaturdayDays = 0, graceDays = 0, latePenaltyDays = 0, weeklyOffDockDays = 0, monthStart, toDate }) {
+export function computePay({ emp, att, daysInMonth, elapsedDays, fullMonth, advancesThisMonth = 0, advanceBalanceIn = 0, advanceRecover = 0, fines = 0, loanInstallment = 0, bonus = 0, restoreSaturdayDays = 0, graceDays = 0, latePenaltyDays = 0, weeklyOffDockDays = 0, openingBalance = 0, monthStart, toDate }) {
   const eff = effectiveAmount(emp, toDate);
   const rate = eff.amount;
   const perDay = emp.type === 'daily' ? rate : rate / daysInMonth;
@@ -112,5 +112,9 @@ export function computePay({ emp, att, daysInMonth, elapsedDays, fullMonth, adva
     advanceBalanceCarried: round(advanceDue - advanceRecovered),
     suggestedWeeklyOffDock: { days: penaltyDays, amount: round(perDay * penaltyDays) },
     net: round(Math.max(0, earnings - fixed - advanceRecovered)),
+    // Cashier model: opening balance carried from last month (+ = still owed to worker, − = he owes),
+    // added to this month's net → the amount to actually settle. Closing balance = payable − amount paid.
+    openingBalance: round(openingBalance),
+    payable: round(Math.max(0, earnings - fixed - advanceRecovered) + openingBalance),
   };
 }

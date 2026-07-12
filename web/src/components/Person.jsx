@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { loadEmployee, loadAllAttendance, loadPunchDoc, saveEmployee, saveMonth, addAdvance, addIncrement, resignEmployee, settleAndResign, checkActionPassword, queueJob, editNameDept, istMonth } from '../lib/data';
+import { loadEmployee, loadAllAttendance, loadPunchDoc, saveEmployee, saveMonth, addAdvance, addIncrement, resignEmployee, settleAndResign, checkActionPassword, queueJob, queueLock, queueUnlock, editNameDept, istMonth } from '../lib/data';
 import { monthCtx, payFor, rupee } from '../lib/paycalc';
 import { payslipOnePdf, sharePdf } from '../lib/salaryPdf';
 import { graceDeltaDays } from '../lib/attendanceEngine';
@@ -22,8 +22,8 @@ export default function Person({ code, mk, user, onBack }) {
 
   if (!emp) return <p className="text-gray-500">Loading…</p>;
   const { att, md, pay, portalOt = 0, appOt = 0, otSource = 'portal', otCredit = 0, detail: otDetail = [], presentAdjust = 0, satAdjust = 0 } = payFor(emp, attMap, mk, ctx, graceDelta, punchDoc);
-  // freeze on tick: once approved, nothing about this month can be edited (undo tick to reopen)
-  const locked = !!md.payment || !!md.approved;
+  // freeze once LOCKED (cashier settle) or approved/paid — nothing about the month can be edited
+  const locked = !!md.locked || !!md.payment || !!md.approved;
   // owner decides a borderline weekday Full/Half/Absent at pay time (md.dayOverrides). null = clear.
   const setDay = (ymd, value) => {
     const next = { ...(md.dayOverrides || {}) };
@@ -36,6 +36,8 @@ export default function Person({ code, mk, user, onBack }) {
     if (hours == null) delete next[ymd]; else next[ymd] = hours;
     act(() => saveMonth(code, mk, { otCredits: next }));
   };
+  const doLock = (cash, account, reason) => act(() => queueLock(code, mk, { cash, account, payable: pay.payable, reason }, user.email));
+  const doUnlock = (reason) => act(() => queueUnlock(code, mk, reason, user.email));
   const today = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
   const presentPct = ctx.elapsedDays > 0 ? Math.round((pay.presentDays / ctx.elapsedDays) * 100) : 0;
 
@@ -94,6 +96,10 @@ export default function Person({ code, mk, user, onBack }) {
           <button onClick={async () => { await queueJob('payslip', { code, month: mk }, user.email); alert('Sent to Telegram.'); }} className="border border-gray-300 rounded-lg py-2 text-sm font-medium">✈️ Telegram</button>
         </div>
       </div>
+
+      {emp.type !== 'daily' && (
+        <SettleLockCard pay={pay} md={md} busy={busy} onLock={doLock} onUnlock={doUnlock} />
+      )}
 
       {emp.type !== 'daily' && otDetail.length > 0 && (
         <DaysOtCard detail={otDetail} overrides={md.dayOverrides || {}} otCredits={md.otCredits || {}} presentAdjust={Math.round((presentAdjust + satAdjust) * 100) / 100} locked={locked} busy={busy} onSetDay={setDay} onCreditOt={creditOt} />
@@ -157,6 +163,46 @@ export default function Person({ code, mk, user, onBack }) {
           Resigned {emp.resignedAt || emp.exitDate || ''}{md.payment?.settlement ? ` · final settled ${rupee(md.payment.net)}` : ''}
         </div>
       )}
+    </div>
+  );
+}
+
+// Cashier settle: shows salary + opening balance = payable; owner enters cash + account paid and
+// LOCKS the month (freezes it, carries the balance to next month). Unlock reopens it. Reason required.
+function SettleLockCard({ pay, md, busy, onLock, onUnlock }) {
+  const [cash, setCash] = useState('');
+  const [account, setAccount] = useState('');
+  const opening = pay.openingBalance || 0;
+  const payable = pay.payable || 0;
+  const paid = (Number(cash) || 0) + (Number(account) || 0);
+  const closing = Math.round((payable - paid) * 100) / 100;
+  if (md.locked) {
+    const p = md.payment || {};
+    return (
+      <div className="bg-green-50 border border-green-200 rounded-xl shadow p-4">
+        <div className="font-bold text-green-800">🔒 Locked</div>
+        <Row k="Paid" v={`${rupee(p.net)} (cash ${rupee(p.cash)} + account ${rupee(p.account)})`} />
+        <Row k="Payable was" v={rupee(p.payable)} />
+        <Row k="Balance carried" v={`${(p.closing || 0) >= 0 ? '+' : ''}${rupee(p.closing)} → next month`} />
+        <p className="text-xs text-gray-500 mt-1">{p.date} · by {String(p.by || '').split('@')[0]}{p.reason ? ` · “${p.reason}”` : ''}</p>
+        <button disabled={!!busy} onClick={() => { const r = prompt('Unlock this month to edit?\nReason (required):'); if (r == null) return; if (!r.trim()) return alert('Reason required.'); onUnlock(r.trim()); }}
+          className="mt-2 text-xs border border-red-300 text-red-700 rounded-lg px-3 py-1.5 disabled:opacity-50">🔓 Unlock to edit</button>
+      </div>
+    );
+  }
+  return (
+    <div className="bg-white rounded-xl shadow p-4 space-y-2">
+      <div className="font-bold text-gray-800">💵 Settle &amp; lock</div>
+      <div className="flex justify-between text-sm"><span className="text-gray-500">Salary this month</span><span className="text-gray-800">{rupee(pay.net)}</span></div>
+      {opening !== 0 && <div className="flex justify-between text-sm"><span className="text-gray-500">Carried balance</span><span className={opening > 0 ? 'text-red-700' : 'text-green-700'}>{opening > 0 ? '+' : ''}{rupee(opening)} {opening > 0 ? '(owed to him)' : '(he owes)'}</span></div>}
+      <div className="flex justify-between text-base font-bold border-t pt-1"><span>Payable now</span><span className="text-red-700">{rupee(payable)}</span></div>
+      <div className="grid grid-cols-2 gap-2 pt-1">
+        <label className="text-xs text-gray-500">Cash paid ₹<input type="number" value={cash} onChange={(e) => setCash(e.target.value)} className="mt-0.5 w-full border rounded-lg px-2 py-2 text-base font-bold text-gray-800" /></label>
+        <label className="text-xs text-gray-500">Account paid ₹<input type="number" value={account} onChange={(e) => setAccount(e.target.value)} className="mt-0.5 w-full border rounded-lg px-2 py-2 text-base font-bold text-gray-800" /></label>
+      </div>
+      {paid > 0 && <p className="text-xs text-gray-600">Paying {rupee(paid)} → balance <b className={closing >= 0 ? 'text-red-700' : 'text-green-700'}>{closing >= 0 ? '+' : ''}{rupee(closing)}</b> carries to next month.</p>}
+      <button disabled={!!busy || paid <= 0} onClick={() => { const r = prompt(`Lock this month?\nPayable ₹${payable} · paying ₹${paid} (cash ${Number(cash) || 0} + account ${Number(account) || 0}) · balance ₹${closing} carries.\n\nReason (required):`); if (r == null) return; if (!r.trim()) return alert('Reason is required to lock.'); onLock(Number(cash) || 0, Number(account) || 0, r.trim()); }}
+        className="w-full bg-green-700 text-white rounded-xl py-3 font-semibold disabled:opacity-50">🔒 Lock month</button>
     </div>
   );
 }
