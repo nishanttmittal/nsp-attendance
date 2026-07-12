@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { loadEmployee, loadAllAttendance, loadPunchDoc, saveEmployee, saveMonth, addAdvance, addIncrement, resignEmployee, settleAndResign, checkActionPassword, queueJob, editNameDept, istMonth } from '../lib/data';
 import { monthCtx, payFor, rupee } from '../lib/paycalc';
 import { payslipOnePdf, sharePdf } from '../lib/salaryPdf';
-import { graceDeltaDays, monthDetail } from '../lib/attendanceEngine';
+import { graceDeltaDays } from '../lib/attendanceEngine';
 
 // One person, one page: this month's money, their ledger, their settings.
 export default function Person({ code, mk, user, onBack }) {
@@ -21,12 +21,15 @@ export default function Person({ code, mk, user, onBack }) {
   const act = async (fn) => { setBusy(true); try { await fn(); await reload(); } finally { setBusy(false); } };
 
   if (!emp) return <p className="text-gray-500">Loading…</p>;
-  const { att, md, pay, portalOt = 0, appOt = 0, otSource = 'portal' } = payFor(emp, attMap, mk, ctx, graceDelta, punchDoc);
+  const { att, md, pay, portalOt = 0, appOt = 0, otSource = 'portal', detail: otDetail = [], presentAdjust = 0 } = payFor(emp, attMap, mk, ctx, graceDelta, punchDoc);
   // freeze on tick: once approved, nothing about this month can be edited (undo tick to reopen)
   const locked = !!md.payment || !!md.approved;
-  // per-day in/out + OT + missing-punch detail. OWNER RULE (2026-07-11): a missing/single punch is
-  // NEVER restored — that day is present but earns 0 OT. So no "fix/credit" action, display only.
-  const otDetail = monthDetail(emp.shift, punchDoc, mk, istMonth()).detail;
+  // owner decides a borderline weekday Full/Half/Absent at pay time (md.dayOverrides). null = clear.
+  const setDay = (ymd, value) => {
+    const next = { ...(md.dayOverrides || {}) };
+    if (value == null) delete next[ymd]; else next[ymd] = value;
+    act(() => saveMonth(code, mk, { dayOverrides: next }));
+  };
   const today = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
   const presentPct = ctx.elapsedDays > 0 ? Math.round((pay.presentDays / ctx.elapsedDays) * 100) : 0;
 
@@ -87,7 +90,7 @@ export default function Person({ code, mk, user, onBack }) {
       </div>
 
       {emp.type !== 'daily' && otDetail.length > 0 && (
-        <DaysOtCard detail={otDetail} />
+        <DaysOtCard detail={otDetail} overrides={md.dayOverrides || {}} presentAdjust={presentAdjust} locked={locked} busy={busy} onSetDay={setDay} />
       )}
 
       {!locked && (
@@ -152,42 +155,55 @@ export default function Person({ code, mk, user, onBack }) {
   );
 }
 
-// Per-day in/out + OT for the month, display-only. Missing/single-punch days are flagged and earn
-// 0 OT — the missing punch is NEVER restored (owner rule 2026-07-11). Shows why OT is what it is.
-function DaysOtCard({ detail }) {
+// Per-day in/out + OT, with a Full / Half / Absent picker per working day so the OWNER decides
+// borderline days at pay time (missing punch still earns 0 OT — never restored). Saturdays & OT unaffected.
+const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const dayDefault = (d) => (d.kind === 'half' ? 'half' : d.kind === 'absent' ? 'absent' : 'full');  // single = full
+function DaysOtCard({ detail, overrides = {}, presentAdjust = 0, locked, busy, onSetDay }) {
   const [open, setOpen] = useState(false);
   const missing = detail.filter((d) => d.missing);
   const totalOt = detail.reduce((s, d) => s + (d.ot || 0), 0);
-  const dayLabel = (ymd) => ymd.slice(8, 10) + '/' + ymd.slice(5, 7);
+  const lbl = (ymd) => ymd.slice(8, 10) + '/' + ymd.slice(5, 7) + ' ' + DOW[new Date(ymd + 'T00:00:00').getDay()];
+  const isSat = (d) => ['weekly-off', 'sat-worked', 'sat-absent'].includes(d.kind);
   return (
     <div className="bg-white rounded-xl shadow p-3">
       <button onClick={() => setOpen(!open)} className="w-full flex justify-between items-center text-sm font-semibold text-gray-700">
-        <span>📅 Days &amp; overtime{missing.length ? <span className="text-amber-600 font-normal"> · {missing.length} missing punch{missing.length > 1 ? 'es' : ''}</span> : ''}</span>
+        <span>📅 Days &amp; overtime{missing.length ? <span className="text-amber-600 font-normal"> · {missing.length} missing</span> : ''}{presentAdjust !== 0 ? <span className="text-indigo-600 font-normal"> · {presentAdjust > 0 ? '+' : ''}{presentAdjust}d adjusted</span> : ''}</span>
         <span className="text-gray-500 font-normal">{totalOt.toFixed(1)}h OT {open ? '▲' : '▼'}</span>
       </button>
       {open && (
         <div className="mt-2 space-y-0.5">
+          <p className="text-[10px] text-gray-400">Tap <b>Full / ½ / Abs</b> to set a working day for pay. Missing-punch days pay 0 OT. Saturdays follow the weekly-off rule.</p>
           {detail.map((d) => {
-            if (d.missing) return (
-              <div key={d.ymd} className="flex items-center gap-2 bg-amber-50 rounded px-2 py-1.5 text-xs">
-                <span className="w-11 font-semibold text-amber-800">{dayLabel(d.ymd)}</span>
-                <span className="flex-1 text-amber-700">⚠ missing {d.missing === 'in' ? 'IN' : 'OUT'} · has {d.missing === 'in' ? 'out ' + d.in : 'in ' + d.in}</span>
-                <span className="w-20 text-right text-amber-600">no OT</span>
+            if (isSat(d)) return (
+              <div key={d.ymd} className="flex items-center gap-2 text-xs px-2 py-1 text-gray-400">
+                <span className="w-16">{lbl(d.ymd)}</span>
+                <span className="flex-1">{d.in ? `${d.in} → ${d.out || 'no out'} · ` : ''}{d.kind === 'sat-worked' ? 'Saturday worked (OT)' : d.kind === 'weekly-off' ? 'weekly off (paid)' : 'Saturday — cut'}</span>
+                <span className="w-12 text-right text-gray-500">{d.ot > 0 ? '+' + d.ot + 'h' : ''}</span>
               </div>
             );
-            const isAbsent = d.kind === 'absent' || d.kind === 'sat-absent';
-            const isWeeklyOff = d.kind === 'weekly-off';
+            const hasPunch = !!(d.in || d.out);
+            const cur = overrides[d.ymd] || dayDefault(d);
+            const overridden = !!overrides[d.ymd];
             return (
-              <div key={d.ymd} className="flex items-center gap-2 text-xs px-2 py-1">
-                <span className="w-11 text-gray-600">{dayLabel(d.ymd)}</span>
-                <span className="flex-1 text-gray-500">
-                  {isAbsent ? <span className="text-red-400">absent</span> : isWeeklyOff ? <span className="text-blue-400">weekly off</span> : `${d.in || '—'} → ${d.out || '—'}`}
-                </span>
-                <span className={`w-14 text-right ${d.ot > 0 ? 'text-gray-800 font-medium' : 'text-gray-300'}`}>{d.ot > 0 ? '+' + d.ot + 'h' : '—'}</span>
+              <div key={d.ymd} className={`text-xs px-2 py-1 rounded ${d.missing ? 'bg-amber-50' : overridden ? 'bg-indigo-50' : ''}`}>
+                <div className="flex items-center gap-2">
+                  <span className="w-16 text-gray-600">{lbl(d.ymd)}</span>
+                  <span className="flex-1 text-gray-500">{d.missing ? <span className="text-amber-700">⚠ missing {d.missing === 'in' ? 'IN' : 'OUT'} · {d.in}</span> : hasPunch ? `${d.in || '—'} → ${d.out || '—'}` : <span className="text-red-400">absent</span>}</span>
+                  <span className={`w-12 text-right ${d.ot > 0 ? 'text-gray-800' : 'text-gray-300'}`}>{d.ot > 0 ? '+' + d.ot + 'h' : '—'}</span>
+                </div>
+                {hasPunch && (
+                  <div className="flex gap-1 mt-1 ml-16 items-center">
+                    {[['full', 'Full'], ['half', '½'], ['absent', 'Abs']].map(([v, t]) => (
+                      <button key={v} disabled={busy || locked} onClick={() => onSetDay(d.ymd, cur === v ? null : v)}
+                        className={`px-2 py-0.5 rounded text-[11px] ${cur === v ? 'bg-red-700 text-white font-semibold' : 'border border-gray-200 text-gray-500'} disabled:opacity-50`}>{t}</button>
+                    ))}
+                    {overridden && <span className="text-[10px] text-indigo-600">was {dayDefault(d)}</span>}
+                  </div>
+                )}
               </div>
             );
           })}
-          <div className="text-[10px] text-gray-400 pt-1 border-t border-gray-100 mt-1">OT = hours past shift; worked Saturday = all hours. A missing/single punch earns 0 OT (not restored).</div>
         </div>
       )}
     </div>

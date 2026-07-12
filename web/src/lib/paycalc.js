@@ -2,7 +2,22 @@
 // All rule complexity stays here — screens just show the result.
 import { computePay } from './payroll';
 import { monthData, dailyAtt, istMonth } from './data';
-import { monthOt } from './attendanceEngine';
+import { monthOt, monthDetail } from './attendanceEngine';
+
+// Day-value for present-count: full=1, half=0.5, absent=0. Owner's per-day override (md.dayOverrides,
+// keyed by YYYY-MM-DD) lets him decide a borderline weekday at pay time. Returns the net +/- present days.
+const DAYVAL = { full: 1, half: 0.5, absent: 0 };
+export function presentAdjustFrom(detail, overrides) {
+  if (!overrides || !Object.keys(overrides).length) return 0;
+  let adj = 0;
+  for (const d of detail) {
+    const ov = overrides[d.ymd];
+    if (!ov || ['weekly-off', 'sat-worked', 'sat-absent'].includes(d.kind)) continue;  // weekdays only
+    const def = d.kind === 'half' ? 0.5 : d.kind === 'absent' ? 0 : 1;                  // single-punch counts as full
+    adj += (DAYVAL[ov] ?? def) - def;
+  }
+  return Math.round(adj * 100) / 100;
+}
 
 const pad = (n) => String(n).padStart(2, '0');
 
@@ -58,11 +73,16 @@ export function payFor(emp, attMap, mk, ctx, graceDelta = 0, punchDoc = null) {
   // OT source: PORTAL (att.otHrs, default) or APP (computed here from raw punches). Owner picks per
   // worker via md.otSource; app-OT is already net (worked − shift), so no late/early re-deduction.
   const portalOt = Number(att.otHrs || 0);
-  // OWNER RULE (2026-07-11): a missing/single punch is NEVER restored — compute OT from raw punches
-  // only, so incomplete days earn 0 OT.
-  const appOt = punchDoc && !att.noRecord ? monthOt(emp.shift, punchDoc, mk, istMonth()) : 0;
+  // OT from raw punches (missing/single punch = 0 OT, never restored) + per-day detail for overrides.
+  const det = punchDoc && !att.noRecord ? monthDetail(emp.shift, punchDoc, mk, istMonth()) : { otHrs: 0, detail: [] };
+  const appOt = det.otHrs;
   const otSource = md.otSource === 'app' ? 'app' : 'portal';
-  const otAtt = otSource === 'app' ? { ...att, otHrs: appOt, lateHrs: 0, earlyHrs: 0 } : att;
+  // owner's per-day Full/Half/Absent decisions on borderline weekdays → adjust present/absent for pay
+  const presentAdjust = presentAdjustFrom(det.detail, md.dayOverrides);
+  const otPart = otSource === 'app' ? { otHrs: appOt, lateHrs: 0, earlyHrs: 0 } : { otHrs: portalOt };
+  const otAtt = { ...att, ...otPart,
+    presentDays: (att.presentDays || 0) + presentAdjust,
+    absentDays: Math.max(0, (att.absentDays || 0) - presentAdjust) };
   const pay = computePay({
     emp, att: otAtt, ...ctx,
     advancesThisMonth, advanceBalanceIn, advanceRecover,
@@ -71,5 +91,5 @@ export function payFor(emp, attMap, mk, ctx, graceDelta = 0, punchDoc = null) {
     graceDays: md.gracePaid ? Number(graceDelta || 0) : 0,   // owner opted in for this worker/month
     latePenaltyDays: 0, weeklyOffDockDays: 0, // the machine applies late/weekly-off rules
   });
-  return { att, md, advs, advancesThisMonth, pay, portalOt, appOt, otSource };
+  return { att, md, advs, advancesThisMonth, pay, portalOt, appOt, otSource, detail: det.detail, presentAdjust };
 }
