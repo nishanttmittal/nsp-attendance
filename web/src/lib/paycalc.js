@@ -2,7 +2,7 @@
 // All rule complexity stays here — screens just show the result.
 import { computePay } from './payroll';
 import { monthData, dailyAtt, istMonth } from './data';
-import { monthOt, monthDetail } from './attendanceEngine';
+import { monthOt, monthDetail, monthLateFix } from './attendanceEngine';
 
 // Day-value for present-count: full=1, half=0.5, absent=0. Owner's per-day override (md.dayOverrides,
 // keyed by YYYY-MM-DD) lets him decide a borderline weekday at pay time. Returns the net +/- present days.
@@ -97,10 +97,21 @@ export function payFor(emp, attMap, mk, ctx, graceDelta = 0, punchDoc = null) {
   // added on top of the chosen OT. Off unless he credits a specific single-punch day.
   const otCredit = Object.values(md.otCredits || {}).reduce((s, v) => s + Number(v || 0), 0);
   const effOt = Math.round(((otSource === 'app' ? appOt : portalOt) + otCredit) * 100) / 100;
+  // Broken-punch LATE fix (portal source only): a single evening punch on a missing-morning day is
+  // misread by the portal as a very-late arrival, inflating `lateHrs` and wrongly eating OT. Recompute
+  // the fake portion from real punches and strip it — floored at the genuine both-punch lateness so we
+  // never restore more OT than the honest late deduction. App source already ignores late (net OT).
+  const rawLate = Number(att.lateHrs || 0);
+  const lateFix = (otSource === 'portal' && punchDoc && !att.noRecord)
+    ? monthLateFix(emp.shift, punchDoc, mk, istMonth()) : { fake: 0, genuine: 0 };
+  const correctedLate = lateFix.fake > 0.25
+    ? Math.max(lateFix.genuine, Math.round((rawLate - lateFix.fake) * 100) / 100)
+    : rawLate;
+  const lateFixed = Math.round(Math.max(0, rawLate - correctedLate) * 100) / 100; // OT hours restored
   // owner's per-day decisions → adjust days for pay: weekdays Full/Half/Absent, Saturdays pay/no-pay
   const presentAdjust = presentAdjustFrom(det.detail, md.dayOverrides);
   const satAdjust = saturdayAdjustFrom(det.detail, md.dayOverrides);
-  const otPart = otSource === 'app' ? { otHrs: effOt, lateHrs: 0, earlyHrs: 0 } : { otHrs: effOt };
+  const otPart = otSource === 'app' ? { otHrs: effOt, lateHrs: 0, earlyHrs: 0 } : { otHrs: effOt, lateHrs: correctedLate };
   const otAtt = { ...att, ...otPart,
     presentDays: (att.presentDays || 0) + presentAdjust,
     weeklyOff: Math.max(0, (att.weeklyOff || 0) + satAdjust),
@@ -114,5 +125,5 @@ export function payFor(emp, attMap, mk, ctx, graceDelta = 0, punchDoc = null) {
     latePenaltyDays: 0, weeklyOffDockDays: 0, // the machine applies late/weekly-off rules
     openingBalance: Number(md.openingBalance || 0),          // running balance carried from last month
   });
-  return { att, md, advs, advancesThisMonth, pay, portalOt, appOt, otSource, otCredit, detail: det.detail, presentAdjust, satAdjust };
+  return { att, md, advs, advancesThisMonth, pay, portalOt, appOt, otSource, otCredit, detail: det.detail, presentAdjust, satAdjust, lateFixed, rawLate };
 }

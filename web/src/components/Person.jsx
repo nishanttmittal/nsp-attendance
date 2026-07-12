@@ -21,7 +21,7 @@ export default function Person({ code, mk, user, onBack }) {
   const act = async (fn) => { setBusy(true); try { await fn(); await reload(); } finally { setBusy(false); } };
 
   if (!emp) return <p className="text-gray-500">Loading…</p>;
-  const { att, md, pay, portalOt = 0, appOt = 0, otSource = 'portal', otCredit = 0, detail: otDetail = [], presentAdjust = 0, satAdjust = 0 } = payFor(emp, attMap, mk, ctx, graceDelta, punchDoc);
+  const { att, md, pay, portalOt = 0, appOt = 0, otSource = 'portal', otCredit = 0, detail: otDetail = [], presentAdjust = 0, satAdjust = 0, lateFixed = 0, rawLate = 0 } = payFor(emp, attMap, mk, ctx, graceDelta, punchDoc);
   // freeze once LOCKED (cashier settle) or approved/paid — nothing about the month can be edited
   const locked = !!md.locked || !!md.payment || !!md.approved;
   // owner decides a borderline weekday Full/Half/Absent at pay time (md.dayOverrides). null = clear.
@@ -69,6 +69,11 @@ export default function Person({ code, mk, user, onBack }) {
         {pay.unpaidWorkedSat > 0 && <Row k="Worked Sat (OT only)" v={`${pay.unpaidWorkedSat} — week not earned (4+ absences): day unpaid, OT kept`} />}
         {emp.type !== 'daily' && !pay.noAttendance && <Row k="Paid days" v={`${Math.max(0, (pay.payableDays || 0) - (pay.absentDays || 0))} of ${ctx.daysInMonth} (weekly-offs included)`} />}
         <Row k="Overtime" v={`${pay.otHrsNet}h paid`} />
+        {lateFixed > 0.25 && (
+          <div className="flex justify-between text-xs py-0.5"><span className="text-gray-500">Late fix</span>
+            <span className="text-green-700">broken punch → −{lateFixed}h fake late removed · OT restored <span className="text-gray-400">(portal said {rawLate}h late)</span></span>
+          </div>
+        )}
         {(portalOt > 0 || appOt > 0) && emp.type !== 'daily' && (
           <div className="flex justify-between text-xs py-0.5"><span className="text-gray-500">OT source</span>
             <span className="text-gray-800">Portal {portalOt}h · App {appOt}h{Math.abs(portalOt - appOt) >= 0.5 ? <span className="text-amber-600"> ⚠ gap</span> : ''}{otCredit > 0 ? <span className="text-green-700"> +{otCredit}h credited</span> : ''} <span className="text-gray-400">(paying {otSource})</span></span>

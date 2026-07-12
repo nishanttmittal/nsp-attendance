@@ -12,6 +12,9 @@
 export const SHIFT_FULLCUT = { GEN: 7, '10H': 9, '12H': 10.5, wir: 9 };
 // Shift DURATION (gross span incl. lunch) — used for app-side OT = worked − shift hours.
 export const SHIFT_HOURS = { GEN: 8.5, '10H': 10.5, '12H': 12, wir: 10.5, DSG: 10 };
+// Shift START time (hours) — the portal counts "late" from here; used to detect the broken-punch
+// inflation where a lone evening punch (missing morning IN) is misread as a very-late arrival.
+export const SHIFT_START = { GEN: 9, '10H': 9, '12H': 9, wir: 9.5, DSG: 9 };
 export const WEEKLY_OFF_NEEDS = 4;
 // Owner rule (2026-07-12): a day's OT of 15 minutes OR LESS is ignored (paid 0); MORE than 15 min
 // counts in full. Threshold, not a per-day deduction.
@@ -121,6 +124,35 @@ export function monthDetail(shift, punchDoc, mk, curMonth) {
   if (!punchDoc) return { otHrs: 0, detail: [] };
   const pbd = punchesByDateFor(punchDoc, mk), win = monthWindow(mk, curMonth);
   return computeMonth(shift || 'GEN', pbd, win, { grace: true });
+}
+
+// Broken-punch LATE correction. On a day with only a single EVENING punch (missing morning IN — e.g.
+// the 16-Jun-2026 morning-device failure), the Realtime portal misreads that lone punch as a very-late
+// ARRIVAL and adds ~10h of fake "late", which then wrongly eats the worker's overtime. This reconstructs
+// from the real punches:
+//   • fake    = hours the portal wrongly added (Σ over missing-in days of punchTime − shiftStart)
+//   • genuine = real arrival lateness from proper both-punch days (15-min grace) — used as a floor so
+//               the correction never restores MORE than the honest late deduction.
+// Caller does: correctedLate = fake > 0 ? max(genuine, portalLate − fake) : portalLate.
+export function monthLateFix(shift, punchDoc, mk, curMonth) {
+  if (!punchDoc) return { fake: 0, genuine: 0 };
+  const start = SHIFT_START[shift] ?? 9;
+  const pbd = punchesByDateFor(punchDoc, mk), win = monthWindow(mk, curMonth);
+  const round2 = (n) => Math.round(n * 100) / 100;
+  let fake = 0, genuine = 0;
+  for (const ymd of Object.keys(pbd)) {
+    if (ymd < win.start || ymd > win.to) continue;               // stay inside the month window
+    const rec = pbd[ymd] || {};
+    const present = [rec.i, rec.o].filter(Boolean);
+    if (present.length === 1) {                                  // single punch
+      const t = hoursOf(present[0]);
+      if (t != null && t >= 14) fake += Math.max(0, t - start);  // lone evening punch = fake "late arrival"
+    } else if (rec.i && rec.o) {                                 // both punches → real arrival lateness
+      const inH = hoursOf(rec.i);
+      if (inH != null && inH < 14) genuine += Math.max(0, inH - start - OT_MIN); // 15-min grace
+    }
+  }
+  return { fake: round2(fake), genuine: round2(genuine) };
 }
 
 // --- helpers to drive the engine from an att_punches doc for a given month ---
