@@ -83,7 +83,9 @@ export function payFor(emp, attMap, mk, ctx, graceDelta = 0, punchDoc = null) {
   const advs = (emp.advances || []).filter((a) => (a.date || '').startsWith(mk));
   const advancesThisMonth = advs.reduce((s, a) => s + Number(a.amount || 0), 0);
   const advanceBalanceIn = Number(md.advanceBalanceIn || 0);
-  const advanceRecover = md.advanceRecover != null ? Number(md.advanceRecover) : advancesThisMonth + advanceBalanceIn;
+  // Advances are NOT auto-deducted (owner 2026-07-12): payable = full salary; the advance stays a
+  // tracked running balance and is recovered only when the owner sets "Advance cut ₹" (md.advanceRecover).
+  const advanceRecover = md.advanceRecover != null ? Number(md.advanceRecover) : 0;
   // OT source: PORTAL (att.otHrs, default) or APP (computed here from raw punches). Owner picks per
   // worker via md.otSource; app-OT is already net (worked − shift), so no late/early re-deduction.
   const portalOt = Number(att.otHrs || 0);

@@ -36,7 +36,7 @@ export default function Person({ code, mk, user, onBack }) {
     if (hours == null) delete next[ymd]; else next[ymd] = hours;
     act(() => saveMonth(code, mk, { otCredits: next }));
   };
-  const doLock = (cash, account, reason) => act(() => queueLock(code, mk, { cash, account, payable: pay.payable, reason }, user.email));
+  const doLock = (cash, account, reason) => act(() => queueLock(code, mk, { cash, account, payable: pay.payable, advanceCarry: pay.advanceBalanceCarried, reason }, user.email));
   const doUnlock = (reason) => act(() => queueUnlock(code, mk, reason, user.email));
   const today = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
   const presentPct = ctx.elapsedDays > 0 ? Math.round((pay.presentDays / ctx.elapsedDays) * 100) : 0;
@@ -118,7 +118,7 @@ export default function Person({ code, mk, user, onBack }) {
           <NumRow label="Bonus ₹" val={md.bonus} disabled={busy} onSave={(v) => act(() => saveMonth(code, mk, { bonus: v }))} />
           <NumRow label="Fine ₹" val={md.fine} disabled={busy} onSave={(v) => act(() => saveMonth(code, mk, { fine: v }))} />
           <NumRow label="Loan cut ₹" val={md.loanInstallment} disabled={busy} onSave={(v) => act(() => saveMonth(code, mk, { loanInstallment: v }))} />
-          <NumRow label={`Advance cut ₹ (owes ${rupee(pay.advanceDue)})`} val={md.advanceRecover ?? pay.advanceDue} disabled={busy} onSave={(v) => act(() => saveMonth(code, mk, { advanceRecover: v }))} />
+          <NumRow label={`Advance cut ₹ (outstanding ${rupee(pay.advanceDue)})`} val={md.advanceRecover ?? 0} disabled={busy} onSave={(v) => act(() => saveMonth(code, mk, { advanceRecover: v }))} />
         </div>
       )}
 
@@ -195,6 +195,7 @@ function SettleLockCard({ pay, md, busy, onLock, onUnlock }) {
       <div className="font-bold text-gray-800">💵 Settle &amp; lock</div>
       <div className="flex justify-between text-sm"><span className="text-gray-500">Salary this month</span><span className="text-gray-800">{rupee(pay.net)}</span></div>
       {opening !== 0 && <div className="flex justify-between text-sm"><span className="text-gray-500">Carried balance</span><span className={opening > 0 ? 'text-red-700' : 'text-green-700'}>{opening > 0 ? '+' : ''}{rupee(opening)} {opening > 0 ? '(owed to him)' : '(he owes)'}</span></div>}
+      {(pay.advanceDue || 0) > 0 && <div className="flex justify-between text-sm"><span className="text-gray-500">Outstanding advance</span><span className="text-amber-700">{rupee(pay.advanceDue)} <span className="text-gray-400 text-xs">(carried, not deducted)</span></span></div>}
       <div className="flex justify-between text-base font-bold border-t pt-1"><span>Payable now</span><span className="text-red-700">{rupee(payable)}</span></div>
       <div className="grid grid-cols-2 gap-2 pt-1">
         <label className="text-xs text-gray-500">Cash paid ₹<input type="number" value={cash} onChange={(e) => setCash(e.target.value)} className="mt-0.5 w-full border rounded-lg px-2 py-2 text-base font-bold text-gray-800" /></label>

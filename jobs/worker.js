@@ -196,9 +196,11 @@ async function handle(type, p) {
     const next = m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`;
     const months = { ...(e.months || {}) };
     const prevNextOpening = Number((months[next] || {}).openingBalance || 0);   // to revert on unlock
+    const prevNextAdvance = Number((months[next] || {}).advanceBalanceIn || 0);   // to revert on unlock
     months[p.month] = { ...md, locked: true, lockedAt: new Date().toISOString(),
-      payment: { cash, account, net: paid, payable, closing, date, mode: 'lock', prevNextOpening, by: p._by || 'owner', reason: p.reason || '' } };
-    months[next] = { ...(months[next] || {}), openingBalance: closing };
+      payment: { cash, account, net: paid, payable, closing, date, mode: 'lock', prevNextOpening, prevNextAdvance, by: p._by || 'owner', reason: p.reason || '' } };
+    // carry BOTH balances to next month: the pay balance (over/under) and the outstanding advance.
+    months[next] = { ...(months[next] || {}), openingBalance: closing, advanceBalanceIn: Number(p.advanceCarry || 0) };
     const entry = { at: new Date().toISOString(), by: p._by || 'owner', code: p.code, name: e.name || p.code, month: p.month, field: 'lock', from: `payable ₹${payable}`, to: `paid ₹${paid} (cash ${cash}+acct ${account}); carry ₹${closing}`, reason: p.reason || '' };
     const patch = { months, decisions: [...(e.decisions || []), entry] };
     await ref.set(patch, { merge: true });
@@ -222,7 +224,7 @@ async function handle(type, p) {
     const next = m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`;
     const months = { ...(e.months || {}) };
     months[p.month] = { ...md, locked: false, payment: null, unlockedAt: new Date().toISOString(), unlockedBy: p._by || 'owner' };
-    months[next] = { ...(months[next] || {}), openingBalance: Number(md.payment?.prevNextOpening || 0) };
+    months[next] = { ...(months[next] || {}), openingBalance: Number(md.payment?.prevNextOpening || 0), advanceBalanceIn: Number(md.payment?.prevNextAdvance || 0) };
     const entry = { at: new Date().toISOString(), by: p._by || 'owner', code: p.code, name: e.name || p.code, month: p.month, field: 'unlock', from: 'locked', to: 'reopened', reason: p.reason || '' };
     await ref.set({ months, decisions: [...(e.decisions || []), entry] }, { merge: true });
     return `unlocked ${p.month}`;
