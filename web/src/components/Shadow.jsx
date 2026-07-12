@@ -117,7 +117,11 @@ export default function Shadow() {
                   {r.app.detail.map((d) => (
                     <div key={d.ymd} className={`contents ${d.missing ? 'font-medium' : ''}`}>
                       <span className={d.missing ? 'text-amber-700' : 'text-gray-500'}>{d.ymd.slice(5)} {DOW[new Date(d.ymd + 'T00:00:00').getDay()]}</span>
-                      <span className="tabular-nums text-gray-700">{d.in || '—'} <span className="text-gray-400">→</span> {d.out || (d.in ? <span className="text-amber-600">no out</span> : '—')}</span>
+                      <span className="tabular-nums text-gray-700">{
+                        d.missing === 'in' ? <>—<span className="text-gray-400"> → </span><b>{d.in}</b></>          // lone evening punch = the OUT, morning IN missing
+                        : d.missing === 'out' ? <><b>{d.in}</b><span className="text-gray-400"> → </span>—</>       // lone morning punch = the IN, OUT missing
+                        : <>{d.in || '—'} <span className="text-gray-400">→</span> {d.out || '—'}</>
+                      }</span>
                       <span className={`text-right ${d.kind === 'absent' || d.kind === 'sat-absent' ? 'text-red-500' : d.missing ? 'text-amber-600' : d.kind === 'half' ? 'text-amber-600' : 'text-gray-700'}`}>
                         {d.missing ? `⚠ no ${d.missing === 'in' ? 'IN' : 'OUT'} · ≈+${d.otIfFixed}h`
                           : `${d.ot > 0 ? '+' + d.ot + 'h · ' : ''}${LABEL[d.kind] || d.kind}`}
