@@ -51,9 +51,9 @@ export default function Dashboard() {
           {presentRows.length === 0 ? <p className="text-sm text-gray-500">No names available.</p> : (
             <ul className="text-sm divide-y divide-gray-100 max-h-72 overflow-auto">
               {presentRows.map((r) => (
-                <li key={r.code} className="py-1.5 flex justify-between">
-                  <span>{r.name} <span className="text-gray-400">({r.dept})</span></span>
-                  <span className="text-gray-500">in {r.inT || '—'}</span>
+                <li key={r.code} className="py-1.5 flex justify-between gap-2">
+                  <span className="truncate">{r.name} <span className="text-gray-400">({r.dept})</span></span>
+                  <span className="text-gray-500 whitespace-nowrap tabular-nums">in {(r.inT || '—').slice(0, 5)} · {r.outT ? <span className="text-red-500">out {String(r.outT).slice(0, 5)}</span> : <span className="text-green-600">still in</span>}</span>
                 </li>
               ))}
             </ul>
