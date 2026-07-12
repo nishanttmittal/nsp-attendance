@@ -387,6 +387,27 @@ export async function queueLock(code, month, { cash, account, payable, advanceCa
 export async function queueUnlock(code, month, reason, by) {
   return queueJob('unlock_month', { code, month, reason: reason || '' }, by);
 }
+// INSTANT lock — the owner may write att_salary directly (rules line 49), so freeze the month + carry
+// the balance right away (no 5-min wait). A background lock_month job then adds the register + Telegram.
+export async function lockMonthDirect(code, month, { cash, account, payable, advanceCarry, reason }, by) {
+  const e = await loadEmployee(code);
+  const md = (e.months || {})[month] || {};
+  if (md.locked) return { alreadyLocked: true };
+  const paid = Number(cash || 0) + Number(account || 0);
+  const closing = Math.round((Number(payable || 0) - paid) * 100) / 100;
+  const [y, m] = month.split('-').map(Number);
+  const next = m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`;
+  const months = { ...(e.months || {}) };
+  const prevNextOpening = Number((months[next] || {}).openingBalance || 0);
+  const prevNextAdvance = Number((months[next] || {}).advanceBalanceIn || 0);
+  const date = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
+  months[month] = { ...md, locked: true, lockedAt: new Date().toISOString(),
+    payment: { cash: Number(cash || 0), account: Number(account || 0), net: paid, payable: Number(payable || 0), closing, mode: 'lock', prevNextOpening, prevNextAdvance, by, reason: reason || '' } };
+  months[next] = { ...(months[next] || {}), openingBalance: closing, advanceBalanceIn: Number(advanceCarry || 0) };
+  const entry = { at: new Date().toISOString(), by, code, name: e.name || code, month, field: 'lock', from: `payable ₹${payable}`, to: `paid ₹${paid} (cash ${cash || 0}+acct ${account || 0}); carry ₹${closing}`, reason: reason || '' };
+  await saveEmployee(code, { months, decisions: [...(e.decisions || []), entry] });
+  return { closing, paid };
+}
 export async function queueMarkPaid(code, month, mode, by, remark, amount, payId) {
   // Unique id per Pay tap → the worker dedupes on it, so a re-tap during the 5-min queue delay
   // can never double-record a (part) payment.

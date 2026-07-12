@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { loadEmployee, loadAllAttendance, loadPunchDoc, saveEmployee, saveMonth, addAdvance, addIncrement, resignEmployee, settleAndResign, checkActionPassword, queueJob, queueLock, queueUnlock, editNameDept, istMonth } from '../lib/data';
+import { loadEmployee, loadAllAttendance, loadPunchDoc, saveEmployee, saveMonth, addAdvance, addIncrement, resignEmployee, settleAndResign, checkActionPassword, queueJob, queueLock, queueUnlock, lockMonthDirect, editNameDept, istMonth } from '../lib/data';
 import { monthCtx, payFor, rupee } from '../lib/paycalc';
 import { payslipOnePdf, sharePdf } from '../lib/salaryPdf';
 import { graceDeltaDays } from '../lib/attendanceEngine';
@@ -36,7 +36,12 @@ export default function Person({ code, mk, user, onBack }) {
     if (hours == null) delete next[ymd]; else next[ymd] = hours;
     act(() => saveMonth(code, mk, { otCredits: next }));
   };
-  const doLock = (cash, account, reason) => act(() => queueLock(code, mk, { cash, account, payable: pay.payable, advanceCarry: pay.advanceBalanceCarried, reason }, user.email));
+  const doLock = (cash, account, reason) => act(async () => {
+    // INSTANT: write the lock directly (owner has att_salary write); it freezes + carries right away.
+    await lockMonthDirect(code, mk, { cash, account, payable: pay.payable, advanceCarry: pay.advanceBalanceCarried, reason }, user.email);
+    // background (best-effort): the robot adds the salary-register snapshot + Telegram alert.
+    queueLock(code, mk, { cash, account, payable: pay.payable, advanceCarry: pay.advanceBalanceCarried, reason }, user.email).catch(() => {});
+  });
   const doUnlock = (reason) => act(() => queueUnlock(code, mk, reason, user.email));
   const today = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
   const presentPct = ctx.elapsedDays > 0 ? Math.round((pay.presentDays / ctx.elapsedDays) * 100) : 0;

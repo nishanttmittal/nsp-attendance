@@ -1,0 +1,267 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Real (non-anonymous) Google login. Used to gate reads that must NOT leak to
+    // anonymous strangers (access-email lists, worker names, attendance problem logs).
+    function nonAnon() { return request.auth != null && request.auth.token.firebase.sign_in_provider != 'anonymous'; }
+
+    // ===== Self-punch (login-free link for app-only staff e.g. Radhey/Dinesh) =====
+    // att_punch: public read of name + times only (NO salary). Written only by the worker (Admin SDK).
+    match /att_punch/{code} {
+      allow read: if true;
+      allow write: if false;
+    }
+    // att_self_punch: anyone with the link may CREATE a tap; the worker validates the token
+    // server-side before recording it. No client read/update/delete.
+    match /att_self_punch/{id} {
+      allow create: if request.resource.data.keys().hasOnly(['code','token','dir','date','localTime','ts'])
+                    && request.resource.data.keys().hasAll(['code','token','dir','date','localTime'])
+                    && request.resource.data.dir in ['in','out']
+                    && request.resource.data.code is string && request.resource.data.code.size() < 40
+                    && request.resource.data.token is string && request.resource.data.token.size() < 200
+                    && request.resource.data.date is string && request.resource.data.date.size() <= 10
+                    && request.resource.data.localTime is string && request.resource.data.localTime.size() <= 8;
+      allow read, update, delete: if false;
+    }
+
+    // ===== NSP Attendance (att_*) =====
+    function isAttAdmin() { return request.auth != null && request.auth.token.email == 'nspenterprises24@gmail.com'; }
+    // attStaff = bootstrap owner OR an ACTIVE att_users/{email} (manager/owner). Gates
+    // staff-only reads + who may queue a privileged job (the worker re-checks role too).
+    function attStaff() { return isAttAdmin() || (nonAnon()
+                          && exists(/databases/$(database)/documents/att_users/$(request.auth.token.email))
+                          && get(/databases/$(database)/documents/att_users/$(request.auth.token.email)).data.active != false); }
+        match /att_meta/{d} { allow read: if attStaff(); allow write: if false; }
+match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
+    // job requests: only staff may create, only for THEMSELVES, only 'pending', only known shape
+    // (defence in depth — the worker also authorizes by role before executing). No spoofing requestedBy.
+    match /att_job_requests/{d} {
+      allow create: if attStaff()
+                    && request.resource.data.requestedBy == request.auth.token.email
+                    && request.resource.data.status == 'pending'
+                    && request.resource.data.keys().hasOnly(['type','payload','requestedBy','status','createdAt']);
+      allow read, update: if isAttAdmin();
+    }
+    // a user may read only their OWN user doc (login role resolution); staff read all; owner writes.
+    match /att_users/{u} { allow read: if attStaff() || (nonAnon() && u == request.auth.token.email); allow write: if isAttAdmin(); }
+    match /att_attendance/{d} { allow read: if isAttAdmin(); allow write: if false; }
+    match /att_punches/{d} { allow read: if isAttAdmin(); allow write: if false; }
+    match /att_salary/{d} { allow read, write: if isAttAdmin(); }
+    match /att_archive/{d} { allow read: if isAttAdmin(); allow write: if false; }
+    match /att_advances/{d} { allow read, write: if isAttAdmin(); }
+    match /att_increments/{d} { allow read, write: if isAttAdmin(); }
+    match /att_loans/{d} { allow read, write: if isAttAdmin(); }
+    match /att_fines/{d} { allow read, write: if isAttAdmin(); }
+    match /att_month_locks/{d} { allow read, write: if isAttAdmin(); }
+    // scan outputs (names/dates only, no salary) — STAFF read so owner + manager see the Problems tab; jobs write via Admin SDK
+    match /att_missed_punch/{d} { allow read: if attStaff(); allow write: if false; }
+    match /att_late_log/{d} { allow read: if attStaff(); allow write: if false; }
+
+
+    // ---- shared helpers ----
+    function signedIn() { return request.auth != null; }
+    function tEmail() { return request.auth != null ? request.auth.token.get('email', '') : ''; }
+    function bootstrapOwner() { return tEmail() in ['nspenterprises24@gmail.com']; }
+
+    // ---- welder role helpers ----
+    function wPath() { return /databases/$(database)/documents/apps/welder/users/$(tEmail()); }
+    function wExists() { return tEmail() != '' && exists(wPath()); }
+    function wData() { return get(wPath()).data; }
+    function wOwner() { return signedIn() && (bootstrapOwner() || (wExists() && wData().role == 'owner' && wData().active == true)); }
+    function wManager() { return signedIn() && (wOwner() || (wExists() && wData().role == 'manager' && wData().active == true)); }
+
+    // ---- plating admin helper ----
+    function pPath() { return /databases/$(database)/documents/apps/platingjobwork/users/$(tEmail()); }
+    function pExists() { return tEmail() != '' && exists(pPath()); }
+    function pOwner() { return signedIn() && (bootstrapOwner() || (pExists() && get(pPath()).data.role == 'owner' && get(pPath()).data.active == true)); }
+    function pUser() { return signedIn() && (bootstrapOwner() || (pExists() && get(pPath()).data.active == true)); }
+
+    // ---- Plating Job Work (allowlist-locked: only active users-doc emails + bootstrap owner) ----
+    match /apps/platingjobwork/challans/{id} { allow read, write: if pUser(); }
+    match /apps/platingjobwork/logs/{id}     { allow read, write: if pUser(); }
+    match /apps/platingjobwork/meta/{id}     { allow read, write: if pUser(); }
+    match /apps/platingjobwork/incoming/{id} { allow read, write: if pUser(); }
+    match /apps/platingjobwork/users/{id}    { allow read: if nonAnon(); allow write: if pOwner(); }
+
+    // ---- fitting role helpers ----
+    function fPath() { return /databases/$(database)/documents/apps/fitting/users/$(tEmail()); }
+    function fExists() { return tEmail() != '' && exists(fPath()); }
+    function fOwner() { return signedIn() && (bootstrapOwner() || (fExists() && get(fPath()).data.role == 'owner' && get(fPath()).data.active == true)); }
+    function fUser() { return signedIn() && (bootstrapOwner() || (fExists() && get(fPath()).data.active == true)); }
+
+    // ---- Fitting (allowlist-locked: only active users-doc emails + bootstrap owner) ----
+    match /apps/fitting/users/{id} { allow read: if nonAnon(); allow write: if fOwner(); }
+    match /apps/fitting/{collection}/{docId} { allow read, write: if fUser() && collection != 'users'; }
+    match /apps/fitting { allow read, write: if fUser(); }
+
+    // ---- Orders (allowlist-locked: only Google users added in Admin → Users) ----
+    function oPath()  { return /databases/$(database)/documents/apps/orders/users/$(tEmail()); }
+    function oUser()  { return signedIn() && (bootstrapOwner() || (tEmail() != '' && exists(oPath()) && get(oPath()).data.active == true)); }
+    function oOwner() { return signedIn() && (bootstrapOwner() || (tEmail() != '' && exists(oPath()) && get(oPath()).data.active == true && get(oPath()).data.role == 'owner')); }
+    // users allowlist: any signed-in device may READ (to resolve role at login); only owner WRITES
+    match /apps/orders/users/{id} { allow read: if nonAnon(); allow write: if oOwner(); }
+    // all other orders data: only allowlisted users (the != 'users' guard keeps this generic rule from granting writes to the users list)
+    match /apps/orders/{collection}/{docId} { allow read, write: if oUser() && collection != 'users'; }
+    match /apps/orders { allow read, write: if oUser(); }
+
+    // ---- Welder Contractor (allowlist-locked; staff = entry only, NO pay data) ----
+    // wUser = any active allowlisted user (staff/manager/owner) or bootstrap owner.
+    function wUser() { return signedIn() && (bootstrapOwner() || (wExists() && wData().active == true)); }
+    // entry + stock (staff allowed to read; write where the entry/floor flow needs it)
+    match /apps/welder/dispatches/{id}      { allow read, write: if wUser(); }
+    match /apps/welder/plating_outbox/{id}  { allow read, write: if wUser(); }
+    match /apps/welder/logs/{id}            { allow read, write: if wUser(); }
+    match /apps/welder/meta/{id}            { allow read, write: if wUser(); }
+    match /apps/welder/parties/{id}         { allow read, write: if wUser(); }
+    match /apps/welder/products/{id}        { allow read: if wUser(); allow write: if wManager(); }
+    match /apps/welder/welders/{id}         { allow read: if wUser(); allow write: if wManager(); }
+    match /apps/welder/components/{id}      { allow read: if wUser(); allow write: if wManager(); }
+    match /apps/welder/receipts/{id}        { allow read: if wUser(); allow write: if wManager(); }
+    match /apps/welder/adjustments/{id}     { allow read: if wUser(); allow write: if wOwner(); }
+    // pay-sensitive: staff BLOCKED — manager/owner only
+    match /apps/welder/rates/{id}        { allow read: if wManager(); allow write: if wOwner(); }
+    match /apps/welder/ledger/{id}       { allow read: if wManager(); allow write: if wOwner(); }
+    match /apps/welder/settlements/{id}  { allow read: if wManager(); allow write: if wOwner(); }
+    match /apps/welder/payments/{id} {
+      allow read:           if wManager();
+      allow create:         if wManager();
+      allow update, delete: if wOwner();
+    }
+    match /apps/welder/users/{id}    { allow read: if nonAnon(); allow write: if wOwner(); }
+
+    // ---- plastic job work role helpers ----
+    function plPath()   { return /databases/$(database)/documents/apps/plasticjobwork/users/$(tEmail()); }
+    function plExists() { return tEmail() != '' && exists(plPath()); }
+    function plOwner()  { return signedIn() && (bootstrapOwner() || (plExists() && get(plPath()).data.role == 'owner' && get(plPath()).data.active == true)); }
+    function plUser()   { return signedIn() && (bootstrapOwner() || (plExists() && get(plPath()).data.active == true)); }
+
+    // ---- Plastic Job Work (allowlist-locked; manager = material in/out, payments owner-only) ----
+    match /apps/plasticjobwork/production/{id} { allow read, write: if plUser(); }
+    match /apps/plasticjobwork/issues/{id}     { allow read, write: if plUser(); }
+    match /apps/plasticjobwork/returns/{id}    { allow read, write: if plUser(); }
+    match /apps/plasticjobwork/logs/{id}       { allow read, write: if plUser(); }
+    // meta = masters/rates/products/moulders/lot-locks: staff READ, OWNER-only WRITE
+    // (a manager must not be able to silently change rates, recipes or lock state).
+    match /apps/plasticjobwork/meta/{id}       { allow read: if plUser(); allow write: if plOwner(); }
+    // EXCEPTION: the entry-number counter is bumped by every production save (a
+    // Firestore transaction), so staff MUST keep write here. Overlapping matches
+    // OR in Firestore, so this grants counter-write on top of the owner-only meta.
+    match /apps/plasticjobwork/meta/counter    { allow read, write: if plUser(); }
+    match /apps/plasticjobwork/purchases/{id}  { allow read, write: if plOwner(); }
+    match /apps/plasticjobwork/payments/{id}   { allow read, write: if plOwner(); }
+    match /apps/plasticjobwork/users/{id}      { allow read: if nonAnon(); allow write: if plOwner(); }
+
+    // ---- UNICO Laser (BOCHU IoT) — read-only analytics; written only by the sync (Admin SDK).
+    // LOCKED: requires a NON-anonymous Google login on the allowlist (bootstrap owner + active
+    // emails in apps/laser/users). Costing/margins are competitively sensitive — no anon reads.
+    function laserPath() { return /databases/$(database)/documents/apps/laser/users/$(tEmail()); }
+    function laserUser() { return nonAnon() && (bootstrapOwner() || (tEmail() != '' && exists(laserPath()) && get(laserPath()).data.active == true)); }
+    // Owner = bootstrap, or an active allowlisted user whose role is 'owner' (not a 'meter' staff).
+    function laserOwner() { return nonAnon() && (bootstrapOwner() || (tEmail() != '' && exists(laserPath()) && get(laserPath()).data.active == true && get(laserPath()).data.role == 'owner')); }
+    match /laser_meta/{id}       { allow read: if laserUser(); allow write: if false; }
+    match /laser_days/{id}       { allow read: if laserUser(); allow write: if false; }
+    match /laser_jobs/{id}       { allow read: if laserUser(); allow write: if false; }
+    // Cost rates (₹/min, salaries, rent, electricity…) — owner-editable via the in-app rate editor.
+    // READ is owner-only: cost basis / margins are competitively sensitive and meter-staff screens
+    // never load laser_config (loadCore runs only after the role==='owner' gate).
+    match /laser_config/{id}     { allow read: if laserOwner(); allow write: if laserOwner(); }
+    // Audit log of rate edits (who/when/old->new). Owner-written, append-only in practice.
+    match /laser_config_log/{id} { allow read: if laserOwner(); allow write: if laserOwner(); }
+    // Effective-dated rate snapshots (one per change) so old months keep old rates. Owner-only read.
+    match /laser_rate_history/{id} { allow read: if laserOwner(); allow write: if laserOwner(); }
+    match /laser_sync_state/{id} { allow read: if laserUser(); allow write: if false; }
+    // Owner-editable: maps a machine file name to its real size (Fix-sizes screen).
+    match /laser_size_map/{id}   { allow read: if laserUser(); allow write: if laserUser(); }
+    // Daily meter readings entered in-app by staff/owner (the only client-writable laser data).
+    match /laser_meter/{id}      { allow read: if laserUser(); allow write: if laserUser(); }
+    // Job catalog (name + photo, optional file link) — staff/owner add for recall.
+    match /laser_job_catalog/{id} { allow read: if laserUser(); allow write: if laserUser(); }
+    // Allowlist: any signed-in user may READ (to resolve their own access at login); owner writes.
+    match /apps/laser/users/{id} { allow read: if nonAnon(); allow write: if bootstrapOwner(); }
+
+    // ---- Inbound leads (IndiaMART + WhatsApp) — read-only command-center feed.
+    // Written ONLY by the lead pollers (Admin SDK). Buyer phone numbers = PII, so
+    // restrict reads to the non-anonymous bootstrap owner (the CEO dashboard login).
+    match /indiamart_leads/{id} { allow read: if nonAnon() && bootstrapOwner(); allow write: if false; }
+    match /whatsapp_leads/{id}  { allow read: if nonAnon() && bootstrapOwner(); allow write: if false; }
+    // Owner-only triage flags (followup / scrap). Kept SEPARATE from the captured
+    // lead data above so the dashboard never mutates the source feed.
+    match /lead_status/{id}     { allow read, write: if nonAnon() && bootstrapOwner(); }
+
+    // ---- Transport Freight Hisab (role-based: owner / manager / gaadiwala) ----
+    // Staff (manager/owner) = full. Gaadiwala = read ONLY his own transporterId,
+    // create/edit/withdraw ONLY his own PENDING/NEEDS_CORRECTION trips; never a
+    // passed status, another transporter, payments, or settlements.
+    function tfPath() { return /databases/$(database)/documents/apps/transportfreight/users/$(tEmail()); }
+    function tfExists() { return tEmail() != '' && exists(tfPath()); }
+    function tfData() { return get(tfPath()).data; }
+    function tfIsOwner() { return signedIn() && (bootstrapOwner() || (tfExists() && tfData().role == 'owner' && tfData().active == true)); }
+    function tfIsManager() { return signedIn() && (tfIsOwner() || (tfExists() && tfData().role == 'manager' && tfData().active == true)); }
+    function tfIsGaadiwala() { return signedIn() && tfExists() && tfData().role == 'gaadiwala' && tfData().active == true; }
+    function tfMyTid() { return tfExists() ? tfData().transporterId : ''; }
+    // Entry charge fields must never be negative (a negative freight would reduce
+    // the payable) — the DB backstop for the app-layer dropError() check (P1-2).
+    function tfNonNegMoney(d) { return d.get('freight', 0) >= 0 && d.get('lrCharge', 0) >= 0 && d.get('unloading', 0) >= 0 && d.get('misc', 0) >= 0 && d.get('extraPoint', 0) >= 0 && d.get('bags', 0) >= 0; }
+
+    // Reads require a NON-anonymous (Google) login. Gaadiwala names/phones and
+    // destination masters are restricted to app MEMBERS (manager/gaadiwala) — a
+    // random signed-in Google account that isn't in the app can't read them
+    // (P1-1). users: each account reads only its OWN doc (role resolution) unless
+    // it's a manager/owner (Admin/login management). The app resolves role from
+    // the own users/{email} doc; the bootstrap owner is covered by tfIsManager().
+    // Entry charge fields must be non-negative (tfNonNegMoney) so no write can
+    // slip a negative freight past the app-layer block (P1-2).
+    match /apps/transportfreight/users/{id}        { allow read: if tEmail() == id || tfIsManager(); allow write: if tfIsOwner(); }
+    match /apps/transportfreight/transporters/{id} { allow read: if tfIsManager() || (tfIsGaadiwala() && id == tfMyTid()); allow write: if tfIsManager(); }
+    match /apps/transportfreight/destinations/{id} { allow read: if tfIsManager() || tfIsGaadiwala(); allow create: if tfIsManager() || tfIsGaadiwala(); allow update, delete: if tfIsManager(); }
+    match /apps/transportfreight/meta/{id}         { allow read, write: if tfIsManager(); }
+    match /apps/transportfreight/logs/{id}         { allow read: if tfIsManager(); allow create: if nonAnon(); }
+    match /apps/transportfreight/entries/{id} {
+      allow read:   if tfIsManager() || (tfIsGaadiwala() && resource.data.transporterId == tfMyTid());
+      // gaadiwala may only submit HIS OWN pending trip, with no challan/approval injected.
+      // Every entry write (manager or gaadiwala) must have non-negative charges (P1-2).
+      allow create: if (tfIsManager() || (tfIsGaadiwala()
+                       && request.resource.data.transporterId == tfMyTid()
+                       && request.resource.data.status == 'pending'
+                       && request.resource.data.get('challanNo', 0) == 0
+                       && request.resource.data.get('approvedBy', '') == ''))
+                       && tfNonNegMoney(request.resource.data);
+      allow update: if (tfIsManager() || (tfIsGaadiwala()
+                       && resource.data.transporterId == tfMyTid()
+                       && request.resource.data.transporterId == tfMyTid()
+                       && resource.data.status in ['pending','needs_correction']
+                       && request.resource.data.status in ['pending','needs_correction']
+                       && request.resource.data.get('challanNo', 0) == 0))
+                       && tfNonNegMoney(request.resource.data);
+      allow delete: if false; // financial record — never hard-deleted (cancel = status; withdraw = deleted flag via update)
+    }
+    match /apps/transportfreight/advances/{id} {
+      allow read:   if tfIsManager() || (tfIsGaadiwala() && resource.data.transporterId == tfMyTid());
+      allow create: if tfIsManager();
+      allow update: if tfIsManager();
+      allow delete: if false; // reversal = a new negative payment, never a delete
+    }
+    match /apps/transportfreight/settlements/{id} {
+      allow read:   if tfIsManager() || (tfIsGaadiwala() && resource.data.transporterId == tfMyTid());
+      allow create: if tfIsOwner();
+      allow update, delete: if false; // locked, immutable snapshot
+    }
+
+    // ---- UNICO Costing (two-vault: owner cost vault + staff price list) ----
+    // Cost/margin/breakdown = owner-only. Staff read published prices only.
+    function cPath()   { return /databases/$(database)/documents/apps/costing/users/$(tEmail()); }
+    function cExists() { return tEmail() != '' && exists(cPath()); }
+    function cData()   { return get(cPath()).data; }
+    function costStaff(){ return nonAnon() && (bootstrapOwner() || (cExists() && cData().active == true)); }
+    function costOwner(){ return nonAnon() && (bootstrapOwner() || (cExists() && cData().active == true && cData().role == 'owner')); }
+    match /costing_rates/{id}         { allow read: if costOwner(); allow write: if false; }
+    match /costing_recipes/{id}       { allow read: if costOwner(); allow write: if false; }
+    match /costing_meta/{id}          { allow read: if costOwner(); allow write: if false; }
+    match /costing_prices/{id}        { allow read: if costStaff(); allow write: if costOwner(); }
+    match /costing_price_history/{id} { allow read: if costOwner(); allow create: if costOwner(); allow update, delete: if false; }
+    match /apps/costing/users/{id}    { allow read: if nonAnon(); allow write: if costOwner(); }
+
+    // Lock everything else.
+    match /{document=**} { allow read, write: if false; }
+  }
+}

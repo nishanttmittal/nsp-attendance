@@ -187,24 +187,30 @@ async function handle(type, p) {
     const ref = db().collection('att_salary').doc(p.code);
     const snap = await ref.get(); if (!snap.exists) throw new Error('no employee ' + p.code);
     const e = snap.data(); const md = (e.months || {})[p.month] || {};
-    if (md.locked) return `already locked (${p.month})`;
-    const cash = Number(p.cash || 0), account = Number(p.account || 0), paid = cash + account;
-    const payable = Number(p.payable || 0);   // client-computed (net + opening balance)
-    const closing = Math.round((payable - paid) * 100) / 100;   // + = still owed to him, − = he owes
     const date = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
-    const [y, m] = p.month.split('-').map(Number);
-    const next = m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`;
-    const months = { ...(e.months || {}) };
-    const prevNextOpening = Number((months[next] || {}).openingBalance || 0);   // to revert on unlock
-    const prevNextAdvance = Number((months[next] || {}).advanceBalanceIn || 0);   // to revert on unlock
-    months[p.month] = { ...md, locked: true, lockedAt: new Date().toISOString(),
-      payment: { cash, account, net: paid, payable, closing, date, mode: 'lock', prevNextOpening, prevNextAdvance, by: p._by || 'owner', reason: p.reason || '' } };
-    // carry BOTH balances to next month: the pay balance (over/under) and the outstanding advance.
-    months[next] = { ...(months[next] || {}), openingBalance: closing, advanceBalanceIn: Number(p.advanceCarry || 0) };
-    const entry = { at: new Date().toISOString(), by: p._by || 'owner', code: p.code, name: e.name || p.code, month: p.month, field: 'lock', from: `payable ₹${payable}`, to: `paid ₹${paid} (cash ${cash}+acct ${account}); carry ₹${closing}`, reason: p.reason || '' };
-    const patch = { months, decisions: [...(e.decisions || []), entry] };
-    await ref.set(patch, { merge: true });
-    try {   // durable salary register snapshot
+    let cash, account, paid, closing;
+    if (md.locked && md.payment && md.payment.mode === 'lock') {
+      // App already locked it INSTANTLY (direct att_salary write) — just add register + Telegram.
+      cash = Number(md.payment.cash || 0); account = Number(md.payment.account || 0);
+      paid = Number(md.payment.net || 0); closing = Number(md.payment.closing || 0);
+    } else if (md.locked) {
+      return `already locked (${p.month})`;
+    } else {
+      // legacy queue-only path (no direct write): do the full lock + carry here.
+      cash = Number(p.cash || 0); account = Number(p.account || 0); paid = cash + account;
+      const payable = Number(p.payable || 0);
+      closing = Math.round((payable - paid) * 100) / 100;
+      const [y, m] = p.month.split('-').map(Number);
+      const next = m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`;
+      const months = { ...(e.months || {}) };
+      const prevNextOpening = Number((months[next] || {}).openingBalance || 0), prevNextAdvance = Number((months[next] || {}).advanceBalanceIn || 0);
+      months[p.month] = { ...md, locked: true, lockedAt: new Date().toISOString(),
+        payment: { cash, account, net: paid, payable, closing, date, mode: 'lock', prevNextOpening, prevNextAdvance, by: p._by || 'owner', reason: p.reason || '' } };
+      months[next] = { ...(months[next] || {}), openingBalance: closing, advanceBalanceIn: Number(p.advanceCarry || 0) };
+      const entry = { at: new Date().toISOString(), by: p._by || 'owner', code: p.code, name: e.name || p.code, month: p.month, field: 'lock', from: `payable ₹${payable}`, to: `paid ₹${paid} (cash ${cash}+acct ${account}); carry ₹${closing}`, reason: p.reason || '' };
+      await ref.set({ months, decisions: [...(e.decisions || []), entry] }, { merge: true });
+    }
+    try {   // durable salary register snapshot (att_meta — worker only; idempotent by code)
       const regRef = db().collection('att_meta').doc('salary_register_' + p.month);
       const reg = (await regRef.get()).data() || { month: p.month, byCode: {} };
       reg.byCode = reg.byCode || {};
@@ -214,7 +220,7 @@ async function handle(type, p) {
       await regRef.set(reg);
     } catch (e2) { console.error('register write failed:', e2.message); }
     await sendTelegram(`🔒 Locked <b>${e.name || p.code}</b> ${p.month}: paid ₹${paid.toLocaleString('en-IN')} (cash ${cash} + acct ${account})${closing ? ` · carry ₹${closing.toLocaleString('en-IN')} → next month` : ''} · by ${p._by || 'owner'}${p.reason ? ` · ${p.reason}` : ''}`).catch(() => {});
-    return `locked ${p.month}: paid ${paid}, carry ${closing}`;
+    return `locked ${p.month}: paid ${paid}, carry ${closing} (register+alert)`;
   }
   if (type === 'unlock_month') {   // reopen a locked month: clear the payment + revert the carried balance
     const ref = db().collection('att_salary').doc(p.code);
