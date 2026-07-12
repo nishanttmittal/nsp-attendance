@@ -52,6 +52,7 @@ function OwnerSalary({ user }) {
 
   const rows = emps.filter((e) => e.amount || e.wage).map((e) => ({ emp: e, ...payFor(e, attMap, mk, ctx, 0, punches[e.code]) }));
   const locked = rows.filter((r) => r.md.locked || r.md.payment);   // settled via Lock
+  const brokenFix = rows.filter((r) => (r.lateFixed || 0) > 0.25);   // workers auto-corrected for broken-punch fake "late"
   const visible = rows.filter((r) => !q || (r.emp.name || '').toLowerCase().includes(q.toLowerCase()));
   const noSalary = emps.filter((e) => !(e.amount || e.wage));
   // month payroll totals: payable for the unsettled, actual paid for the locked
@@ -119,6 +120,11 @@ function OwnerSalary({ user }) {
           <span>{rows.length} staff</span>
         </div>
         {!ctx.fullMonth && <p className="text-xs text-gray-400">Running month — figures till yesterday.</p>}
+        {brokenFix.length > 0 && (
+          <p className="text-xs bg-amber-50 text-amber-800 rounded-lg px-2 py-1.5">
+            ⚠ <b>{brokenFix.length}</b> worker{brokenFix.length > 1 ? 's' : ''} had a <b>broken-punch day</b> this month — the app auto-restored their overtime (machine missed a punch, portal wrongly cut OT). Tagged <b>“punch-fixed”</b> below; open each to see the day.
+          </p>
+        )}
         <label className="flex items-center gap-1.5 text-xs text-gray-500"><input type="checkbox" checked={showRemoved} onChange={(e) => setShowRemoved(e.target.checked)} /> Show removed/resigned staff (kept in the sheet for costing)</label>
         <p className="text-[11px] text-gray-500">Tap a worker → <b>Settle &amp; lock</b> on his page (enter cash + account, Lock). The month freezes and any balance carries to next month.</p>
       </div>
@@ -154,6 +160,7 @@ function OwnerRow({ r, busy, queued, onName }) {
         <div className="flex-1">
           <button onClick={onName} className="text-left block">
             <span className="font-medium text-gray-800">{emp.name || emp.code}{emp.nickname ? <span className="text-gray-400 font-normal"> ({emp.nickname})</span> : null}</span>
+            {(r.lateFixed || 0) > 0.25 && <span className="ml-1.5 text-[10px] bg-amber-100 text-amber-800 rounded px-1 py-0.5 align-middle">⚠ punch-fixed +{r.lateFixed}h OT</span>}
           </button>
           <div className="text-xs text-gray-500">
             <button onClick={() => setShowDays((s) => !s)} className="text-blue-700 underline decoration-dotted underline-offset-2">{pay.paidDays}d paid {showDays ? '▾' : '▸'}</button>
