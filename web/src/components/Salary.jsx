@@ -13,7 +13,9 @@ export default function Salary({ user }) {
 
 /* ---------------- owner view ---------------- */
 function OwnerSalary({ user }) {
-  const [mk, setMk] = useState(istMonth());
+  // remember the month the owner is working on (don't snap back to the current month on every visit)
+  const [mk, setMkState] = useState(() => { try { return localStorage.getItem('nsp_salary_mk') || istMonth(); } catch { return istMonth(); } });
+  const setMk = (m) => { setMkState(m); try { localStorage.setItem('nsp_salary_mk', m); } catch { /* ignore */ } };
   const [emps, setEmps] = useState(null);
   const [attMap, setAttMap] = useState({});
   const [punches, setPunches] = useState({});
@@ -49,15 +51,13 @@ function OwnerSalary({ user }) {
   if (emps === null) return <p className="text-gray-500">Loading…</p>;
 
   const rows = emps.filter((e) => e.amount || e.wage).map((e) => ({ emp: e, ...payFor(e, attMap, mk, ctx, 0, punches[e.code]) }));
-  const ticked = rows.filter((r) => r.md.approved);
-  const paid = ticked.filter((r) => r.md.payment);
-  const held = rows.filter((r) => r.md.hold);
+  const locked = rows.filter((r) => r.md.locked || r.md.payment);   // settled via Lock
   const visible = rows.filter((r) => !q || (r.emp.name || '').toLowerCase().includes(q.toLowerCase()));
   const noSalary = emps.filter((e) => !(e.amount || e.wage));
-  // month payroll totals (approved figure once ticked, else the live computed net)
-  const totalNet = rows.reduce((s, r) => s + Number((r.md.approved ? r.md.approvedNet : r.pay.net) || 0), 0);
-  const paidNet = paid.reduce((s, r) => s + Number(r.md.payment?.net || 0), 0);
-  const pendingNet = Math.max(0, totalNet - paidNet);
+  // month payroll totals: payable for the unsettled, actual paid for the locked
+  const totalPayable = rows.reduce((s, r) => s + Number((r.md.locked || r.md.payment) ? (r.md.payment?.net || 0) : (r.pay.payable || 0)), 0);
+  const paidNet = locked.reduce((s, r) => s + Number(r.md.payment?.net || 0), 0);
+  const pendingNet = rows.filter((r) => !(r.md.locked || r.md.payment)).reduce((s, r) => s + Number(r.pay.payable || 0), 0);
 
   async function tick(r) {
     setBusy(r.emp.code);
@@ -97,33 +97,6 @@ function OwnerSalary({ user }) {
       setPayC(null); await reload();
     } finally { setBusy(''); }
   }
-  // owner finalizes the whole month's hisab: locks ticked staff + carries each one's leftover
-  // advance forward (advance carries ONLY now). Admin-password gated.
-  async function finalizeHisab() {
-    if (!ticked.length) { alert('Tick (approve) people first — only ticked staff are finalized.'); return; }
-    if (!confirm(`Finalize the ${mk} hisab?\n\nThis LOCKS the ${ticked.length} ticked people for ${mk} and carries each one's leftover advance forward to next month. (Advances carry forward only now.)`)) return;
-    const pw = prompt('Admin password to finalize & lock:');
-    if (pw == null) return;
-    const ok = await checkActionPassword(pw);
-    if (ok === 'unset') { if (!confirm('No action password set (set one in ⚙ Settings). Finalize anyway?')) return; }
-    else if (!ok) { alert('Wrong password.'); return; }
-    setBusy('hisab');
-    try { await queueFinalizeHisab(mk, user.email); alert('Hisab finalize queued — locks the month + carries advances in a moment.'); await reload(); }
-    finally { setBusy(''); }
-  }
-
-  async function tickAll() {
-    const remaining = rows.filter((r) => !r.md.approved && !r.md.hold && r.pay.net > 0);
-    if (!remaining.length) return;
-    if (!confirm(`Tick all remaining ${remaining.length} people for ${mk}? (held salaries are skipped)`)) return;
-    setBusy('all');
-    try {
-      await ensureApprovalBackup(mk, user.email);
-      for (const r of remaining) await approveSalary(r.emp.code, mk, r.pay, user.email);
-      await reload();
-    } finally { setBusy(''); }
-  }
-
   return (
     <div className="space-y-3">
       <div className="bg-white rounded-xl shadow p-3 space-y-2">
@@ -133,19 +106,12 @@ function OwnerSalary({ user }) {
           </select>
           <button onClick={() => setShowReport(true)} className="border border-gray-300 rounded-lg px-3 text-sm font-medium">📄 Report</button>
         </div>
-        <div className="flex items-center gap-2">
-          <div className="flex-1 text-sm text-gray-600">
-            <b className="text-gray-800">{ticked.length}</b> of {rows.length} ticked · <b className="text-green-700">{paid.length}</b> paid ({rupee(paid.reduce((s, r) => s + Number(r.md.payment?.net || 0), 0))}){held.length > 0 ? <> · <b className="text-red-600">{held.length}</b> hold</> : null}
-          </div>
-          {rows.some((r) => !r.md.approved && !r.md.hold && r.pay.net > 0) && (
-            <button disabled={busy === 'all'} onClick={tickAll} className="text-xs border border-red-300 text-red-700 rounded-lg px-2.5 py-1.5 font-medium disabled:opacity-50">
-              {busy === 'all' ? 'Ticking…' : `✓ Tick all (${rows.filter((r) => !r.md.approved && !r.md.hold && r.pay.net > 0).length})`}
-            </button>
-          )}
+        <div className="text-sm text-gray-600">
+          <b className="text-green-700">{locked.length}</b> of {rows.length} locked · paid <b>{rupee(paidNet)}</b>
         </div>
         <div className="flex items-baseline justify-between border-t border-gray-100 pt-2">
           <span className="text-sm text-gray-600">Total payroll{ctx.fullMonth ? '' : ' (so far)'}</span>
-          <span className="text-xl font-bold text-red-700">{rupee(totalNet)}</span>
+          <span className="text-xl font-bold text-red-700">{rupee(totalPayable)}</span>
         </div>
         <div className="flex gap-4 text-xs text-gray-500 -mt-1">
           <span>Paid <b className="text-green-700">{rupee(paidNet)}</b></span>
@@ -154,75 +120,36 @@ function OwnerSalary({ user }) {
         </div>
         {!ctx.fullMonth && <p className="text-xs text-gray-400">Running month — figures till yesterday.</p>}
         <label className="flex items-center gap-1.5 text-xs text-gray-500"><input type="checkbox" checked={showRemoved} onChange={(e) => setShowRemoved(e.target.checked)} /> Show removed/resigned staff (kept in the sheet for costing)</label>
-        {(() => {
-          const closed = rows.filter((r) => r.md.payment).length;
-          return <p className="text-[11px] text-gray-500">🔒 Each worker's hisab closes when you <b>pay</b> him — his leftover advance carries to next month automatically. No month-end step needed.{closed > 0 ? ` (${closed} of ${rows.length} closed)` : ''}</p>;
-        })()}
+        <p className="text-[11px] text-gray-500">Tap a worker → <b>Settle &amp; lock</b> on his page (enter cash + account, Lock). The month freezes and any balance carries to next month.</p>
       </div>
 
       <input className="w-full border rounded-lg px-3 py-2" placeholder="🔍 Search name…" value={q} onChange={(e) => setQ(e.target.value)} />
 
       <div className="bg-white rounded-xl shadow divide-y divide-gray-100">
         {visible.length === 0 && <p className="p-4 text-sm text-gray-400">No one matches.</p>}
-        {visible.map((r) => { const remaining = Math.max(0, Number(r.md.approvedNet ?? r.pay.net) - Number(r.md.paidSoFar || 0)); return (
-          <OwnerRow key={r.emp.code} r={r} busy={busy === r.emp.code} queued={pending[r.emp.code] != null} onName={() => setOpenCode(r.emp.code)} onTick={() => tick(r)} onHold={() => hold(r)} onRelease={() => release(r)} onChooseOt={(src) => chooseOt(r, src)} onPay={() => setPayC({ r, mode: 'cash', amount: String(remaining), remark: '' })} />
-        ); })}
+        {visible.map((r) => (
+          <OwnerRow key={r.emp.code} r={r} busy={busy === r.emp.code} queued={pending[r.emp.code] != null} onName={() => setOpenCode(r.emp.code)} />
+        ))}
       </div>
 
       <AdvanceCard user={user} />
       {mk === istMonth() && <SelfPunchCard />}
       {noSalary.length > 0 && <NoSalaryList list={noSalary} onSaved={reload} />}
       {showReport && <ReportModal user={user} mk={mk} rows={rows} onClose={() => setShowReport(false)} />}
-
-      {payC && (() => { const due = Number(payC.r.md.approvedNet ?? payC.r.pay.net) || 0; const paidSoFar = Number(payC.r.md.paidSoFar || 0); const remaining = Math.max(0, due - paidSoFar); const amt = Number(payC.amount) || 0; const isPart = amt > 0 && amt < remaining - 0.5; return (
-        <div className="fixed inset-0 z-50 bg-black/40 flex items-end sm:items-center justify-center p-4" onClick={() => busy ? null : setPayC(null)}>
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-5 space-y-4" onClick={(e) => e.stopPropagation()}>
-            <div className="text-center">
-              <div className="text-3xl mb-1">💵</div>
-              <p className="font-bold text-gray-800 text-lg">{payC.r.emp.name || payC.r.emp.code}</p>
-              <p className="text-xs text-gray-500">Pay &amp; settle · Net <b className="text-gray-700">{rupee(due)}</b>{paidSoFar > 0 ? <> · already paid <b className="text-green-700">{rupee(paidSoFar)}</b> · <b className="text-red-700">{rupee(remaining)}</b> left</> : <> · due <b className="text-red-700">{rupee(remaining)}</b></>} · {monthOptions().find((m) => m.mk === mk)?.label || mk}</p>
-            </div>
-            <label className="block text-xs text-gray-500">Amount paid now ₹
-              <input type="number" value={payC.amount} onChange={(e) => setPayC({ ...payC, amount: e.target.value })}
-                className="mt-1 w-full border rounded-lg px-3 py-2 text-lg font-bold text-gray-800" />
-            </label>
-            {isPart && <p className="text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded-lg p-2">Part payment — <b>{rupee(remaining - amt)}</b> stays pending. His hisab stays <b>open</b> until fully paid (e.g. pay the account part next day).</p>}
-            {amt > remaining + 0.5 && <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2">Paying {rupee(amt - remaining)} extra → recorded as an <b>advance carried forward</b> to next month.</p>}
-            <div className="grid grid-cols-2 gap-2">
-              {['cash', 'bank'].map((m) => (
-                <button key={m} onClick={() => setPayC({ ...payC, mode: m })} className={`rounded-lg py-2 text-sm font-medium border ${payC.mode === m ? 'bg-gray-800 text-white border-gray-800' : 'border-gray-300 text-gray-600'}`}>{m === 'cash' ? '💵 Cash' : '🏦 Bank'}</button>
-              ))}
-            </div>
-            <input value={payC.remark} onChange={(e) => setPayC({ ...payC, remark: e.target.value })} placeholder="Remark (optional)" className="w-full border rounded-lg px-3 py-2 text-sm" />
-            <div className="flex gap-2">
-              <button disabled={!!busy} onClick={() => setPayC(null)} className="flex-1 border rounded-xl py-3 font-medium text-gray-600 disabled:opacity-50">Cancel</button>
-              <button disabled={!!busy || !(amt >= 0)} onClick={() => doPay(payC.r, payC.mode, payC.remark.trim(), amt)}
-                className="flex-1 bg-green-700 text-white rounded-xl py-3 font-semibold disabled:opacity-50">{busy ? 'Paying…' : `Pay ${rupee(amt)}`}</button>
-            </div>
-          </div>
-        </div>
-      ); })()}
     </div>
   );
 }
 
-function OwnerRow({ r, busy, queued, onName, onTick, onHold, onRelease, onChooseOt, onPay }) {
-  const { emp, md, pay, portalOt = 0, appOt = 0, otSource = 'portal' } = r;
+function OwnerRow({ r, busy, queued, onName }) {
+  const { emp, md, pay } = r;
   const [showDays, setShowDays] = useState(false);
-  const isPaid = !!md.payment, isTicked = !!md.approved, isHeld = !!md.hold;
-  const due = Number(md.approvedNet ?? pay.net) || 0;
-  const paidSoFar = Number(md.paidSoFar || 0);
-  const remaining = Math.max(0, due - paidSoFar);
-  const isPartial = !isPaid && paidSoFar > 0;
-  const otLocked = isPaid || isTicked || isHeld;                 // choice frozen once ticked/paid
-  const otDiffer = Math.abs(portalOt - appOt) >= 0.5;
-  const showOt = (portalOt > 0 || appOt > 0) && emp.type !== 'daily';
+  const isLocked = !!md.locked || !!md.payment;                  // settled & frozen via Lock
   const sub2 = [
     pay.otHrsNet > 0 ? `OT ${pay.otHrsNet}h` : null,
-    pay.advanceRecovered > 0 ? `adv −${rupee(pay.advanceRecovered)}` : null,
+    (pay.openingBalance || 0) !== 0 ? `bal ${pay.openingBalance > 0 ? '+' : ''}${rupee(pay.openingBalance)}` : null,
   ].filter(Boolean).join(' · ');
   return (
-    <div className={`p-3 ${isHeld ? 'bg-red-50' : ''}`}>
+    <div className="p-3">
       <div className="flex items-center gap-2">
         <div className="flex-1">
           <button onClick={onName} className="text-left block">
@@ -232,39 +159,17 @@ function OwnerRow({ r, busy, queued, onName, onTick, onHold, onRelease, onChoose
             <button onClick={() => setShowDays((s) => !s)} className="text-blue-700 underline decoration-dotted underline-offset-2">{pay.paidDays}d paid {showDays ? '▾' : '▸'}</button>
             {sub2 ? ` · ${sub2}` : ''}
           </div>
-          {showOt && (
-            <div className="text-[11px] mt-1 flex items-center gap-1 flex-wrap">
-              <span className="text-gray-400">OT pay from</span>
-              <button disabled={busy || otLocked} onClick={() => onChooseOt('portal')}
-                className={`px-1.5 py-0.5 rounded ${otSource === 'portal' ? 'bg-red-700 text-white font-semibold' : 'text-gray-500 border border-gray-200'} disabled:opacity-60`}>Portal {portalOt}h</button>
-              <button disabled={busy || otLocked} onClick={() => onChooseOt('app')}
-                className={`px-1.5 py-0.5 rounded ${otSource === 'app' ? 'bg-red-700 text-white font-semibold' : 'text-gray-500 border border-gray-200'} disabled:opacity-60`}>App {appOt}h</button>
-              {otDiffer && <span className="text-amber-600" title="Portal and app OT differ">⚠ {Math.abs(portalOt - appOt).toFixed(1)}h gap</span>}
-              {otLocked && <span className="text-gray-400">· locked</span>}
-            </div>
-          )}
           {showDays && <DaysBreakdown pay={pay} />}
         </div>
         <div className="text-right">
-          <div className="font-bold text-red-700">{rupee(isPaid ? md.payment.net : (isPartial ? remaining : (isTicked ? md.approvedNet : pay.net)))}</div>
-          {isHeld ? <button disabled={busy} onClick={onRelease} className="text-[11px] text-red-600 underline">🚫 hold · release</button>
-            : isPaid ? <span className="text-[11px] text-green-700 font-medium">✓ PAID ({md.payment.mode}{md.payment.parts > 1 ? `, ${md.payment.parts} parts` : ''})</span>
-            : queued ? <span className="text-[11px] text-amber-600 font-medium">⏳ payment queued… (updates in a few min)</span>
-            : isPartial ? <div className="flex flex-col items-end gap-0.5">
-                <span className="text-[11px] text-green-700">{rupee(paidSoFar)} paid · <b className="text-red-600">{rupee(remaining)}</b> left</span>
-                <button disabled={busy} onClick={onPay} className="text-xs bg-green-700 text-white rounded-lg px-3 py-1.5 font-medium disabled:opacity-50">💵 Pay rest</button>
-              </div>
-            : isTicked ? <div className="flex gap-1 justify-end items-center">
-                <button disabled={busy} onClick={onPay} className="text-xs bg-green-700 text-white rounded-lg px-3 py-1.5 font-medium disabled:opacity-50">💵 Pay</button>
-                <button disabled={busy} onClick={onTick} className="text-[11px] text-amber-700 underline">undo</button>
-              </div>
-            : <div className="flex gap-1 justify-end">
-                <button disabled={busy} onClick={onTick} className="text-xs bg-red-700 text-white rounded-lg px-3 py-1.5 font-medium disabled:opacity-50">✓ Tick</button>
-                <button disabled={busy} onClick={onHold} title="Hold salary" className="text-xs border border-gray-300 text-gray-500 rounded-lg px-2 py-1.5 disabled:opacity-50">🚫</button>
-              </div>}
+          <div className="font-bold text-red-700">{rupee(isLocked ? (md.payment?.net || 0) : pay.payable)}</div>
+          {isLocked
+            ? <span className="text-[11px] text-green-700 font-medium">🔒 Locked{md.payment?.closing ? ` · bal ${md.payment.closing >= 0 ? '+' : ''}${rupee(md.payment.closing)}` : ''}</span>
+            : queued
+              ? <span className="text-[11px] text-amber-600 font-medium">⏳ saving… (~5 min)</span>
+              : <button disabled={busy} onClick={onName} className="text-xs bg-green-700 text-white rounded-lg px-3 py-1.5 font-medium disabled:opacity-50">Settle →</button>}
         </div>
       </div>
-      {isHeld && <div className="text-[11px] text-red-700 mt-1">🚫 Hold: {md.hold.reason}</div>}
     </div>
   );
 }
