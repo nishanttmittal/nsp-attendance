@@ -41,6 +41,10 @@ export default function Person({ code, mk, user, onBack }) {
   // Attendance summary for answering a worker on the spot (half-days + missed punches from the day detail).
   const halfDays = otDetail.filter((d) => d.kind === 'half').length;
   const missedPunches = otDetail.filter((d) => d.single || d.missing).length;
+  // Extra days CREDITED this month = full-attendance bonus (1) + goodwill Saturdays + 15-min grace.
+  const extraDays = Math.round(((dispPay.perfectBonus > 0 ? 1 : 0) + (dispPay.restoreSaturdayDays || 0) + (dispPay.graceDays || 0)) * 100) / 100;
+  // eligible for the +1 full-attendance bonus but owner hasn't granted it yet (reminder in the summary)
+  const bonusEligibleUnpaid = pay.perfectEligible && !(dispPay.perfectBonus > 0);
   // owner decides a borderline weekday Full/Half/Absent at pay time (md.dayOverrides). null = clear.
   const setDay = (ymd, value) => {
     const next = { ...(md.dayOverrides || {}) };
@@ -86,6 +90,7 @@ export default function Person({ code, mk, user, onBack }) {
               <span>Absent <b className={pay.absentDays ? 'text-red-600' : ''}>{pay.absentDays}</b></span>
               <span>Weekly-off <b>{pay.weeklyOffAll}</b></span>
               <span>Half-day <b>{halfDays}</b></span>
+              <span>Extra day <b className={extraDays ? 'text-green-700' : ''}>{extraDays}</b>{bonusEligibleUnpaid ? <span className="text-[11px] text-green-600"> (+1 eligible)</span> : ''}</span>
               <span>Missed punch <b className={missedPunches ? 'text-amber-600' : ''}>{missedPunches}</b></span>
               <span>Overtime <b>{pay.otHrsNet}h</b></span>
             </div>
