@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { loadEmployee, loadAllAttendance, loadPunchDoc, saveEmployee, saveMonth, addAdvance, addIncrement, resignEmployee, settleAndResign, checkActionPassword, queueJob, queueLock, queueUnlock, lockMonthDirect, editNameDept, istMonth } from '../lib/data';
-import { monthCtx, payFor, rupee } from '../lib/paycalc';
+import { monthCtx, payFor, rupee, paymentBreakdown } from '../lib/paycalc';
 import { payslipOnePdf, sharePdf } from '../lib/salaryPdf';
 import { graceDeltaDays } from '../lib/attendanceEngine';
 
@@ -53,13 +53,7 @@ export default function Person({ code, mk, user, onBack }) {
   const doLock = (cash, account, reason) => act(async () => {
     // Snapshot the salary breakdown AT LOCK so the paid month always shows these exact figures, immune
     // to any later rule change. advanceCarry is always 0 now (advance folds fully into the balance).
-    const breakdown = {
-      base: pay.base, otPay: pay.otPay, otHrsNet: pay.otHrsNet, perfectBonus: pay.perfectBonus,
-      gracePay: pay.gracePay, graceDays: pay.graceDays, restoreSaturdayPay: pay.restoreSaturdayPay,
-      restoreSaturdayDays: pay.restoreSaturdayDays, bonus: pay.bonus, fines: pay.fines,
-      advanceDue: pay.advanceDue, advanceRecovered: pay.advanceRecovered,
-      net: pay.net, openingBalance: pay.openingBalance, presentDays: pay.presentDays, absentDays: pay.absentDays,
-    };
+    const breakdown = paymentBreakdown(pay);
     // INSTANT: write the lock directly (owner has att_salary write); it freezes + carries right away.
     await lockMonthDirect(code, mk, { cash, account, payable: pay.payable, advanceCarry: pay.advanceBalanceCarried, breakdown, reason }, user.email);
     // background (best-effort): the robot adds the salary-register snapshot + Telegram alert.

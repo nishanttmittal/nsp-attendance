@@ -37,6 +37,18 @@ const pad = (n) => String(n).padStart(2, '0');
 
 export const rupee = (n) => '₹' + Number(n || 0).toLocaleString('en-IN');
 
+// Snapshot of a worker's salary figures AT LOCK — stored on the payment so a paid month always
+// shows these exact numbers, never recomputed under a later rule change. Used by the pay screens.
+export function paymentBreakdown(pay) {
+  return {
+    base: pay.base, otPay: pay.otPay, otHrsNet: pay.otHrsNet, perfectBonus: pay.perfectBonus,
+    gracePay: pay.gracePay, graceDays: pay.graceDays, restoreSaturdayPay: pay.restoreSaturdayPay,
+    restoreSaturdayDays: pay.restoreSaturdayDays, bonus: pay.bonus, fines: pay.fines,
+    advanceDue: pay.advanceDue, advanceRecovered: pay.advanceRecovered,
+    net: pay.net, openingBalance: pay.openingBalance, presentDays: pay.presentDays, absentDays: pay.absentDays,
+  };
+}
+
 export const DATA_START = '2026-06';   // app runs from June 2026 onward — no data before this
 export function monthOptions(count = 6) {
   const now = new Date(Date.now() + 5.5 * 3600 * 1000);

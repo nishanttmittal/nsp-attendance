@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { loadEmployees, loadAllAttendance, loadAllPunches, setOtSource, saveEmployee, loadPayout, queueMarkPaid, queueAdvance, loadRoster, approveSalary, unapproveSalary, holdSalary, releaseSalary, ensureApprovalBackup, istMonth, queueJob, queueFinalizeHisab, checkActionPassword } from '../lib/data';
-import { monthOptions, monthCtx, payFor, rupee } from '../lib/paycalc';
+import { loadEmployees, loadAllAttendance, loadAllPunches, setOtSource, saveEmployee, loadPayout, queueMarkPaid, queueAdvance, loadRoster, approveSalary, unapproveSalary, holdSalary, releaseSalary, ensureApprovalBackup, istMonth, queueJob, queueFinalizeHisab, checkActionPassword, lockMonthDirect, queueLock } from '../lib/data';
+import { monthOptions, monthCtx, payFor, rupee, paymentBreakdown } from '../lib/paycalc';
 import Person from './Person.jsx';
 import SelfPunchCard from './SelfPunchCard.jsx';
 import NamePick from './NamePick.jsx';
@@ -98,6 +98,22 @@ function OwnerSalary({ user }) {
       setPayC(null); await reload();
     } finally { setBusy(''); }
   }
+  // FAST PAY: one tap on the row's Cash/Account button → this confirm → instant Settle & lock (no typing).
+  // `amount` is what's handed over (defaults to the full payable); the rest carries as balance.
+  async function doFastLock(r, mode, amount) {
+    const code = r.emp.code;
+    setBusy(code);
+    try {
+      const pay = r.pay;
+      const amt = Number(amount) || 0;
+      const cash = mode === 'cash' ? amt : 0;
+      const account = mode === 'account' ? amt : 0;
+      const args = { cash, account, payable: pay.payable, advanceCarry: pay.advanceBalanceCarried, reason: `Salary ${mk} (${mode})` };
+      await lockMonthDirect(code, mk, { ...args, breakdown: paymentBreakdown(pay) }, user.email);  // instant freeze + carry
+      queueLock(code, mk, args, user.email).catch(() => {});                                       // register + Telegram
+      setPayC(null); await reload();
+    } finally { setBusy(''); }
+  }
   return (
     <div className="space-y-3">
       <div className="bg-white rounded-xl shadow p-3 space-y-2">
@@ -126,7 +142,7 @@ function OwnerSalary({ user }) {
           </p>
         )}
         <label className="flex items-center gap-1.5 text-xs text-gray-500"><input type="checkbox" checked={showRemoved} onChange={(e) => setShowRemoved(e.target.checked)} /> Show removed/resigned staff (kept in the sheet for costing)</label>
-        <p className="text-[11px] text-gray-500">Tap a worker → <b>Settle &amp; lock</b> on his page (enter cash + account, Lock). The month freezes and any balance carries to next month.</p>
+        <p className="text-[11px] text-gray-500">Tap <b>💵 Cash</b> or <b>🏦 Account</b> to pay the full amount and lock in one go. Tap the <b>name</b> for details (split, part-pay, OT, bonus).</p>
       </div>
 
       <input className="w-full border rounded-lg px-3 py-2" placeholder="🔍 Search name…" value={q} onChange={(e) => setQ(e.target.value)} />
@@ -134,7 +150,9 @@ function OwnerSalary({ user }) {
       <div className="bg-white rounded-xl shadow divide-y divide-gray-100">
         {visible.length === 0 && <p className="p-4 text-sm text-gray-400">No one matches.</p>}
         {visible.map((r) => (
-          <OwnerRow key={r.emp.code} r={r} busy={busy === r.emp.code} queued={pending[r.emp.code] != null} onName={() => setOpenCode(r.emp.code)} />
+          <OwnerRow key={r.emp.code} r={r} busy={busy === r.emp.code} queued={pending[r.emp.code] != null}
+            onName={() => setOpenCode(r.emp.code)}
+            onPay={(mode) => setPayC({ r, mode, amount: String(Math.max(0, r.pay.payable || 0)) })} />
         ))}
       </div>
 
@@ -142,24 +160,66 @@ function OwnerSalary({ user }) {
       {mk === istMonth() && <SelfPunchCard />}
       {noSalary.length > 0 && <NoSalaryList list={noSalary} onSaved={reload} />}
       {showReport && <ReportModal user={user} mk={mk} rows={rows} onClose={() => setShowReport(false)} />}
+      {payC && <FastPaySheet payC={payC} mk={mk} busy={!!busy} onChange={setPayC} onCancel={() => setPayC(null)} onConfirm={doFastLock} />}
     </div>
   );
 }
 
-function OwnerRow({ r, busy, queued, onName }) {
+// Fast Settle & lock — big, one-decision sheet. Amount defaults to the full payable; owner can pay less
+// (the rest carries) or ₹0 (a worker who owes just gets locked). No reason typing.
+function FastPaySheet({ payC, mk, busy, onChange, onCancel, onConfirm }) {
+  const { r, mode, amount } = payC;
+  const pay = r.pay;
+  const payable = pay.payable || 0;
+  const amt = Number(amount) || 0;
+  const closing = Math.round((payable - amt) * 100) / 100;
+  const label = monthOptions(6).find((m) => m.mk === mk)?.label || mk;
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-end sm:items-center justify-center p-4" onClick={() => busy ? null : onCancel()}>
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-5 space-y-4" onClick={(e) => e.stopPropagation()}>
+        <div className="text-center">
+          <div className="text-4xl mb-1">{mode === 'cash' ? '💵' : '🏦'}</div>
+          <p className="text-gray-500 text-sm">Pay by {mode === 'cash' ? 'Cash' : 'Account'} & lock — {label}</p>
+          <p className="font-bold text-gray-900 text-xl mt-1">{r.emp.name || r.emp.code}</p>
+          {payable >= 0
+            ? <p className="text-sm text-gray-500">Payable <b className="text-red-700 text-base">{rupee(payable)}</b></p>
+            : <p className="text-sm text-green-700 font-medium">He owes {rupee(Math.abs(payable))} — locking carries it forward</p>}
+        </div>
+        <label className="block text-xs text-gray-500">Amount paid now ₹
+          <input type="number" inputMode="numeric" value={amount} onChange={(e) => onChange({ ...payC, amount: e.target.value })}
+            className="mt-1 w-full border rounded-lg px-3 py-3 text-2xl font-bold text-gray-900 text-center" />
+        </label>
+        <div className="grid grid-cols-2 gap-1.5">
+          <button onClick={() => onChange({ ...payC, mode: 'cash' })} className={`rounded-lg py-2 text-sm font-semibold ${mode === 'cash' ? 'bg-green-700 text-white' : 'border border-gray-300 text-gray-600'}`}>💵 Cash</button>
+          <button onClick={() => onChange({ ...payC, mode: 'account' })} className={`rounded-lg py-2 text-sm font-semibold ${mode === 'account' ? 'bg-gray-800 text-white' : 'border border-gray-300 text-gray-600'}`}>🏦 Account</button>
+        </div>
+        <p className="text-xs text-center text-gray-600">Balance <b className={closing >= 0 ? 'text-red-700' : 'text-green-700'}>{closing >= 0 ? '+' : ''}{rupee(closing)}</b> {closing >= 0 ? 'stays owed to him' : 'he owes us'} → carries next month.</p>
+        <div className="flex gap-2">
+          <button disabled={busy} onClick={onCancel} className="flex-1 border rounded-xl py-3 font-medium text-gray-600 disabled:opacity-50">Cancel</button>
+          <button disabled={busy} onClick={() => onConfirm(r, mode, amt)}
+            className="flex-1 bg-green-700 text-white rounded-xl py-3 font-semibold disabled:opacity-50">{busy ? 'Paying…' : `Pay ${rupee(amt)} & lock`}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function OwnerRow({ r, busy, queued, onName, onPay }) {
   const { emp, md, pay } = r;
   const [showDays, setShowDays] = useState(false);
   const isLocked = !!md.locked || !!md.payment;                  // settled & frozen via Lock
+  const payable = pay.payable || 0;
+  const owes = payable < 0;
   const sub2 = [
     pay.otHrsNet > 0 ? `OT ${pay.otHrsNet}h` : null,
     (pay.openingBalance || 0) !== 0 ? `bal ${pay.openingBalance > 0 ? '+' : ''}${rupee(pay.openingBalance)}` : null,
   ].filter(Boolean).join(' · ');
   return (
     <div className="p-3">
-      <div className="flex items-center gap-2">
-        <div className="flex-1">
+      <div className="flex items-start gap-2">
+        <div className="flex-1 min-w-0">
           <button onClick={onName} className="text-left block">
-            <span className="font-medium text-gray-800">{emp.name || emp.code}{emp.nickname ? <span className="text-gray-400 font-normal"> ({emp.nickname})</span> : null}</span>
+            <span className="font-semibold text-gray-900 text-[15px]">{emp.name || emp.code}{emp.nickname ? <span className="text-gray-400 font-normal"> ({emp.nickname})</span> : null}</span>
             {(r.lateFixed || 0) > 0.25 && <span className="ml-1.5 text-[10px] bg-amber-100 text-amber-800 rounded px-1 py-0.5 align-middle">⚠ punch-fixed +{r.lateFixed}h OT</span>}
           </button>
           <div className="text-xs text-gray-500">
@@ -168,15 +228,26 @@ function OwnerRow({ r, busy, queued, onName }) {
           </div>
           {showDays && <DaysBreakdown pay={pay} />}
         </div>
-        <div className="text-right">
-          <div className="font-bold text-red-700">{rupee(isLocked ? (md.payment?.net || 0) : pay.payable)}</div>
-          {isLocked
-            ? <span className="text-[11px] text-green-700 font-medium">🔒 Locked{md.payment?.closing ? ` · bal ${md.payment.closing >= 0 ? '+' : ''}${rupee(md.payment.closing)}` : ''}</span>
-            : queued
-              ? <span className="text-[11px] text-amber-600 font-medium">⏳ saving… (~5 min)</span>
-              : <button disabled={busy} onClick={onName} className="text-xs bg-green-700 text-white rounded-lg px-3 py-1.5 font-medium disabled:opacity-50">Settle →</button>}
+        <div className="text-right shrink-0">
+          <div className={`font-bold text-lg ${owes && !isLocked ? 'text-green-700' : 'text-red-700'}`}>
+            {isLocked ? rupee(md.payment?.net || 0) : owes ? `owes ${rupee(Math.abs(payable))}` : rupee(payable)}
+          </div>
+          {isLocked && <span className="text-[11px] text-green-700 font-medium">🔒 Locked{md.payment?.closing ? ` · bal ${md.payment.closing >= 0 ? '+' : ''}${rupee(md.payment.closing)}` : ''}</span>}
+          {queued && !isLocked && <span className="text-[11px] text-amber-600 font-medium">⏳ saving… (~5 min)</span>}
         </div>
       </div>
+      {!isLocked && !queued && (
+        <div className="flex gap-2 mt-2.5">
+          {owes ? (
+            <button disabled={busy} onClick={() => onPay('cash')} className="flex-1 bg-gray-800 text-white rounded-xl py-2.5 font-semibold text-sm disabled:opacity-50">Settle &amp; lock <span className="font-normal opacity-80">(carries {rupee(Math.abs(payable))})</span></button>
+          ) : (
+            <>
+              <button disabled={busy} onClick={() => onPay('cash')} className="flex-1 bg-green-700 text-white rounded-xl py-2.5 font-semibold text-sm disabled:opacity-50">💵 Cash</button>
+              <button disabled={busy} onClick={() => onPay('account')} className="flex-1 bg-gray-800 text-white rounded-xl py-2.5 font-semibold text-sm disabled:opacity-50">🏦 Account</button>
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }
