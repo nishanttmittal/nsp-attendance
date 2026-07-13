@@ -140,6 +140,19 @@ export default function Person({ code, mk, user, onBack }) {
       {!locked && (
         <div className="bg-white rounded-xl shadow p-3 space-y-1">
           <div className="text-sm font-semibold text-gray-700">Adjust this month</div>
+          {pay.type !== 'daily' && (portalOt > 0 || appOt > 0) && (
+            <div className="flex items-center justify-between py-1 border-b mb-1">
+              <span className="text-sm">Overtime to pay
+                <span className="text-gray-500"> — Actual {portalOt}h · App {appOt}h{Math.abs(portalOt - appOt) >= 0.5 ? ' ⚠' : ''}</span>
+              </span>
+              <div className="flex gap-1">
+                <button disabled={busy} onClick={() => act(() => saveMonth(code, mk, { otSource: 'portal' }))}
+                  className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold ${otSource === 'portal' ? 'bg-blue-600 text-white' : 'border border-gray-300 text-gray-600'}`}>Actual</button>
+                <button disabled={busy} onClick={() => act(() => saveMonth(code, mk, { otSource: 'app' }))}
+                  className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold ${otSource === 'app' ? 'bg-blue-600 text-white' : 'border border-gray-300 text-gray-600'}`}>App</button>
+              </div>
+            </div>
+          )}
           {pay.type !== 'daily' && graceDelta > 0 && (
             <label className="flex items-center justify-between py-1">
               <span className="text-sm">⏱ Pay 15-min grace <span className="text-gray-500">(+{graceDelta} day = {rupee(pay.perDay * graceDelta)})</span></span>
