@@ -38,9 +38,17 @@ export default function Person({ code, mk, user, onBack }) {
     : locked
       ? { ...pay, advanceRecovered: 0, advanceBalanceCarried: 0, net: paidNet }
       : pay;
-  // Attendance summary for answering a worker on the spot (half-days + missed punches from the day detail).
-  const halfDays = otDetail.filter((d) => d.kind === 'half').length;
-  const missedPunches = otDetail.filter((d) => d.single || d.missing).length;
+  // Attendance summary for answering a worker on the spot — with the actual DATES.
+  // Mid-month joiner: only count/show from the join date onward (nothing before he was employed).
+  const joinedThisMonth = (emp.joinDate || '').startsWith(mk);
+  const fromYmd = joinedThisMonth ? emp.joinDate : null;
+  const keep = (d) => !fromYmd || d.ymd >= fromYmd;
+  const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][Number(mk.slice(5, 7)) - 1];
+  const dates = (list) => list.map((d) => Number(d.ymd.slice(8, 10))).join(', ');
+  const absentD = otDetail.filter((d) => d.kind === 'absent' && keep(d));
+  const halfD = otDetail.filter((d) => d.kind === 'half' && keep(d));
+  const missedD = otDetail.filter((d) => (d.single || d.missing) && keep(d));
+  const joinDayLabel = joinedThisMonth ? `${Number(emp.joinDate.slice(8, 10))} ${MON}` : null;
   // Extra days CREDITED this month = full-attendance bonus (1) + goodwill Saturdays + 15-min grace.
   const extraDays = Math.round(((dispPay.perfectBonus > 0 ? 1 : 0) + (dispPay.restoreSaturdayDays || 0) + (dispPay.graceDays || 0)) * 100) / 100;
   // eligible for the +1 full-attendance bonus but owner hasn't granted it yet (reminder in the summary)
@@ -84,15 +92,17 @@ export default function Person({ code, mk, user, onBack }) {
         {/* At-a-glance summary — read this out when a worker asks about his month */}
         {!pay.noAttendance && emp.type !== 'daily' && (
           <div className="bg-slate-50 border border-slate-200 rounded-lg p-2.5 mb-2 text-sm text-gray-800">
-            <div className="text-[11px] uppercase tracking-wide text-gray-400 mb-1">{mk} — attendance</div>
+            <div className="text-[11px] uppercase tracking-wide text-gray-400 mb-1">{MON} {mk.slice(0, 4)} — attendance{joinDayLabel ? ` · joined ${joinDayLabel}` : ''}</div>
             <div className="grid grid-cols-2 gap-x-3 gap-y-1">
               <span>Present <b>{pay.presentDays}</b></span>
-              <span>Absent <b className={pay.absentDays ? 'text-red-600' : ''}>{pay.absentDays}</b></span>
               <span>Weekly-off <b>{pay.weeklyOffAll}</b></span>
-              <span>Half-day <b>{halfDays}</b></span>
               <span>Extra day <b className={extraDays ? 'text-green-700' : ''}>{extraDays}</b>{bonusEligibleUnpaid ? <span className="text-[11px] text-green-600"> (+1 eligible)</span> : ''}</span>
-              <span>Missed punch <b className={missedPunches ? 'text-amber-600' : ''}>{missedPunches}</b></span>
               <span>Overtime <b>{pay.otHrsNet}h</b></span>
+            </div>
+            <div className="border-t border-slate-200 mt-1.5 pt-1.5 space-y-0.5">
+              <div>Absent <b className={absentD.length ? 'text-red-600' : ''}>{absentD.length}</b>{absentD.length ? <span className="text-gray-500"> — {dates(absentD)} {MON}</span> : ''}</div>
+              <div>Half-day <b>{halfD.length}</b>{halfD.length ? <span className="text-gray-500"> — {dates(halfD)} {MON}</span> : ''}</div>
+              <div>Missed punch <b className={missedD.length ? 'text-amber-600' : ''}>{missedD.length}</b>{missedD.length ? <span className="text-gray-500"> — {dates(missedD)} {MON}</span> : ''}</div>
             </div>
             <div className="border-t border-slate-200 mt-1.5 pt-1.5">Advance outstanding <b className={dispPay.advanceDue ? 'text-amber-700' : ''}>{rupee(dispPay.advanceDue || 0)}</b></div>
           </div>
