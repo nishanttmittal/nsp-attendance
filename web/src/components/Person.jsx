@@ -38,6 +38,9 @@ export default function Person({ code, mk, user, onBack }) {
     : locked
       ? { ...pay, advanceRecovered: 0, advanceBalanceCarried: 0, net: paidNet }
       : pay;
+  // Attendance summary for answering a worker on the spot (half-days + missed punches from the day detail).
+  const halfDays = otDetail.filter((d) => d.kind === 'half').length;
+  const missedPunches = otDetail.filter((d) => d.single || d.missing).length;
   // owner decides a borderline weekday Full/Half/Absent at pay time (md.dayOverrides). null = clear.
   const setDay = (ymd, value) => {
     const next = { ...(md.dayOverrides || {}) };
@@ -72,8 +75,23 @@ export default function Person({ code, mk, user, onBack }) {
         <div className="text-xs text-gray-500">{emp.dept || ''} · {emp.shift || ''} · {emp.type === 'daily' ? rupee(emp.wage) + '/day' : rupee(emp.amount) + '/month'}</div>
         <div className="text-xs text-gray-500 mb-2">
           {emp.phone ? '📞 ' + emp.phone + ' · ' : ''}{emp.joinDate ? 'joined ' + emp.joinDate + ' · ' : ''}
-          present {presentPct}% · late {att.lateDays || 0}× · OT {pay.otHrsNet}h
+          present {presentPct}% · late {att.lateDays || 0}×
         </div>
+        {/* At-a-glance summary — read this out when a worker asks about his month */}
+        {!pay.noAttendance && emp.type !== 'daily' && (
+          <div className="bg-slate-50 border border-slate-200 rounded-lg p-2.5 mb-2 text-sm text-gray-800">
+            <div className="text-[11px] uppercase tracking-wide text-gray-400 mb-1">{mk} — attendance</div>
+            <div className="grid grid-cols-2 gap-x-3 gap-y-1">
+              <span>Present <b>{pay.presentDays}</b></span>
+              <span>Absent <b className={pay.absentDays ? 'text-red-600' : ''}>{pay.absentDays}</b></span>
+              <span>Weekly-off <b>{pay.weeklyOffAll}</b></span>
+              <span>Half-day <b>{halfDays}</b></span>
+              <span>Missed punch <b className={missedPunches ? 'text-amber-600' : ''}>{missedPunches}</b></span>
+              <span>Overtime <b>{pay.otHrsNet}h</b></span>
+            </div>
+            <div className="border-t border-slate-200 mt-1.5 pt-1.5">Advance outstanding <b className={dispPay.advanceDue ? 'text-amber-700' : ''}>{rupee(dispPay.advanceDue || 0)}</b></div>
+          </div>
+        )}
         {md.approved && !md.payment && <p className="text-xs bg-amber-50 border border-amber-200 text-amber-800 rounded p-1.5 mb-2">🔒 Ticked — figures frozen at {rupee(md.approvedNet)}. Undo the tick in the list to edit.</p>}
         {pay.noAttendance && <p className="text-xs bg-blue-50 border border-blue-200 text-blue-800 rounded p-1.5 mb-2">ℹ️ No attendance for {mk} — not employed this month (joined later). Pays ₹0; old months don't apply.</p>}
         <Row k="Days" v={`present ${pay.presentDays} · absent ${pay.absentDays}`} />
