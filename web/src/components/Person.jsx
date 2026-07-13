@@ -64,6 +64,10 @@ export default function Person({ code, mk, user, onBack }) {
   const satCut = pay.saturdaysCut || 0;
   // This month's advances WITH dates (only those logged as ledger entries; carried balances have none).
   const advLines = advs.map((a) => `${rupee(a.amount)} on ${Number((a.date || '').slice(8, 10))} ${MON}`).join(', ');
+  const paidDaysN = pay.paidDays || 0;
+  const holidayN = pay.holiday || 0;
+  const prevBal = Math.round((pay.openingBalance || 0) * 100) / 100;   // + = owed to worker, − = he owes
+  const fineAmt = dispPay.fines || 0;
   // owner decides a borderline weekday Full/Half/Absent at pay time (md.dayOverrides). null = clear.
   const setDay = (ymd, value) => {
     const next = { ...(md.dayOverrides || {}) };
@@ -107,7 +111,9 @@ export default function Person({ code, mk, user, onBack }) {
             <div className="grid grid-cols-2 gap-x-3 gap-y-1">
               <span>Present <b>{pay.presentDays}</b></span>
               <span>Weekly-off <b>{pay.weeklyOffAll}</b></span>
+              <span>Holiday <b>{holidayN}</b></span>
               <span>Extra day <b className={extraDays ? 'text-green-700' : ''}>{extraDays}</b>{bonusEligibleUnpaid ? <span className="text-[11px] text-green-600"> (+1 eligible)</span> : ''}</span>
+              <span>Paid days <b>{paidDaysN}</b></span>
               <span>Overtime <b>{pay.otHrsNet}h</b></span>
             </div>
             <div className="border-t border-slate-200 mt-1.5 pt-1.5 space-y-0.5">
@@ -118,6 +124,8 @@ export default function Person({ code, mk, user, onBack }) {
               {(workedSat > 0 || satCut > 0) && <div>{workedSat > 0 ? <>Worked Sat <b>{workedSat}</b> <span className="text-gray-400">(paid in OT)</span></> : null}{workedSat > 0 && satCut > 0 ? ' · ' : ''}{satCut > 0 ? <>Sat cut <b className="text-red-600">{satCut}</b> <span className="text-gray-400">(low attendance)</span></> : null}</div>}
             </div>
             <div className="border-t border-slate-200 mt-1.5 pt-1.5 space-y-0.5">
+              {prevBal !== 0 && <div>Previous balance <b className={prevBal >= 0 ? 'text-green-700' : 'text-red-600'}>{rupee(Math.abs(prevBal))}</b> <span className="text-gray-400">({prevBal >= 0 ? 'owed to you' : 'you owe'})</span></div>}
+              {fineAmt > 0 && <div>Fine <b className="text-red-600">−{rupee(fineAmt)}</b></div>}
               {advs.length > 0 && <div className="text-gray-600">Advance this month: {advLines}</div>}
               <div>Advance outstanding <b className={dispPay.advanceDue ? 'text-amber-700' : ''}>{rupee(dispPay.advanceDue || 0)}</b></div>
             </div>
