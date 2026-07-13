@@ -5,6 +5,7 @@ import Person from './Person.jsx';
 import SelfPunchCard from './SelfPunchCard.jsx';
 import NamePick from './NamePick.jsx';
 import { payslipAllPdf, sharePdf, advanceSplit } from '../lib/salaryPdf';
+import { shareCheckSheet } from '../lib/checksheet';
 
 // SALARY — owner ticks person by person; manager sees ticked list and marks PAID.
 export default function Salary({ user }) {
@@ -123,6 +124,7 @@ function OwnerSalary({ user }) {
           </select>
           <button onClick={() => setShowReport(true)} className="border border-gray-300 rounded-lg px-3 text-sm font-medium">📄 Report</button>
         </div>
+        <button onClick={() => shareCheckSheet(rows, mk)} className="w-full bg-blue-600 text-white rounded-lg py-2.5 text-sm font-semibold">📋 Days &amp; OT check-sheet → WhatsApp <span className="font-normal opacity-90">(staff verify before pay)</span></button>
         <div className="text-sm text-gray-600">
           <b className="text-green-700">{locked.length}</b> of {rows.length} locked · paid <b>{rupee(paidNet)}</b>
         </div>
