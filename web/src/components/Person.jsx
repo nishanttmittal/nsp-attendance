@@ -153,6 +153,12 @@ export default function Person({ code, mk, user, onBack }) {
               </div>
             </div>
           )}
+          {pay.type !== 'daily' && pay.perfectEligible && (
+            <label className="flex items-center justify-between py-1 bg-green-50 border border-green-200 rounded-lg px-2">
+              <span className="text-sm">🎯 Full-attendance bonus <span className="text-gray-500">(zero absent → +1 day = {rupee(pay.perfectBonusDay)})</span></span>
+              <input type="checkbox" className="w-5 h-5" checked={!!md.perfectBonusPaid} disabled={busy} onChange={(e) => act(() => saveMonth(code, mk, { perfectBonusPaid: e.target.checked }))} />
+            </label>
+          )}
           {pay.type !== 'daily' && graceDelta > 0 && (
             <label className="flex items-center justify-between py-1">
               <span className="text-sm">⏱ Pay 15-min grace <span className="text-gray-500">(+{graceDelta} day = {rupee(pay.perDay * graceDelta)})</span></span>

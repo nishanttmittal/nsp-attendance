@@ -310,6 +310,7 @@ async function handle(type, p) {
       // owner rule: deduct the FULL outstanding advance by default (override per month if needed)
       advanceRecover: md.advanceRecover != null ? Number(md.advanceRecover) : adv + Number(md.advanceBalanceIn || 0),
       fines: Number(md.fine || 0), loanInstallment: Number(md.loanInstallment || 0), bonus: Number(md.bonus || 0),
+      payPerfectBonus: !!md.perfectBonusPaid,   // full-attendance bonus: owner adds/rejects per worker
     });
     const r = n => '₹' + Number(n || 0).toLocaleString('en-IN');
     const lines = [`🧾 <b>Payslip — ${emp.name || p.code} (${mk})</b>`,

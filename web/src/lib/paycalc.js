@@ -122,6 +122,7 @@ export function payFor(emp, attMap, mk, ctx, graceDelta = 0, punchDoc = null) {
     fines: Number(md.fine || 0), bonus: Number(md.bonus || 0),
     restoreSaturdayDays: Number(md.restoreSaturdays || 0),
     graceDays: md.gracePaid ? Number(graceDelta || 0) : 0,   // owner opted in for this worker/month
+    payPerfectBonus: !!md.perfectBonusPaid,                  // full-attendance bonus: owner adds/rejects per worker
     latePenaltyDays: 0, weeklyOffDockDays: 0, // the machine applies late/weekly-off rules
     openingBalance: Number(md.openingBalance || 0),          // running balance carried from last month
   });

@@ -19,7 +19,7 @@ export function effectiveAmount(emp, toDate) {
 }
 
 // One employee's pay for the period. att = {presentDays,absentDays,otHrs,lateHrs,earlyHrs}.
-export function computePay({ emp, att, daysInMonth, elapsedDays, fullMonth, advancesThisMonth = 0, advanceBalanceIn = 0, advanceRecover = 0, fines = 0, loanInstallment = 0, bonus = 0, restoreSaturdayDays = 0, graceDays = 0, latePenaltyDays = 0, weeklyOffDockDays = 0, openingBalance = 0, monthStart, toDate }) {
+export function computePay({ emp, att, daysInMonth, elapsedDays, fullMonth, advancesThisMonth = 0, advanceBalanceIn = 0, advanceRecover = 0, fines = 0, loanInstallment = 0, bonus = 0, restoreSaturdayDays = 0, graceDays = 0, payPerfectBonus = false, latePenaltyDays = 0, weeklyOffDockDays = 0, openingBalance = 0, monthStart, toDate }) {
   const eff = effectiveAmount(emp, toDate);
   const rate = eff.amount;
   const perDay = emp.type === 'daily' ? rate : rate / daysInMonth;
@@ -49,8 +49,11 @@ export function computePay({ emp, att, daysInMonth, elapsedDays, fullMonth, adva
   const hourlyRate = perDay / (SHIFT_HOURS[emp.shift] || 8);
   const otPay = netOtHrs * hourlyRate;
 
-  // full-month, zero-absence bonus — NOT for mid-month joiners/leavers (prorated window)
-  const perfectBonus = (fullMonth && (att.absentDays || 0) === 0 && (att.presentDays || 0) > 0 && effElapsed === daysInMonth) ? perDay : 0;
+  // full-month, zero-absence bonus (1 day's pay) — NOT for mid-month joiners/leavers (prorated window).
+  // Owner-controlled (owner 2026-07-13): the worker is ELIGIBLE when attendance is full, but the bonus is
+  // only PAID when the owner opts in (md.perfectBonusPaid → payPerfectBonus) — his call to add or reject.
+  const perfectEligible = fullMonth && (att.absentDays || 0) === 0 && (att.presentDays || 0) > 0 && effElapsed === daysInMonth;
+  const perfectBonus = (perfectEligible && payPerfectBonus) ? perDay : 0;
   const penaltyDays = Math.floor((att.absentDays || 0) / 3);
 
   // late-arrival penalty: approved 25% (¼ day) or 50% (½ day) of a day's pay
@@ -110,7 +113,7 @@ export function computePay({ emp, att, daysInMonth, elapsedDays, fullMonth, adva
     restoreSaturdayDays: restoreSatDays, restoreSaturdayPay: round(restoreSaturdayPay),
     graceDays: graceDaysN, gracePay: round(gracePay),
     otHrs: round(att.otHrs || 0), otHrsNet: round(netOtHrs),
-    base: round(base), otPay: round(otPay), perfectBonus: round(perfectBonus), bonus: round(Number(bonus || 0)),
+    base: round(base), otPay: round(otPay), perfectBonus: round(perfectBonus), perfectEligible, perfectBonusDay: round(perDay), bonus: round(Number(bonus || 0)),
     fines: round(Number(fines || 0)), loanInstallment: round(Number(loanInstallment || 0)),
     latePenalty: round(latePenalty), latePenaltyDays: Number(latePenaltyDays || 0),
     weeklyOffDock: round(weeklyOffDock), weeklyOffDockDays: Number(weeklyOffDockDays || 0), suggestedDockDays,

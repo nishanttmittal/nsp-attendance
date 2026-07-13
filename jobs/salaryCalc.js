@@ -38,7 +38,7 @@ function effectiveAmount(emp, toDate) {
 
 const DAY = 86400000;
 // core calc for one employee — exported for the PWA to reuse
-function computePay({ emp, att, daysInMonth, elapsedDays, fullMonth, advances, advanceBalanceIn = 0, advanceRecover = 0, fines = 0, loanInstallment = 0, bonus = 0, latePenaltyDays = 0, weeklyOffDockDays = 0, monthStart, toDate }) {
+function computePay({ emp, att, daysInMonth, elapsedDays, fullMonth, advances, advanceBalanceIn = 0, advanceRecover = 0, fines = 0, loanInstallment = 0, bonus = 0, payPerfectBonus = false, latePenaltyDays = 0, weeklyOffDockDays = 0, monthStart, toDate }) {
   const eff = effectiveAmount(emp, toDate);
   const rate = eff.amount;
   const perDay = emp.type === 'daily' ? rate : rate / daysInMonth;
@@ -65,7 +65,9 @@ function computePay({ emp, att, daysInMonth, elapsedDays, fullMonth, advances, a
   const otPay = netOtHrs * hourlyRate;
   // perfect attendance bonus (complete month, zero absence; lateness does not disqualify)
   // full-month, zero-absence bonus — NOT for mid-month joiners/leavers (prorated window)
-  const perfectBonus = (fullMonth && att.absentDays === 0 && att.presentDays > 0 && effElapsed === daysInMonth) ? perDay : 0;
+  // full-attendance bonus is OWNER-CONTROLLED now (owner 2026-07-13): eligible on zero-absence, paid only when opted in
+  const perfectEligible = fullMonth && att.absentDays === 0 && att.presentDays > 0 && effElapsed === daysInMonth;
+  const perfectBonus = (perfectEligible && payPerfectBonus) ? perDay : 0;
   // excess-absence weekly-off dock: every 3 absent days → 1 off — SUGGESTED, confirm before applying
   const penaltyDays = Math.floor(att.absentDays / 3);
   const suggestedPenalty = round(perDay * penaltyDays);
