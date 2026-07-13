@@ -83,9 +83,9 @@ export function payFor(emp, attMap, mk, ctx, graceDelta = 0, punchDoc = null) {
   const advs = (emp.advances || []).filter((a) => (a.date || '').startsWith(mk));
   const advancesThisMonth = advs.reduce((s, a) => s + Number(a.amount || 0), 0);
   const advanceBalanceIn = Number(md.advanceBalanceIn || 0);
-  // Advances are NOT auto-deducted (owner 2026-07-12): payable = full salary; the advance stays a
-  // tracked running balance and is recovered only when the owner sets "Advance cut ₹" (md.advanceRecover).
-  const advanceRecover = md.advanceRecover != null ? Number(md.advanceRecover) : 0;
+  // ONE advance account (owner 2026-07-13): the engine always cuts the FULL outstanding advance
+  // (this-month advances + any carried-in balance) into the running balance. No per-month "advance cut"
+  // or "loan cut" input any more — whatever advance was given simply reduces the person's account.
   // OT source: PORTAL (att.otHrs, default) or APP (computed here from raw punches). Owner picks per
   // worker via md.otSource; app-OT is already net (worked − shift), so no late/early re-deduction.
   const portalOt = Number(att.otHrs || 0);
@@ -118,8 +118,8 @@ export function payFor(emp, attMap, mk, ctx, graceDelta = 0, punchDoc = null) {
     absentDays: Math.max(0, (att.absentDays || 0) - presentAdjust - satAdjust) };
   const pay = computePay({
     emp, att: otAtt, ...ctx,
-    advancesThisMonth, advanceBalanceIn, advanceRecover,
-    fines: Number(md.fine || 0), loanInstallment: Number(md.loanInstallment || 0), bonus: Number(md.bonus || 0),
+    advancesThisMonth, advanceBalanceIn,
+    fines: Number(md.fine || 0), bonus: Number(md.bonus || 0),
     restoreSaturdayDays: Number(md.restoreSaturdays || 0),
     graceDays: md.gracePaid ? Number(graceDelta || 0) : 0,   // owner opted in for this worker/month
     latePenaltyDays: 0, weeklyOffDockDays: 0, // the machine applies late/weekly-off rules

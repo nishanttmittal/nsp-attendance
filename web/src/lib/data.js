@@ -389,7 +389,7 @@ export async function queueUnlock(code, month, reason, by) {
 }
 // INSTANT lock — the owner may write att_salary directly (rules line 49), so freeze the month + carry
 // the balance right away (no 5-min wait). A background lock_month job then adds the register + Telegram.
-export async function lockMonthDirect(code, month, { cash, account, payable, advanceCarry, reason }, by) {
+export async function lockMonthDirect(code, month, { cash, account, payable, advanceCarry, breakdown, reason }, by) {
   const e = await loadEmployee(code);
   const md = (e.months || {})[month] || {};
   if (md.locked) return { alreadyLocked: true };
@@ -401,9 +401,11 @@ export async function lockMonthDirect(code, month, { cash, account, payable, adv
   const prevNextOpening = Number((months[next] || {}).openingBalance || 0);
   const prevNextAdvance = Number((months[next] || {}).advanceBalanceIn || 0);
   const date = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
+  // `breakdown` snapshots the salary figures AT LOCK so an already-paid month never re-renders under a
+  // later rule change. advanceBalanceIn is forced to 0: the advance folded fully into `closing` (one account).
   months[month] = { ...md, locked: true, lockedAt: new Date().toISOString(),
-    payment: { cash: Number(cash || 0), account: Number(account || 0), net: paid, payable: Number(payable || 0), closing, mode: 'lock', prevNextOpening, prevNextAdvance, by, reason: reason || '' } };
-  months[next] = { ...(months[next] || {}), openingBalance: closing, advanceBalanceIn: Number(advanceCarry || 0) };
+    payment: { cash: Number(cash || 0), account: Number(account || 0), net: paid, payable: Number(payable || 0), closing, mode: 'lock', prevNextOpening, prevNextAdvance, ...(breakdown ? { breakdown } : {}), by, reason: reason || '' } };
+  months[next] = { ...(months[next] || {}), openingBalance: closing, advanceBalanceIn: 0 };
   const entry = { at: new Date().toISOString(), by, code, name: e.name || code, month, field: 'lock', from: `payable ₹${payable}`, to: `paid ₹${paid} (cash ${cash || 0}+acct ${account || 0}); carry ₹${closing}`, reason: reason || '' };
   await saveEmployee(code, { months, decisions: [...(e.decisions || []), entry] });
   return { closing, paid };

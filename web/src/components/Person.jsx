@@ -24,6 +24,20 @@ export default function Person({ code, mk, user, onBack }) {
   const { att, md, pay, portalOt = 0, appOt = 0, otSource = 'portal', otCredit = 0, detail: otDetail = [], presentAdjust = 0, satAdjust = 0, lateFixed = 0, rawLate = 0 } = payFor(emp, attMap, mk, ctx, graceDelta, punchDoc);
   // freeze once LOCKED (cashier settle) or approved/paid — nothing about the month can be edited
   const locked = !!md.locked || !!md.payment || !!md.approved;
+  // For a LOCKED month, show the figures as they were AT LOCK (stored snapshot), never recomputed under
+  // today's rules — otherwise a change like the new full-advance-cut would make an already-paid month
+  // look wrong. Months locked before snapshots existed (e.g. June) have no `breakdown`; there we show
+  // base/OT only and skip the advance/loan itemisation (the stored net + carry are still authoritative).
+  const snap = locked && md.payment && md.payment.breakdown ? md.payment.breakdown : null;
+  // One display object used everywhere (rows, WhatsApp, PDF) so a locked month renders its LOCKED
+  // figures, never today's recomputed ones. snapshot → exact stored figures; locked-without-snapshot
+  // (June) → hide advance itemisation and show the amount actually paid as the net; open month → live.
+  const paidNet = md.payment ? md.payment.net : pay.net;
+  const dispPay = snap
+    ? { ...pay, ...snap, otHrsNet: snap.otHrsNet ?? pay.otHrsNet, advanceBalanceCarried: 0 }
+    : locked
+      ? { ...pay, advanceRecovered: 0, advanceBalanceCarried: 0, net: paidNet }
+      : pay;
   // owner decides a borderline weekday Full/Half/Absent at pay time (md.dayOverrides). null = clear.
   const setDay = (ymd, value) => {
     const next = { ...(md.dayOverrides || {}) };
@@ -37,8 +51,17 @@ export default function Person({ code, mk, user, onBack }) {
     act(() => saveMonth(code, mk, { otCredits: next }));
   };
   const doLock = (cash, account, reason) => act(async () => {
+    // Snapshot the salary breakdown AT LOCK so the paid month always shows these exact figures, immune
+    // to any later rule change. advanceCarry is always 0 now (advance folds fully into the balance).
+    const breakdown = {
+      base: pay.base, otPay: pay.otPay, otHrsNet: pay.otHrsNet, perfectBonus: pay.perfectBonus,
+      gracePay: pay.gracePay, graceDays: pay.graceDays, restoreSaturdayPay: pay.restoreSaturdayPay,
+      restoreSaturdayDays: pay.restoreSaturdayDays, bonus: pay.bonus, fines: pay.fines,
+      advanceDue: pay.advanceDue, advanceRecovered: pay.advanceRecovered,
+      net: pay.net, openingBalance: pay.openingBalance, presentDays: pay.presentDays, absentDays: pay.absentDays,
+    };
     // INSTANT: write the lock directly (owner has att_salary write); it freezes + carries right away.
-    await lockMonthDirect(code, mk, { cash, account, payable: pay.payable, advanceCarry: pay.advanceBalanceCarried, reason }, user.email);
+    await lockMonthDirect(code, mk, { cash, account, payable: pay.payable, advanceCarry: pay.advanceBalanceCarried, breakdown, reason }, user.email);
     // background (best-effort): the robot adds the salary-register snapshot + Telegram alert.
     queueLock(code, mk, { cash, account, payable: pay.payable, advanceCarry: pay.advanceBalanceCarried, reason }, user.email).catch(() => {});
   });
@@ -80,26 +103,25 @@ export default function Person({ code, mk, user, onBack }) {
           </div>
         )}
         <hr className="my-1.5" />
-        <Row k="Base pay" v={rupee(pay.base)} />
-        <Row k="+ Overtime" v={rupee(pay.otPay)} />
-        {pay.perfectBonus > 0 && <Row k="+ Full-attendance bonus" v={rupee(pay.perfectBonus)} />}
-        {pay.gracePay > 0 && <Row k={`+ 15-min grace (${pay.graceDays} day)`} v={rupee(pay.gracePay)} />}
-        {pay.restoreSaturdayPay > 0 && <Row k={`+ ${pay.restoreSaturdayDays} Saturday${pay.restoreSaturdayDays > 1 ? 's' : ''} (goodwill)`} v={rupee(pay.restoreSaturdayPay)} />}
-        {pay.bonus > 0 && <Row k="+ Bonus" v={rupee(pay.bonus)} />}
-        {pay.fines > 0 && <Row k="− Fine" v={rupee(pay.fines)} />}
-        {pay.loanInstallment > 0 && <Row k="− Loan" v={rupee(pay.loanInstallment)} />}
-        {pay.advanceRecovered > 0 && <Row k="− Advance" v={rupee(pay.advanceRecovered)} />}
-        <div className="flex justify-between mt-1 pt-1.5 border-t font-bold"><span>This month ({mk})</span><span className="text-red-700">{rupee(locked && md.payment ? md.payment.net : pay.net)}</span></div>
+        <Row k="Base pay" v={rupee(dispPay.base)} />
+        <Row k="+ Overtime" v={rupee(dispPay.otPay)} />
+        {dispPay.perfectBonus > 0 && <Row k="+ Full-attendance bonus" v={rupee(dispPay.perfectBonus)} />}
+        {dispPay.gracePay > 0 && <Row k={`+ 15-min grace (${dispPay.graceDays} day)`} v={rupee(dispPay.gracePay)} />}
+        {dispPay.restoreSaturdayPay > 0 && <Row k={`+ ${dispPay.restoreSaturdayDays} Saturday${dispPay.restoreSaturdayDays > 1 ? 's' : ''} (goodwill)`} v={rupee(dispPay.restoreSaturdayPay)} />}
+        {dispPay.bonus > 0 && <Row k="+ Bonus" v={rupee(dispPay.bonus)} />}
+        {dispPay.fines > 0 && <Row k="− Fine" v={rupee(dispPay.fines)} />}
+        {dispPay.advanceRecovered > 0 && <Row k="− Advance (full)" v={rupee(dispPay.advanceRecovered)} />}
+        <div className="flex justify-between mt-1 pt-1.5 border-t font-bold"><span>This month ({mk})</span><span className="text-red-700">{rupee(dispPay.net)}</span></div>
         {md.payment && <p className="text-xs text-green-700 mt-1">✓ Paid {md.payment.date} ({md.payment.mode})</p>}
-        {pay.advanceBalanceCarried > 0 && <p className="text-xs text-amber-700 mt-1">Still owes {rupee(pay.advanceBalanceCarried)} advance — carries forward.</p>}
         <div className="grid grid-cols-3 gap-2 mt-3">
-          <button onClick={() => sharePdf(payslipOnePdf(emp, pay, mk), `payslip-${code}-${mk}.pdf`)} className="border border-gray-300 rounded-lg py-2 text-sm font-medium">📄 PDF</button>
+          <button onClick={() => sharePdf(payslipOnePdf(emp, dispPay, mk), `payslip-${code}-${mk}.pdf`)} className="border border-gray-300 rounded-lg py-2 text-sm font-medium">📄 PDF</button>
           <button onClick={() => {
             const sat = (att.weeklyOff || 0) + (att.weeklyOffPresent || 0);
-            const L = [`*NSP — Salary ${mk}*`, `${emp.name || code}`, `Days: ${pay.presentDays} present / ${pay.absentDays} absent` + (sat ? ` / ${sat} weekly-off (paid)` : '') + (pay.saturdaysCut ? ` / ${pay.saturdaysCut} Sat cut` : ''), `OT: ${pay.otHrsNet}h`,
-              `Base ₹${pay.base}` + (pay.otPay ? ` + OT ₹${pay.otPay}` : '') + (pay.perfectBonus ? ` + bonus ₹${pay.perfectBonus}` : '') + (pay.gracePay ? ` + grace ₹${pay.gracePay}` : '') + (pay.restoreSaturdayPay ? ` + ${pay.restoreSaturdayDays} Sat goodwill ₹${pay.restoreSaturdayPay}` : '') + (pay.bonus ? ` + bonus ₹${pay.bonus}` : ''),
-              ...(pay.fines ? [`Fine −₹${pay.fines}`] : []), ...(pay.loanInstallment ? [`Loan −₹${pay.loanInstallment}`] : []), ...(pay.advanceRecovered ? [`Advance −₹${pay.advanceRecovered}`] : []),
-              `*NET: ₹${(locked && md.payment ? md.payment.net : pay.net).toLocaleString('en-IN')}*`];
+            const L = [`*NSP — Salary ${mk}*`, `${emp.name || code}`, `Days: ${dispPay.presentDays} present / ${dispPay.absentDays} absent` + (sat ? ` / ${sat} weekly-off (paid)` : '') + (pay.saturdaysCut ? ` / ${pay.saturdaysCut} Sat cut` : ''), `OT: ${dispPay.otHrsNet}h`,
+              `Base ₹${dispPay.base}` + (dispPay.otPay ? ` + OT ₹${dispPay.otPay}` : '') + (dispPay.perfectBonus ? ` + bonus ₹${dispPay.perfectBonus}` : '') + (dispPay.gracePay ? ` + grace ₹${dispPay.gracePay}` : '') + (dispPay.restoreSaturdayPay ? ` + ${dispPay.restoreSaturdayDays} Sat goodwill ₹${dispPay.restoreSaturdayPay}` : '') + (dispPay.bonus ? ` + bonus ₹${dispPay.bonus}` : ''),
+              ...(dispPay.fines ? [`Fine −₹${dispPay.fines}`] : []),
+              ...(dispPay.advanceRecovered ? [`Advance −₹${dispPay.advanceRecovered}`] : []),
+              `*NET: ₹${Number(dispPay.net).toLocaleString('en-IN')}*`];
             const phone = (emp.phone || '').replace(/\D/g, '');
             window.open(`https://wa.me/${phone ? (phone.length === 10 ? '91' + phone : phone) : ''}?text=${encodeURIComponent(L.join('\n'))}`);
           }} className="border border-green-300 text-green-700 rounded-lg py-2 text-sm font-medium">🟢 WhatsApp</button>
@@ -127,8 +149,7 @@ export default function Person({ code, mk, user, onBack }) {
           {pay.type !== 'daily' && <NumRow label={`Give back Saturdays${pay.saturdaysCut > 0 ? ` (${pay.saturdaysCut} cut · ${rupee(pay.perDay)}/day)` : ` (${rupee(pay.perDay)}/day)`}`} val={md.restoreSaturdays} disabled={busy} onSave={(v) => act(() => saveMonth(code, mk, { restoreSaturdays: v }))} />}
           <NumRow label="Bonus ₹" val={md.bonus} disabled={busy} onSave={(v) => act(() => saveMonth(code, mk, { bonus: v }))} />
           <NumRow label="Fine ₹" val={md.fine} disabled={busy} onSave={(v) => act(() => saveMonth(code, mk, { fine: v }))} />
-          <NumRow label="Loan cut ₹" val={md.loanInstallment} disabled={busy} onSave={(v) => act(() => saveMonth(code, mk, { loanInstallment: v }))} />
-          <NumRow label={`Advance cut ₹ (outstanding ${rupee(pay.advanceDue)})`} val={md.advanceRecover ?? 0} disabled={busy} onSave={(v) => act(() => saveMonth(code, mk, { advanceRecover: v }))} />
+          <p className="text-[11px] text-gray-500 pt-1">Advances are cut automatically in full at Settle — give an advance in the ledger below; it adds to this worker's account and the whole balance is squared off when you lock the month.</p>
         </div>
       )}
 
@@ -184,6 +205,8 @@ function SettleLockCard({ pay, md, busy, onLock, onUnlock }) {
   const [account, setAccount] = useState('');
   const opening = pay.openingBalance || 0;
   const payable = pay.payable || 0;
+  const advCut = pay.advanceRecovered || 0;                 // full outstanding advance, auto-cut at settle
+  const salaryThisMonth = Math.round(((pay.net || 0) + advCut) * 100) / 100;  // earnings − fines, before advance
   const paid = (Number(cash) || 0) + (Number(account) || 0);
   const closing = Math.round((payable - paid) * 100) / 100;
   if (md.locked) {
@@ -203,16 +226,16 @@ function SettleLockCard({ pay, md, busy, onLock, onUnlock }) {
   return (
     <div className="bg-white rounded-xl shadow p-4 space-y-2">
       <div className="font-bold text-gray-800">💵 Settle &amp; lock</div>
-      <div className="flex justify-between text-sm"><span className="text-gray-500">Salary this month</span><span className="text-gray-800">{rupee(pay.net)}</span></div>
+      <div className="flex justify-between text-sm"><span className="text-gray-500">Salary this month</span><span className="text-gray-800">{rupee(salaryThisMonth)}</span></div>
+      {advCut > 0 && <div className="flex justify-between text-sm"><span className="text-gray-500">− Advance (full)</span><span className="text-amber-700">{rupee(advCut)}</span></div>}
       {opening !== 0 && <div className="flex justify-between text-sm"><span className="text-gray-500">Carried balance</span><span className={opening > 0 ? 'text-red-700' : 'text-green-700'}>{opening > 0 ? '+' : ''}{rupee(opening)} {opening > 0 ? '(owed to him)' : '(he owes)'}</span></div>}
-      {(pay.advanceDue || 0) > 0 && <div className="flex justify-between text-sm"><span className="text-gray-500">Outstanding advance</span><span className="text-amber-700">{rupee(pay.advanceDue)} <span className="text-gray-400 text-xs">(carried, not deducted)</span></span></div>}
-      <div className="flex justify-between text-base font-bold border-t pt-1"><span>Payable now</span><span className="text-red-700">{rupee(payable)}</span></div>
+      <div className="flex justify-between text-base font-bold border-t pt-1"><span>{payable >= 0 ? 'Payable now' : 'He owes'}</span><span className={payable >= 0 ? 'text-red-700' : 'text-green-700'}>{rupee(Math.abs(payable))}</span></div>
       <div className="grid grid-cols-2 gap-2 pt-1">
         <label className="text-xs text-gray-500">Cash paid ₹<input type="number" value={cash} onChange={(e) => setCash(e.target.value)} className="mt-0.5 w-full border rounded-lg px-2 py-2 text-base font-bold text-gray-800" /></label>
         <label className="text-xs text-gray-500">Account paid ₹<input type="number" value={account} onChange={(e) => setAccount(e.target.value)} className="mt-0.5 w-full border rounded-lg px-2 py-2 text-base font-bold text-gray-800" /></label>
       </div>
-      {paid > 0 && <p className="text-xs text-gray-600">Paying {rupee(paid)} → balance <b className={closing >= 0 ? 'text-red-700' : 'text-green-700'}>{closing >= 0 ? '+' : ''}{rupee(closing)}</b> carries to next month.</p>}
-      <button disabled={!!busy || paid <= 0} onClick={() => { const r = prompt(`Lock this month?\nPayable ₹${payable} · paying ₹${paid} (cash ${Number(cash) || 0} + account ${Number(account) || 0}) · balance ₹${closing} carries.\n\nReason (required):`); if (r == null) return; if (!r.trim()) return alert('Reason is required to lock.'); onLock(Number(cash) || 0, Number(account) || 0, r.trim()); }}
+      <p className="text-xs text-gray-600">{paid > 0 ? `Paying ${rupee(paid)} → ` : 'Paying nothing → '}balance <b className={closing >= 0 ? 'text-red-700' : 'text-green-700'}>{closing >= 0 ? '+' : ''}{rupee(closing)}</b> {closing >= 0 ? 'stays owed to him' : 'he owes us'}, carries to next month.</p>
+      <button disabled={!!busy} onClick={() => { const r = prompt(`Lock this month?\nPayable ₹${payable} · paying ₹${paid} (cash ${Number(cash) || 0} + account ${Number(account) || 0}) · balance ₹${closing} carries.\n\nReason (required):`); if (r == null) return; if (!r.trim()) return alert('Reason is required to lock.'); onLock(Number(cash) || 0, Number(account) || 0, r.trim()); }}
         className="w-full bg-green-700 text-white rounded-xl py-3 font-semibold disabled:opacity-50">🔒 Lock month</button>
     </div>
   );

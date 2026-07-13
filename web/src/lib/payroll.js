@@ -66,10 +66,16 @@ export function computePay({ emp, att, daysInMonth, elapsedDays, fullMonth, adva
   const graceDaysN = emp.type === 'daily' ? 0 : Number(graceDays || 0);
   const gracePay = round(perDay * graceDaysN);
   const earnings = base + otPay + perfectBonus + restoreSaturdayPay + gracePay + Number(bonus || 0);
-  const fixed = Number(fines || 0) + Number(loanInstallment || 0) + latePenalty + weeklyOffDock;
-  const avail = Math.max(0, earnings - fixed);
+  // Fines/penalties are the only "fixed" cuts now. Loan installments are GONE as a separate concept
+  // (owner 2026-07-13): loans + advances are ONE running account, so any loan is just an advance.
+  const fixed = Number(fines || 0) + latePenalty + weeklyOffDock;
+  // ONE advance account (owner 2026-07-13, welder-Hisab model): the FULL outstanding advance is cut at
+  // every settle — this month's new advances + any advance still carried in (advanceBalanceIn, the last
+  // remnant of the old two-rail system, consumed ONCE here then zeroed). No per-month "advance cut" tab.
+  // What isn't covered by this month's salary is NOT floored: it flows into a signed running balance
+  // (payable/openingBalance) that carries forward — negative = the worker owes us, recovered next month.
   const advanceDue = Number(advancesThisMonth || 0) + Number(advanceBalanceIn || 0);
-  const advanceRecovered = Math.min(Number(advanceRecover || 0), advanceDue, avail);
+  const advanceRecovered = advanceDue;
 
   // Day breakdown for the salary tab. Paid days = days the worker is actually PAID for.
   // A WORKED weekly-off (weeklyOffPresent) is NOT an extra paid day — the Saturday is already
@@ -109,12 +115,15 @@ export function computePay({ emp, att, daysInMonth, elapsedDays, fullMonth, adva
     latePenalty: round(latePenalty), latePenaltyDays: Number(latePenaltyDays || 0),
     weeklyOffDock: round(weeklyOffDock), weeklyOffDockDays: Number(weeklyOffDockDays || 0), suggestedDockDays,
     advanceDue: round(advanceDue), advanceRecovered: round(advanceRecovered),
-    advanceBalanceCarried: round(advanceDue - advanceRecovered),
+    advanceBalanceCarried: 0,   // advance is always fully cut into the running balance now (never a separate carry)
     suggestedWeeklyOffDock: { days: penaltyDays, amount: round(perDay * penaltyDays) },
-    net: round(Math.max(0, earnings - fixed - advanceRecovered)),
-    // Cashier model: opening balance carried from last month (+ = still owed to worker, − = he owes),
-    // added to this month's net → the amount to actually settle. Closing balance = payable − amount paid.
+    // This-month net is now SIGNED: earnings − fines − FULL advance. Negative = the worker took more
+    // advance than he earned this month; the shortfall carries in the balance, it is not floored to 0.
+    net: round(earnings - fixed - advanceRecovered),
+    // One running balance (owner 2026-07-13): opening balance carried from last month (+ = still owed to
+    // the worker, − = he owes us) + this-month net = what to settle. Closing balance = payable − paid,
+    // and it too may be negative and carry forward. This IS the advance account — nothing carries twice.
     openingBalance: round(openingBalance),
-    payable: round(Math.max(0, earnings - fixed - advanceRecovered) + openingBalance),
+    payable: round((earnings - fixed - advanceRecovered) + openingBalance),
   };
 }

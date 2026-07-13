@@ -75,11 +75,12 @@ function computePay({ emp, att, daysInMonth, elapsedDays, fullMonth, advances, a
   const latePenalty = round(perDay * Number(latePenaltyDays || 0)); // 0.25 (=25%) or 0.5 (=50%) of a day
   const weeklyOffDock = round(perDay * Number(weeklyOffDockDays || 0)); // 3 absences = 1 Saturday cut
   const earnings = base + otPay + perfectBonus + Number(bonus || 0);
-  const fixedDeductions = Number(fines || 0) + Number(loanInstallment || 0) + latePenalty + weeklyOffDock;
-  const availForAdvance = Math.max(0, earnings - fixedDeductions);
+  // ONE advance account (owner 2026-07-13): loans folded into advances; the FULL outstanding advance is
+  // cut at settle into a signed running balance (negative = worker owes; carries forward). Match web/payroll.js.
+  const fixedDeductions = Number(fines || 0) + latePenalty + weeklyOffDock;
   const advThisMonth = advances.reduce((s, a) => s + Number(a.amount || 0), 0);
   const advanceDue = advThisMonth + advanceBalanceIn;
-  const advanceRecovered = Math.min(Number(advanceRecover || 0), advanceDue, availForAdvance);
+  const advanceRecovered = advanceDue;
   return {
     type: emp.type, effectiveRate: rate, effectiveRemark: eff.remark,
     presentDays: att.presentDays, absentDays: att.absentDays, payableDays: effElapsed,
@@ -90,9 +91,9 @@ function computePay({ emp, att, daysInMonth, elapsedDays, fullMonth, advances, a
     latePenalty: round(latePenalty), latePenaltyDays: Number(latePenaltyDays || 0),
     weeklyOffDock: round(weeklyOffDock), weeklyOffDockDays: Number(weeklyOffDockDays || 0),
     advanceDue: round(advanceDue), advanceRecovered: round(advanceRecovered),
-    advanceBalanceCarried: round(advanceDue - advanceRecovered),
+    advanceBalanceCarried: 0,   // advance always fully cut into the running balance now
     suggestedWeeklyOffDock: { days: penaltyDays, amount: suggestedPenalty },
-    net: round(Math.max(0, earnings - fixedDeductions - advanceRecovered)),
+    net: round(earnings - fixedDeductions - advanceRecovered),   // SIGNED (can be negative → carries)
   };
 }
 

@@ -59,14 +59,12 @@ export function payslipOnePdf(emp, pay, monthLabel) {
     ...(pay.gracePay > 0 ? [[`15-min grace (${pay.graceDays} day)`, rs(pay.gracePay)]] : []),
     ...(pay.restoreSaturdayPay > 0 ? [[`${pay.restoreSaturdayDays} Saturday goodwill`, rs(pay.restoreSaturdayPay)]] : []),
     ['Bonus', rs(pay.bonus)],
-    ['Fine', '- ' + rs(pay.fines)],
-    ['Loan installment', '- ' + rs(pay.loanInstallment)],
-    ['Advance recovered', '- ' + rs(pay.advanceRecovered)],
+    ...(pay.fines > 0 ? [['Fine', '- ' + rs(pay.fines)]] : []),
+    ...(pay.advanceRecovered > 0 ? [['Advance recovered (full)', '- ' + rs(pay.advanceRecovered)]] : []),
   ];
   autoTable(doc, { startY: 62, head: [['Component', 'Amount']], body, theme: 'grid', styles: { fontSize: 10 } });
   let y = (doc.lastAutoTable?.finalY || 110) + 10;
   doc.setFontSize(14); doc.text('NET PAY:  ' + rs(pay.net), 14, y);
-  if (pay.advanceBalanceCarried > 0) { y += 8; doc.setFontSize(9); doc.text('Advance balance carried forward: ' + rs(pay.advanceBalanceCarried), 14, y); }
   doc.setFontSize(9); doc.text('Authorised signature: ____________________', 14, 285);
   return doc;
 }
