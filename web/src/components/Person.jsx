@@ -21,7 +21,7 @@ export default function Person({ code, mk, user, onBack }) {
   const act = async (fn) => { setBusy(true); try { await fn(); await reload(); } finally { setBusy(false); } };
 
   if (!emp) return <p className="text-gray-500">Loading…</p>;
-  const { att, md, pay, portalOt = 0, appOt = 0, otSource = 'portal', otCredit = 0, detail: otDetail = [], presentAdjust = 0, satAdjust = 0, lateFixed = 0, rawLate = 0 } = payFor(emp, attMap, mk, ctx, graceDelta, punchDoc);
+  const { att, md, pay, advs = [], portalOt = 0, appOt = 0, otSource = 'portal', otCredit = 0, detail: otDetail = [], presentAdjust = 0, satAdjust = 0, lateFixed = 0, rawLate = 0 } = payFor(emp, attMap, mk, ctx, graceDelta, punchDoc);
   // freeze once LOCKED (cashier settle) or approved/paid — nothing about the month can be edited
   const locked = !!md.locked || !!md.payment || !!md.approved;
   // For a LOCKED month, show the figures as they were AT LOCK (stored snapshot), never recomputed under
@@ -53,6 +53,17 @@ export default function Person({ code, mk, user, onBack }) {
   const extraDays = Math.round(((dispPay.perfectBonus > 0 ? 1 : 0) + (dispPay.restoreSaturdayDays || 0) + (dispPay.graceDays || 0)) * 100) / 100;
   // eligible for the +1 full-attendance bonus but owner hasn't granted it yet (reminder in the summary)
   const bonusEligibleUnpaid = pay.perfectEligible && !(dispPay.perfectBonus > 0);
+  const r1 = (n) => Math.round(Number(n || 0) * 10) / 10;
+  // Late/early that reduced OT. App-OT source is already net (no separate late/early), so show 0 there.
+  const lateTimes = att.lateDays || 0;
+  const lateHrsEff = otSource === 'app' ? 0 : Math.max(0, r1(rawLate) - r1(lateFixed));
+  const earlyHrsEff = otSource === 'app' ? 0 : r1(att.earlyHrs || 0);
+  const showLate = lateTimes > 0 || lateHrsEff > 0 || earlyHrsEff > 0;
+  // Saturdays: worked (paid as OT, not an extra day) and cut for low attendance.
+  const workedSat = pay.weeklyOffPresent || 0;
+  const satCut = pay.saturdaysCut || 0;
+  // This month's advances WITH dates (only those logged as ledger entries; carried balances have none).
+  const advLines = advs.map((a) => `${rupee(a.amount)} on ${Number((a.date || '').slice(8, 10))} ${MON}`).join(', ');
   // owner decides a borderline weekday Full/Half/Absent at pay time (md.dayOverrides). null = clear.
   const setDay = (ymd, value) => {
     const next = { ...(md.dayOverrides || {}) };
@@ -103,8 +114,13 @@ export default function Person({ code, mk, user, onBack }) {
               <div>Absent <b className={absentD.length ? 'text-red-600' : ''}>{absentD.length}</b>{absentD.length ? <span className="text-gray-500"> — {dates(absentD)} {MON}</span> : ''}</div>
               <div>Half-day <b>{halfD.length}</b>{halfD.length ? <span className="text-gray-500"> — {dates(halfD)} {MON}</span> : ''}</div>
               <div>Missed punch <b className={missedD.length ? 'text-amber-600' : ''}>{missedD.length}</b>{missedD.length ? <span className="text-gray-500"> — {dates(missedD)} {MON}</span> : ''}</div>
+              {showLate && <div>Late <b>{lateTimes}×</b>{lateHrsEff > 0 ? ` · ${lateHrsEff}h` : ''}{earlyHrsEff > 0 ? ` · early ${earlyHrsEff}h` : ''}{(lateHrsEff > 0 || earlyHrsEff > 0) ? <span className="text-gray-400"> (cut from OT)</span> : ''}</div>}
+              {(workedSat > 0 || satCut > 0) && <div>{workedSat > 0 ? <>Worked Sat <b>{workedSat}</b> <span className="text-gray-400">(paid in OT)</span></> : null}{workedSat > 0 && satCut > 0 ? ' · ' : ''}{satCut > 0 ? <>Sat cut <b className="text-red-600">{satCut}</b> <span className="text-gray-400">(low attendance)</span></> : null}</div>}
             </div>
-            <div className="border-t border-slate-200 mt-1.5 pt-1.5">Advance outstanding <b className={dispPay.advanceDue ? 'text-amber-700' : ''}>{rupee(dispPay.advanceDue || 0)}</b></div>
+            <div className="border-t border-slate-200 mt-1.5 pt-1.5 space-y-0.5">
+              {advs.length > 0 && <div className="text-gray-600">Advance this month: {advLines}</div>}
+              <div>Advance outstanding <b className={dispPay.advanceDue ? 'text-amber-700' : ''}>{rupee(dispPay.advanceDue || 0)}</b></div>
+            </div>
           </div>
         )}
         {md.approved && !md.payment && <p className="text-xs bg-amber-50 border border-amber-200 text-amber-800 rounded p-1.5 mb-2">🔒 Ticked — figures frozen at {rupee(md.approvedNet)}. Undo the tick in the list to edit.</p>}
