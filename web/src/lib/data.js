@@ -1,7 +1,8 @@
 // Data layer. Shape matches the jobs' getState.gatherState() output.
 // Reads Firestore doc `daily_stats/today` when Firebase is configured; otherwise mock.
 import { isConfigured, db } from './firebase';
-import { doc, getDoc, getDocs, setDoc, collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, setDoc, collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { getDoc, getDocs } from './readmeter';   // metered reads → usage_reads/{date} (quota diagnosis)
 
 const MOCK = {
   at: new Date().toISOString(),
