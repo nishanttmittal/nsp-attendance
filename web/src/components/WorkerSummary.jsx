@@ -60,7 +60,12 @@ export default function WorkerSummary({ r, mk, disp }) {
         {prevBal !== 0 && <div>Previous balance <b className={prevBal >= 0 ? 'text-green-700' : 'text-red-600'}>{rupee(Math.abs(prevBal))}</b> <span className="text-gray-400">({prevBal >= 0 ? 'owed to you' : 'you owe'})</span></div>}
         {fineAmt > 0 && <div>Fine <b className="text-red-600">−{rupee(fineAmt)}</b></div>}
         {advs.length > 0 && <div className="text-gray-600">Advance this month: {advLines}</div>}
-        <div>Advance outstanding <b className={d.advanceDue ? 'text-amber-700' : ''}>{rupee(d.advanceDue || 0)}</b></div>
+        {(d.advanceDue || 0) > 0
+          ? <div className="flex items-center justify-between mt-1 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5">
+              <span className="font-semibold text-amber-800">💰 Advance carried forward</span>
+              <b className="text-lg text-amber-800">{rupee(d.advanceDue)}</b>
+            </div>
+          : <div>Advance outstanding <b className="text-gray-500">₹0</b></div>}
       </div>
     </div>
   );
