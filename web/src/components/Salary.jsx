@@ -6,6 +6,7 @@ import SelfPunchCard from './SelfPunchCard.jsx';
 import NamePick from './NamePick.jsx';
 import { payslipAllPdf, sharePdf, advanceSplit } from '../lib/salaryPdf';
 import { shareCheckSheet } from '../lib/checksheet';
+import WorkerSummary from './WorkerSummary.jsx';
 
 // SALARY — owner ticks person by person; manager sees ticked list and marks PAID.
 export default function Salary({ user }) {
@@ -173,7 +174,7 @@ function OwnerSalary({ user }) {
       <div className="bg-white rounded-xl shadow divide-y divide-gray-100">
         {visible.length === 0 && <p className="p-4 text-sm text-gray-400">No one matches.</p>}
         {visible.map((r) => (
-          <OwnerRow key={r.emp.code} r={r} busy={busy === r.emp.code} queued={pending[r.emp.code] != null}
+          <OwnerRow key={r.emp.code} r={r} mk={mk} busy={busy === r.emp.code} queued={pending[r.emp.code] != null}
             justPaidMode={justPaid[r.emp.code]}
             onName={() => setOpenCode(r.emp.code)}
             onPay={(mode) => payNow(r, mode)}
@@ -241,7 +242,7 @@ function FastPaySheet({ payC, mk, busy, onChange, onCancel, onConfirm }) {
   );
 }
 
-function OwnerRow({ r, busy, queued, justPaidMode, onName, onPay, onUndo }) {
+function OwnerRow({ r, mk, busy, queued, justPaidMode, onName, onPay, onUndo }) {
   const { emp, md, pay } = r;
   const [showDays, setShowDays] = useState(false);
   const isLocked = !!md.locked || !!md.payment;                  // settled & frozen via Lock
@@ -260,10 +261,10 @@ function OwnerRow({ r, busy, queued, justPaidMode, onName, onPay, onUndo }) {
             {(r.lateFixed || 0) > 0.25 && <span className="ml-1.5 text-[10px] bg-amber-100 text-amber-800 rounded px-1 py-0.5 align-middle">⚠ punch-fixed +{r.lateFixed}h OT</span>}
           </button>
           <div className="text-xs text-gray-500">
-            <button onClick={() => setShowDays((s) => !s)} className="text-blue-700 underline decoration-dotted underline-offset-2">{pay.paidDays}d paid {showDays ? '▾' : '▸'}</button>
+            <button onClick={() => setShowDays((s) => !s)} className="text-blue-700 underline decoration-dotted underline-offset-2">{pay.paidDays}d · details {showDays ? '▾' : '▸'}</button>
             {sub2 ? ` · ${sub2}` : ''}
           </div>
-          {showDays && <DaysBreakdown pay={pay} />}
+          {showDays && <WorkerSummary r={r} mk={mk} />}
         </div>
         <div className="text-right shrink-0">
           <div className={`font-bold text-lg ${owes && !isLocked ? 'text-green-700' : 'text-red-700'}`}>
