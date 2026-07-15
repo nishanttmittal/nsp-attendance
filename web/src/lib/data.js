@@ -388,6 +388,22 @@ export async function queueLock(code, month, { cash, account, payable, advanceCa
 export async function queueUnlock(code, month, reason, by) {
   return queueJob('unlock_month', { code, month, reason: reason || '' }, by);
 }
+// INSTANT unlock — mirror of lockMonthDirect + the worker's unlock_month: the owner may write att_salary
+// directly, so reopen the month right away (no dependency on the background robot, which may be offline).
+// Clears lock + payment and REVERTS the carry it pushed to next month (restores prevNextOpening/Advance).
+export async function unlockMonthDirect(code, month, reason, by) {
+  const e = await loadEmployee(code);
+  const md = (e.months || {})[month] || {};
+  if (!md.locked && !md.payment) return { notLocked: true };
+  const [y, m] = month.split('-').map(Number);
+  const next = m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`;
+  const months = { ...(e.months || {}) };
+  months[month] = { ...md, locked: false, payment: null, unlockedAt: new Date().toISOString(), unlockedBy: by };
+  months[next] = { ...(months[next] || {}), openingBalance: Number(md.payment?.prevNextOpening || 0), advanceBalanceIn: Number(md.payment?.prevNextAdvance || 0) };
+  const entry = { at: new Date().toISOString(), by, code, name: e.name || code, month, field: 'unlock', from: 'locked', to: 'reopened', reason: reason || '' };
+  await saveEmployee(code, { months, decisions: [...(e.decisions || []), entry] });
+  return { unlocked: true };
+}
 // INSTANT lock — the owner may write att_salary directly (rules line 49), so freeze the month + carry
 // the balance right away (no 5-min wait). A background lock_month job then adds the register + Telegram.
 export async function lockMonthDirect(code, month, { cash, account, payable, advanceCarry, breakdown, reason }, by) {

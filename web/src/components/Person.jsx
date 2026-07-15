@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { loadEmployee, loadAllAttendance, loadPunchDoc, saveEmployee, saveMonth, addAdvance, addIncrement, resignEmployee, settleAndResign, checkActionPassword, queueJob, queueLock, queueUnlock, lockMonthDirect, editNameDept, istMonth } from '../lib/data';
+import { loadEmployee, loadAllAttendance, loadPunchDoc, saveEmployee, saveMonth, addAdvance, addIncrement, resignEmployee, settleAndResign, checkActionPassword, queueJob, queueLock, queueUnlock, lockMonthDirect, unlockMonthDirect, editNameDept, istMonth } from '../lib/data';
 import { monthCtx, payFor, rupee, paymentBreakdown } from '../lib/paycalc';
 import { payslipOnePdf, sharePdf } from '../lib/salaryPdf';
 import { graceDeltaDays } from '../lib/attendanceEngine';
@@ -89,7 +89,10 @@ export default function Person({ code, mk, user, onBack }) {
     // background (best-effort): the robot adds the salary-register snapshot + Telegram alert.
     queueLock(code, mk, { cash, account, payable: pay.payable, advanceCarry: pay.advanceBalanceCarried, reason }, user.email).catch(() => {});
   });
-  const doUnlock = (reason) => act(() => queueUnlock(code, mk, reason, user.email));
+  const doUnlock = (reason) => act(async () => {
+    await unlockMonthDirect(code, mk, reason, user.email);        // INSTANT reopen (no robot dependency)
+    queueUnlock(code, mk, reason, user.email).catch(() => {});    // background: register + Telegram (best-effort)
+  });
   const today = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
   const presentPct = ctx.elapsedDays > 0 ? Math.round((pay.presentDays / ctx.elapsedDays) * 100) : 0;
 
