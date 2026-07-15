@@ -7,8 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "predeploy": "npm run build",
-    "deploy": "gh-pages -d dist"
+    "predeploy": "PWA_BASE=/nsp-attendance/ npm run build",
+    "deploy": "gh-pages -d dist --dotfiles --nojekyll"
   },
   "dependencies": {
     "firebase": "^12.14.0",

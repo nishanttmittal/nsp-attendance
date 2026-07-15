@@ -122,8 +122,9 @@ function OwnerSalary({ user }) {
       if (fresh) setEmps((prev) => prev.map((e) => (e.code === code ? fresh : e)));
     } finally { setBusy(''); }
   }
-  // One tap on a row's Cash/Account → pay the FULL amount by that method + lock, no popup.
-  const payNow = (r, mode) => doFastLock(r, mode, Math.max(0, r.pay.payable || 0));
+  // Tap a row's Cash/Account → open the pay sheet PRE-FILLED with the full payable, so the owner
+  // can enter/confirm the amount before it settles & locks (no more instant full-amount lock).
+  const payNow = (r, mode) => setPayC({ r, mode, amount: String(Math.max(0, r.pay.payable || 0)), remark: '' });
   // Undo a just-paid worker (mis-tap): instant unlock + refresh just that row.
   async function undoPay(r) {
     const code = r.emp.code;
@@ -167,7 +168,7 @@ function OwnerSalary({ user }) {
           </p>
         )}
         <label className="flex items-center gap-1.5 text-xs text-gray-500"><input type="checkbox" checked={showRemoved} onChange={(e) => setShowRemoved(e.target.checked)} /> Show removed/resigned staff (kept in the sheet for costing)</label>
-        <p className="text-[11px] text-gray-500"><b>One tap</b> — 💵 Cash or 🏦 Account pays the full amount and locks instantly (Undo if you mis-tap). Tap the <b>name</b> only for split / part-pay / OT / bonus.</p>
+        <p className="text-[11px] text-gray-500">Tap 💵 Cash or 🏦 Account → a box opens: <b>TYPE the amount</b> at the top, then <b>Pay &amp; lock</b> (Undo if you mis-tap). Tap the <b>name</b> for OT / bonus / details. <span className="text-gray-400">(pay v3)</span></p>
       </div>
 
       <input className="w-full border rounded-lg px-3 py-2" placeholder="🔍 Search name…" value={q} onChange={(e) => setQ(e.target.value)} />
@@ -195,49 +196,45 @@ function OwnerSalary({ user }) {
 // Fast Settle & lock — ONE decision. First level shows only: who, how much, which method, and a big
 // Pay button. Everything else (change amount, split, part-pay) hides behind "Change amount / method"
 // so the common case is a single tap. No reason typing.
-function FastPaySheet({ payC, mk, busy, onChange, onCancel, onConfirm }) {
+function FastPaySheet({ payC, busy, onChange, onCancel, onConfirm }) {
   const { r, mode, amount } = payC;
-  const [more, setMore] = useState(false);
   const pay = r.pay;
   const payable = pay.payable || 0;
   const owes = payable < 0;
   const amt = Number(amount) || 0;
   const closing = Math.round((payable - amt) * 100) / 100;
-  const modeLabel = mode === 'cash' ? 'Cash' : 'Account';
   return (
     <div className="fixed inset-0 z-50 bg-black/40 flex items-end sm:items-center justify-center p-4" onClick={() => busy ? null : onCancel()}>
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-5 space-y-4" onClick={(e) => e.stopPropagation()}>
-        {/* MINIMAL first level: who · how much · which method */}
         <div className="text-center">
-          <div className="text-4xl mb-1">{mode === 'cash' ? '💵' : '🏦'}</div>
+          <div className="text-3xl mb-1">{mode === 'cash' ? '💵' : '🏦'}</div>
           <p className="font-bold text-gray-900 text-xl">{r.emp.name || r.emp.code}</p>
-          {owes
-            ? <p className="text-sm text-green-700 font-medium mt-0.5">He owes {rupee(Math.abs(payable))} — locking carries it forward</p>
-            : <p className="text-gray-600 mt-0.5">Pay <b className="text-gray-900 text-lg">{rupee(amt)}</b> by {modeLabel}</p>}
-        </div>
-        <button disabled={busy} onClick={() => onConfirm(r, mode, amt)}
-          className="w-full bg-green-700 text-white rounded-xl py-4 text-base font-bold disabled:opacity-50">
-          {busy ? 'Paying…' : owes ? 'Settle & lock' : `Pay ${rupee(amt)} & lock`}
-        </button>
-        <div className="flex items-center justify-between">
-          <button disabled={busy} onClick={onCancel} className="text-sm text-gray-500 px-2 py-1 disabled:opacity-50">Cancel</button>
-          <button onClick={() => setMore((m) => !m)} className="text-sm text-blue-700 px-2 py-1">{more ? 'Hide' : 'Change amount / method'}</button>
+          <p className="text-xs text-gray-500 mt-0.5">Full payable {rupee(Math.abs(payable))}{owes ? ' — he owes us' : ''}</p>
         </div>
 
-        {/* INSIDE: only if something's unusual (split, part-pay, wrong method) */}
-        {more && (
-          <div className="border-t pt-3 space-y-3">
-            <div className="grid grid-cols-2 gap-1.5">
-              <button onClick={() => onChange({ ...payC, mode: 'cash' })} className={`rounded-lg py-2 text-sm font-semibold ${mode === 'cash' ? 'bg-green-700 text-white' : 'border border-gray-300 text-gray-600'}`}>💵 Cash</button>
-              <button onClick={() => onChange({ ...payC, mode: 'account' })} className={`rounded-lg py-2 text-sm font-semibold ${mode === 'account' ? 'bg-gray-800 text-white' : 'border border-gray-300 text-gray-600'}`}>🏦 Account</button>
-            </div>
-            <label className="block text-xs text-gray-500">Amount paid now ₹
-              <input type="number" inputMode="numeric" value={amount} onChange={(e) => onChange({ ...payC, amount: e.target.value })}
-                className="mt-1 w-full border rounded-lg px-3 py-2.5 text-xl font-bold text-gray-900 text-center" />
-            </label>
-            <p className="text-xs text-center text-gray-600">Balance <b className={closing >= 0 ? 'text-red-700' : 'text-green-700'}>{closing >= 0 ? '+' : ''}{rupee(closing)}</b> {closing >= 0 ? 'stays owed to him' : 'he owes us'} → carries next month.</p>
-          </div>
-        )}
+        {/* METHOD — pick Cash or Account */}
+        <div className="grid grid-cols-2 gap-2">
+          <button onClick={() => onChange({ ...payC, mode: 'cash' })} className={`rounded-lg py-2.5 text-sm font-semibold ${mode === 'cash' ? 'bg-green-700 text-white' : 'border border-gray-300 text-gray-600'}`}>💵 Cash</button>
+          <button onClick={() => onChange({ ...payC, mode: 'account' })} className={`rounded-lg py-2.5 text-sm font-semibold ${mode === 'account' ? 'bg-gray-800 text-white' : 'border border-gray-300 text-gray-600'}`}>🏦 Account</button>
+        </div>
+
+        {/* AMOUNT — the main thing: big, editable, ABOVE the pay button */}
+        <div>
+          <label className="block text-center text-sm font-semibold text-gray-700 mb-1">Amount paying now (₹) — tap to change</label>
+          <input type="number" inputMode="numeric" autoFocus value={amount}
+            onChange={(e) => onChange({ ...payC, amount: e.target.value })}
+            onFocus={(e) => e.target.select()}
+            className="w-full border-2 border-green-600 rounded-xl px-3 py-3 text-3xl font-bold text-gray-900 text-center focus:outline-none focus:ring-2 focus:ring-green-400" />
+          <p className="text-xs text-center text-gray-600 mt-1.5">
+            Balance <b className={closing >= 0 ? 'text-red-700' : 'text-green-700'}>{closing >= 0 ? '+' : ''}{rupee(closing)}</b> {closing >= 0 ? 'stays owed to him' : 'he owes us'} → carries next month.
+          </p>
+        </div>
+
+        <button disabled={busy} onClick={() => onConfirm(r, mode, amt)}
+          className="w-full bg-green-700 text-white rounded-xl py-4 text-base font-bold disabled:opacity-50 active:scale-95 transition">
+          {busy ? 'Paying…' : `Pay ${rupee(amt)} & lock`}
+        </button>
+        <button disabled={busy} onClick={onCancel} className="w-full text-sm text-gray-500 py-1 disabled:opacity-50">Cancel</button>
       </div>
     </div>
   );
