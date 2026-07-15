@@ -308,7 +308,7 @@ function SettleLockCard({ pay, md, busy, onLock, onUnlock }) {
         <label className="text-xs text-gray-500">Account paid ₹<input type="number" value={account} onChange={(e) => setAccount(e.target.value)} className="mt-0.5 w-full border rounded-lg px-2 py-2 text-base font-bold text-gray-800" /></label>
       </div>
       <p className="text-xs text-gray-600">{paid > 0 ? `Paying ${rupee(paid)} → ` : 'Paying nothing → '}balance <b className={closing >= 0 ? 'text-red-700' : 'text-green-700'}>{closing >= 0 ? '+' : ''}{rupee(closing)}</b> {closing >= 0 ? 'stays owed to him' : 'he owes us'}, carries to next month.</p>
-      <button disabled={!!busy} onClick={() => { const r = prompt(`Lock this month?\nPayable ₹${payable} · paying ₹${paid} (cash ${Number(cash) || 0} + account ${Number(account) || 0}) · balance ₹${closing} carries.\n\nReason (required):`); if (r == null) return; if (!r.trim()) return alert('Reason is required to lock.'); onLock(Number(cash) || 0, Number(account) || 0, r.trim()); }}
+      <button disabled={!!busy} onClick={() => onLock(Number(cash) || 0, Number(account) || 0, `Salary lock`)}
         className="w-full bg-green-700 text-white rounded-xl py-3 font-semibold disabled:opacity-50">🔒 Lock month</button>
     </div>
   );
