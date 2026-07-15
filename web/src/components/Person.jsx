@@ -36,7 +36,7 @@ export default function Person({ code, mk, user, onBack }) {
   const dispPay = snap
     ? { ...pay, ...snap, otHrsNet: snap.otHrsNet ?? pay.otHrsNet, advanceBalanceCarried: 0 }
     : locked
-      ? { ...pay, advanceRecovered: 0, advanceBalanceCarried: 0, net: paidNet }
+      ? { ...pay, advanceRecovered: 0, advanceDue: 0, advanceBalanceCarried: 0, net: paidNet }
       : pay;
   // Attendance summary for answering a worker on the spot — with the actual DATES.
   // Mid-month joiner: only count/show from the join date onward (nothing before he was employed).

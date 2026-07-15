@@ -311,6 +311,7 @@ async function handle(type, p) {
       advanceRecover: md.advanceRecover != null ? Number(md.advanceRecover) : adv + Number(md.advanceBalanceIn || 0),
       fines: Number(md.fine || 0), loanInstallment: Number(md.loanInstallment || 0), bonus: Number(md.bonus || 0),
       payPerfectBonus: !!md.perfectBonusPaid,   // full-attendance bonus: owner adds/rejects per worker
+      openingBalance: Number(md.openingBalance || 0),   // carried balance — else Telegram payslip over/under-states payable
     });
     const r = n => '₹' + Number(n || 0).toLocaleString('en-IN');
     const lines = [`🧾 <b>Payslip — ${emp.name || p.code} (${mk})</b>`,

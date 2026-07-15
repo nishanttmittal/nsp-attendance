@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { loadEmployees, loadAllAttendance, loadAllPunches, loadEmployee, setOtSource, saveEmployee, loadPayout, queueMarkPaid, queueAdvance, loadRoster, approveSalary, unapproveSalary, holdSalary, releaseSalary, ensureApprovalBackup, istMonth, queueJob, queueFinalizeHisab, checkActionPassword, lockMonthDirect, unlockMonthDirect, queueLock } from '../lib/data';
+import { loadEmployees, loadAllAttendance, loadAllPunches, loadEmployee, setOtSource, saveEmployee, loadPayout, queueMarkPaid, queueAdvance, loadRoster, approveSalary, unapproveSalary, holdSalary, releaseSalary, ensureApprovalBackup, istMonth, queueJob, queueFinalizeHisab, checkActionPassword, lockMonthDirect, unlockMonthDirect, queueLock, queueUnlock } from '../lib/data';
 import { monthOptions, monthCtx, payFor, rupee, paymentBreakdown } from '../lib/paycalc';
 import Person from './Person.jsx';
 import SelfPunchCard from './SelfPunchCard.jsx';
@@ -130,6 +130,7 @@ function OwnerSalary({ user }) {
     setBusy(code);
     try {
       await unlockMonthDirect(code, mk, 'undo', user.email);
+      queueUnlock(code, mk, 'undo', user.email).catch(() => {});   // cancel the queued lock_month so the robot can't re-lock it
       setJustPaid((p) => { const n = { ...p }; delete n[code]; return n; });
       const fresh = await loadEmployee(code).catch(() => null);
       if (fresh) setEmps((prev) => prev.map((e) => (e.code === code ? fresh : e)));

@@ -9,9 +9,13 @@ const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', '
 const r1 = (n) => Math.round(Number(n || 0) * 10) / 10;
 
 export default function WorkerSummary({ r, mk, disp }) {
-  const { emp, att, pay, detail: otDetail = [], advs = [], rawLate = 0, lateFixed = 0, otSource = 'portal' } = r;
+  const { emp, att, pay, md, detail: otDetail = [], advs = [], rawLate = 0, lateFixed = 0, otSource = 'portal' } = r;
   if (pay.noAttendance || emp.type === 'daily') return null;
-  const d = disp || pay;   // snapshot-aware fields (advance/fine/bonus) when provided, else live
+  // For a LOCKED month, read money fields from the stored snapshot (never recompute under today's rules).
+  // Locked-without-snapshot (e.g. June) → zero the advance so it can't show a recomputed outstanding.
+  const snap = md && md.payment && md.payment.breakdown ? md.payment.breakdown : null;
+  const isLocked = !!(md && (md.locked || md.payment));
+  const d = disp || (snap ? { ...pay, ...snap } : isLocked ? { ...pay, advanceRecovered: 0, advanceDue: 0 } : pay);
   const joinedThisMonth = (emp.joinDate || '').startsWith(mk);
   const fromYmd = joinedThisMonth ? emp.joinDate : null;
   const keep = (x) => !fromYmd || x.ymd >= fromYmd;

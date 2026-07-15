@@ -399,7 +399,11 @@ export async function unlockMonthDirect(code, month, reason, by) {
   const next = m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`;
   const months = { ...(e.months || {}) };
   months[month] = { ...md, locked: false, payment: null, unlockedAt: new Date().toISOString(), unlockedBy: by };
-  months[next] = { ...(months[next] || {}), openingBalance: Number(md.payment?.prevNextOpening || 0), advanceBalanceIn: Number(md.payment?.prevNextAdvance || 0) };
+  // Revert the carry we pushed to next month — BUT never touch next month if it's already locked
+  // (its balance is baked into its own frozen payment; overwriting would desync it). Unlock later months first.
+  if (!(months[next] || {}).locked) {
+    months[next] = { ...(months[next] || {}), openingBalance: Number(md.payment?.prevNextOpening || 0), advanceBalanceIn: Number(md.payment?.prevNextAdvance || 0) };
+  }
   const entry = { at: new Date().toISOString(), by, code, name: e.name || code, month, field: 'unlock', from: 'locked', to: 'reopened', reason: reason || '' };
   await saveEmployee(code, { months, decisions: [...(e.decisions || []), entry] });
   return { unlocked: true };
