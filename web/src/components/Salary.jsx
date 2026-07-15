@@ -101,30 +101,40 @@ function OwnerSalary({ user }) {
       setPayC(null); await reload();
     } finally { setBusy(''); }
   }
-  // FAST PAY: one tap on the row's Cash/Account button → this confirm → instant Settle & lock (no typing).
-  // `amount` is what's handed over (defaults to the full payable); the rest carries as balance.
-  async function doFastLock(r, mode, amount) {
+  // Settle & lock a month. Supports a SPLIT payment (part cash + part account together) and an
+  // optional owner-granted BONUS DAY (+1 day's pay) ticked right in the pay sheet. Nothing is
+  // auto-applied — the owner sets cash, account, and the bonus tick before locking.
+  async function doFastLock(r, cash, account, bonusDay) {
     const code = r.emp.code;
     setBusy(code);
     try {
       const pay = r.pay;
-      const amt = Number(amount) || 0;
-      const cash = mode === 'cash' ? amt : 0;
-      const account = mode === 'account' ? amt : 0;
-      const args = { cash, account, payable: pay.payable, advanceCarry: pay.advanceBalanceCarried, reason: `Salary ${mk} (${mode})` };
-      await lockMonthDirect(code, mk, { ...args, breakdown: paymentBreakdown(pay) }, user.email);  // instant freeze + carry
-      queueLock(code, mk, args, user.email).catch(() => {});                                       // register + Telegram
-      // FAST: update ONLY this worker (1 read) instead of reloading the whole roster — so paying
-      // 50 staff is 50 quick taps, not 50 full reloads. Optimistic ✓ + Undo shows right away.
+      const perDay = Number(pay.perDay || 0);
+      const bonusAdd = bonusDay ? perDay : 0;
+      const cashN = Number(cash) || 0;
+      const acctN = Number(account) || 0;
+      const payable = Math.round(((pay.payable || 0) + bonusAdd) * 100) / 100;
+      // bonus day is baked into THIS payment's snapshot only (payable + breakdown), never into the
+      // stored month — so an Undo returns the worker to clean pay with no lingering bonus.
+      const breakdown = bonusDay
+        ? { ...paymentBreakdown(pay), bonus: Math.round(((pay.bonus || 0) + perDay) * 100) / 100, net: Math.round(((pay.net || 0) + perDay) * 100) / 100 }
+        : paymentBreakdown(pay);
+      const args = { cash: cashN, account: acctN, payable, advanceCarry: pay.advanceBalanceCarried, reason: `Salary ${mk}${bonusDay ? ' +bonus day' : ''}` };
+      await lockMonthDirect(code, mk, { ...args, breakdown }, user.email);   // instant freeze + carry
+      queueLock(code, mk, args, user.email).catch(() => {});                 // register + Telegram
+      // FAST: update ONLY this worker (1 read) instead of reloading the whole roster.
       setPayC(null);
-      setJustPaid((p) => ({ ...p, [code]: mode }));
+      setJustPaid((p) => ({ ...p, [code]: cashN > 0 && acctN > 0 ? 'split' : (acctN > 0 ? 'account' : 'cash') }));
       const fresh = await loadEmployee(code).catch(() => null);
       if (fresh) setEmps((prev) => prev.map((e) => (e.code === code ? fresh : e)));
     } finally { setBusy(''); }
   }
-  // Tap a row's Cash/Account → open the pay sheet PRE-FILLED with the full payable, so the owner
-  // can enter/confirm the amount before it settles & locks (no more instant full-amount lock).
-  const payNow = (r, mode) => setPayC({ r, mode, amount: String(Math.max(0, r.pay.payable || 0)), remark: '' });
+  // Tap a row's Cash/Account → open the pay sheet PRE-FILLED with the full payable in that method
+  // (owner can then split part to the other method, edit amounts, or tick a bonus day).
+  const payNow = (r, mode) => {
+    const full = String(Math.max(0, r.pay.payable || 0));
+    setPayC({ r, cash: mode === 'account' ? '0' : full, account: mode === 'account' ? full : '0', bonusDay: false });
+  };
   // Undo a just-paid worker (mis-tap): instant unlock + refresh just that row.
   async function undoPay(r) {
     const code = r.emp.code;
@@ -168,7 +178,7 @@ function OwnerSalary({ user }) {
           </p>
         )}
         <label className="flex items-center gap-1.5 text-xs text-gray-500"><input type="checkbox" checked={showRemoved} onChange={(e) => setShowRemoved(e.target.checked)} /> Show removed/resigned staff (kept in the sheet for costing)</label>
-        <p className="text-[11px] text-gray-500">Tap 💵 Cash or 🏦 Account → a box opens: <b>TYPE the amount</b> at the top, then <b>Pay &amp; lock</b> (Undo if you mis-tap). Tap the <b>name</b> for OT / bonus / details. <span className="text-gray-400">(pay v3)</span></p>
+        <p className="text-[11px] text-gray-500">Tap 💵 Cash or 🏦 Account → a box opens: split across <b>Cash + Account</b>, tick <b>🎯 Bonus day</b> on top if giving one, then <b>Pay &amp; lock</b> (Undo if you mis-tap). Tap the <b>name</b> for OT / details. <span className="text-gray-400">(pay v4)</span></p>
       </div>
 
       <input className="w-full border rounded-lg px-3 py-2" placeholder="🔍 Search name…" value={q} onChange={(e) => setQ(e.target.value)} />
@@ -193,46 +203,59 @@ function OwnerSalary({ user }) {
   );
 }
 
-// Fast Settle & lock — ONE decision. First level shows only: who, how much, which method, and a big
-// Pay button. Everything else (change amount, split, part-pay) hides behind "Change amount / method"
-// so the common case is a single tap. No reason typing.
+// Settle & lock sheet. Owner can SPLIT one payment across Cash + Account (both fields at once) and
+// tick a BONUS DAY (+1 day's pay) on top. Amount fields are front-and-centre, above the Pay button.
 function FastPaySheet({ payC, busy, onChange, onCancel, onConfirm }) {
-  const { r, mode, amount } = payC;
+  const { r, cash, account, bonusDay } = payC;
   const pay = r.pay;
-  const payable = pay.payable || 0;
-  const owes = payable < 0;
-  const amt = Number(amount) || 0;
-  const closing = Math.round((payable - amt) * 100) / 100;
+  const perDay = Number(pay.perDay || 0);
+  const basePayable = pay.payable || 0;
+  const effPayable = Math.round((basePayable + (bonusDay ? perDay : 0)) * 100) / 100;   // payable incl. bonus day
+  const owes = effPayable < 0;
+  const cashN = Number(cash) || 0;
+  const acctN = Number(account) || 0;
+  const total = Math.round((cashN + acctN) * 100) / 100;
+  const closing = Math.round((effPayable - total) * 100) / 100;
   return (
     <div className="fixed inset-0 z-50 bg-black/40 flex items-end sm:items-center justify-center p-4" onClick={() => busy ? null : onCancel()}>
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-5 space-y-4" onClick={(e) => e.stopPropagation()}>
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-5 space-y-3" onClick={(e) => e.stopPropagation()}>
         <div className="text-center">
-          <div className="text-3xl mb-1">{mode === 'cash' ? '💵' : '🏦'}</div>
           <p className="font-bold text-gray-900 text-xl">{r.emp.name || r.emp.code}</p>
-          <p className="text-xs text-gray-500 mt-0.5">Full payable {rupee(Math.abs(payable))}{owes ? ' — he owes us' : ''}</p>
+          <p className="text-xs text-gray-500 mt-0.5">Payable {rupee(Math.abs(effPayable))}{owes ? ' — he owes us' : ''}{bonusDay ? ` · incl. +${rupee(perDay)} bonus` : ''}</p>
         </div>
 
-        {/* METHOD — pick Cash or Account */}
+        {/* BONUS DAY — tick on top; adds one day's pay and bumps the cash field to cover it */}
+        {perDay > 0 && (
+          <label className="flex items-center justify-between bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 cursor-pointer">
+            <span className="text-sm font-semibold text-amber-900">🎯 Bonus day <span className="font-normal text-amber-700">+{rupee(perDay)} (1 day)</span></span>
+            <input type="checkbox" className="w-6 h-6 accent-amber-600" checked={!!bonusDay} disabled={busy}
+              onChange={(e) => {
+                const on = e.target.checked;
+                const bump = on ? perDay : -perDay;
+                onChange({ ...payC, bonusDay: on, cash: String(Math.max(0, Math.round(((Number(cash) || 0) + bump) * 100) / 100)) });
+              }} />
+          </label>
+        )}
+
+        {/* SPLIT — Cash + Account, both editable at once */}
         <div className="grid grid-cols-2 gap-2">
-          <button onClick={() => onChange({ ...payC, mode: 'cash' })} className={`rounded-lg py-2.5 text-sm font-semibold ${mode === 'cash' ? 'bg-green-700 text-white' : 'border border-gray-300 text-gray-600'}`}>💵 Cash</button>
-          <button onClick={() => onChange({ ...payC, mode: 'account' })} className={`rounded-lg py-2.5 text-sm font-semibold ${mode === 'account' ? 'bg-gray-800 text-white' : 'border border-gray-300 text-gray-600'}`}>🏦 Account</button>
+          <label className="block text-xs font-semibold text-gray-600 text-center">💵 Cash ₹
+            <input type="number" inputMode="numeric" autoFocus value={cash} onChange={(e) => onChange({ ...payC, cash: e.target.value })} onFocus={(e) => e.target.select()}
+              className="mt-1 w-full border-2 border-green-600 rounded-lg px-2 py-2.5 text-2xl font-bold text-gray-900 text-center focus:outline-none focus:ring-2 focus:ring-green-400" />
+          </label>
+          <label className="block text-xs font-semibold text-gray-600 text-center">🏦 Account ₹
+            <input type="number" inputMode="numeric" value={account} onChange={(e) => onChange({ ...payC, account: e.target.value })} onFocus={(e) => e.target.select()}
+              className="mt-1 w-full border-2 border-gray-700 rounded-lg px-2 py-2.5 text-2xl font-bold text-gray-900 text-center focus:outline-none focus:ring-2 focus:ring-gray-400" />
+          </label>
         </div>
 
-        {/* AMOUNT — the main thing: big, editable, ABOVE the pay button */}
-        <div>
-          <label className="block text-center text-sm font-semibold text-gray-700 mb-1">Amount paying now (₹) — tap to change</label>
-          <input type="number" inputMode="numeric" autoFocus value={amount}
-            onChange={(e) => onChange({ ...payC, amount: e.target.value })}
-            onFocus={(e) => e.target.select()}
-            className="w-full border-2 border-green-600 rounded-xl px-3 py-3 text-3xl font-bold text-gray-900 text-center focus:outline-none focus:ring-2 focus:ring-green-400" />
-          <p className="text-xs text-center text-gray-600 mt-1.5">
-            Balance <b className={closing >= 0 ? 'text-red-700' : 'text-green-700'}>{closing >= 0 ? '+' : ''}{rupee(closing)}</b> {closing >= 0 ? 'stays owed to him' : 'he owes us'} → carries next month.
-          </p>
-        </div>
+        <p className="text-xs text-center text-gray-600">
+          Paying now <b className="text-gray-900">{rupee(total)}</b> · Balance <b className={closing >= 0 ? 'text-red-700' : 'text-green-700'}>{closing >= 0 ? '+' : ''}{rupee(closing)}</b> {closing >= 0 ? 'stays owed to him' : 'he owes us'} → carries next month.
+        </p>
 
-        <button disabled={busy} onClick={() => onConfirm(r, mode, amt)}
+        <button disabled={busy} onClick={() => onConfirm(r, cashN, acctN, !!bonusDay)}
           className="w-full bg-green-700 text-white rounded-xl py-4 text-base font-bold disabled:opacity-50 active:scale-95 transition">
-          {busy ? 'Paying…' : `Pay ${rupee(amt)} & lock`}
+          {busy ? 'Paying…' : `Pay ${rupee(total)} & lock`}
         </button>
         <button disabled={busy} onClick={onCancel} className="w-full text-sm text-gray-500 py-1 disabled:opacity-50">Cancel</button>
       </div>
@@ -275,7 +298,7 @@ function OwnerRow({ r, mk, busy, queued, justPaidMode, onName, onPay, onUndo }) 
       {/* just paid this session → ✓ confirmation + one-tap Undo for a mis-tap */}
       {justPaidMode && (
         <div className="flex items-center justify-between mt-2 text-sm">
-          <span className="text-green-700 font-semibold">✓ Paid {justPaidMode === 'cash' ? '💵 cash' : '🏦 account'}{md.payment?.closing ? ` · bal ${md.payment.closing >= 0 ? '+' : ''}${rupee(md.payment.closing)}` : ''}</span>
+          <span className="text-green-700 font-semibold">✓ Paid {justPaidMode === 'split' ? '💵+🏦 split' : justPaidMode === 'account' ? '🏦 account' : '💵 cash'}{md.payment?.closing ? ` · bal ${md.payment.closing >= 0 ? '+' : ''}${rupee(md.payment.closing)}` : ''}</span>
           <button disabled={busy} onClick={onUndo} className="text-gray-500 underline underline-offset-2 px-2 py-1 disabled:opacity-50">Undo</button>
         </div>
       )}
