@@ -128,8 +128,34 @@ export function payFor(emp, attMap, mk, ctx, graceDelta = 0, punchDoc = null) {
     presentDays: (att.presentDays || 0) + presentAdjust,
     weeklyOff: Math.max(0, (att.weeklyOff || 0) + satAdjust),
     absentDays: Math.max(0, (att.absentDays || 0) - presentAdjust - satAdjust) };
+  // OWNER MANUAL OVERRIDE (any worker): md.override = { days, ot } fixes the paid days + net OT for the
+  // month and WINS over the punch/portal figures. base = perDay × days, OT = ot hours. Used for manual
+  // workers (Radhey/Dinesh) and to correct any worker's month. Clear it to fall back to auto figures.
+  // Owner override composes independently: setting ONLY days must NOT touch OT, and setting ONLY OT
+  // must NOT touch the paid days / weekly-offs (else correcting OT silently drops paid Sundays).
+  const ov = md.override;
+  const hasDaysOv = !!ov && ov.days != null;
+  const hasOtOv = !!ov && ov.ot != null;
+  const hasOverride = hasDaysOv || hasOtOv;
+  // A manual/app-only worker with NO override AND no logged days must pay 0 (noRecord) — never a full
+  // month by default. (Guards a newly-added manual worker before the owner enters their days.)
+  const appOnlyNoData = !!emp.appOnly && !hasOverride && !((emp.attendanceLog && emp.attendanceLog[mk]) || []).length;
+  let effAtt = appOnlyNoData ? { ...otAtt, noRecord: true } : otAtt;
+  if (hasDaysOv) {
+    const ovDays = Number(ov.days) || 0;
+    const elapsed = ctx.elapsedDays || 0;
+    // monthly base is prorated by elapsed (can't pay future days mid-month); daily pays every entered day.
+    const paidDaysShown = emp.type === 'daily' ? ovDays : Math.min(ovDays, elapsed || ovDays);
+    effAtt = { ...effAtt,
+      presentDays: paidDaysShown, equivalentDays: ovDays,   // equivalentDays drives daily/app-only base
+      weeklyOff: 0, weeklyOffPresent: 0, holiday: 0, unpaidWorkedSat: 0,
+      absentDays: Math.max(0, elapsed - ovDays), noRecord: false };
+  }
+  if (hasOtOv) {
+    effAtt = { ...effAtt, otHrs: Number(ov.ot) || 0, lateHrs: 0, earlyHrs: 0 };   // owner's net OT is final
+  }
   const pay = computePay({
-    emp, att: otAtt, ...ctx,
+    emp, att: effAtt, ...ctx,
     advancesThisMonth, advanceBalanceIn,
     fines: Number(md.fine || 0), bonus: Number(md.bonus || 0),
     restoreSaturdayDays: Number(md.restoreSaturdays || 0),
@@ -138,5 +164,5 @@ export function payFor(emp, attMap, mk, ctx, graceDelta = 0, punchDoc = null) {
     latePenaltyDays: 0, weeklyOffDockDays: 0, // the machine applies late/weekly-off rules
     openingBalance: Number(md.openingBalance || 0),          // running balance carried from last month
   });
-  return { att, md, advs, advancesThisMonth, pay, portalOt, appOt, otSource, otCredit, detail: det.detail, presentAdjust, satAdjust, lateFixed, rawLate };
+  return { att, md, advs, advancesThisMonth, pay, portalOt, appOt, otSource, otCredit, detail: det.detail, presentAdjust, satAdjust, lateFixed, rawLate, hasOverride };
 }

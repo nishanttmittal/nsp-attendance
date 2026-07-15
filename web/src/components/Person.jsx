@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { loadEmployee, loadAllAttendance, loadPunchDoc, saveEmployee, saveMonth, addAdvance, addIncrement, resignEmployee, settleAndResign, checkActionPassword, queueJob, queueLock, queueUnlock, lockMonthDirect, unlockMonthDirect, editNameDept, istMonth } from '../lib/data';
+import { loadEmployee, loadAllAttendance, loadPunchDoc, saveEmployee, saveMonth, addAdvance, addIncrement, resignEmployee, settleAndResign, checkActionPassword, queueJob, queueLock, queueUnlock, lockMonthDirect, unlockMonthDirect, editNameDept, istMonth, removeWorker, restoreWorker, deleteWorkerHard, workerEverPaid } from '../lib/data';
 import { monthCtx, payFor, rupee, paymentBreakdown } from '../lib/paycalc';
 import { payslipOnePdf, sharePdf } from '../lib/salaryPdf';
 import { graceDeltaDays } from '../lib/attendanceEngine';
@@ -199,6 +199,9 @@ export default function Person({ code, mk, user, onBack }) {
       {!locked && (
         <div className="bg-white rounded-xl shadow p-3 space-y-1">
           <div className="text-sm font-semibold text-gray-700">Adjust this month</div>
+          <MonthOverride md={md} pay={pay} busy={busy}
+            onSet={(days, ot) => act(() => saveMonth(code, mk, { override: { days, ot } }))}
+            onClear={() => act(() => saveMonth(code, mk, { override: null }))} />
           {pay.type !== 'daily' && (portalOt > 0 || appOt > 0) && (
             <div className="flex items-center justify-between py-1 border-b mb-1">
               <span className="text-sm">Overtime to pay
@@ -272,6 +275,72 @@ export default function Person({ code, mk, user, onBack }) {
           Resigned {emp.resignedAt || emp.exitDate || ''}{md.payment?.settlement ? ` · final settled ${rupee(md.payment.net)}` : ''}
         </div>
       )}
+
+      <DangerZone emp={emp} busy={busy} user={user} onBack={onBack} />
+    </div>
+  );
+}
+
+// Manual override of the month's paid days + net OT — wins over the machine figures. Empty = auto.
+function MonthOverride({ md, pay, busy, onSet, onClear }) {
+  const ov = md.override || null;
+  const [days, setDays] = useState(ov?.days ?? '');
+  const [ot, setOt] = useState(ov?.ot ?? '');
+  useEffect(() => { setDays(md.override?.days ?? ''); setOt(md.override?.ot ?? ''); }, [md.override]);
+  return (
+    <div className={`rounded-lg px-2 py-2 mb-1 ${ov ? 'bg-amber-50 border border-amber-200' : 'bg-gray-50 border border-gray-200'}`}>
+      <div className="text-sm font-semibold text-gray-700">✍️ Override days / OT {ov ? <span className="text-amber-700 text-xs font-normal">(manual — wins over machine)</span> : <span className="text-gray-400 text-xs font-normal">(leave blank = auto)</span>}</div>
+      <div className="flex items-end gap-2 mt-1">
+        <label className="text-[11px] text-gray-500 flex-1">Paid days
+          <input type="number" inputMode="decimal" value={days} onChange={(e) => setDays(e.target.value)} placeholder={`auto ${pay.paidDays}`}
+            className="mt-0.5 w-full border rounded px-2 py-1.5 text-base font-semibold text-center" /></label>
+        <label className="text-[11px] text-gray-500 flex-1">OT hours
+          <input type="number" inputMode="decimal" value={ot} onChange={(e) => setOt(e.target.value)} placeholder={`auto ${pay.otHrsNet}`}
+            className="mt-0.5 w-full border rounded px-2 py-1.5 text-base font-semibold text-center" /></label>
+      </div>
+      <div className="flex gap-2 mt-2">
+        <button disabled={busy || (days === '' && ot === '')} onClick={() => onSet(days === '' ? null : Number(days), ot === '' ? null : Number(ot))}
+          className="flex-1 bg-amber-600 text-white rounded py-1.5 text-sm font-medium disabled:opacity-40">Save override</button>
+        {ov && <button disabled={busy} onClick={onClear} className="flex-1 border border-gray-300 text-gray-600 rounded py-1.5 text-sm disabled:opacity-40">Use machine figures</button>}
+      </div>
+    </div>
+  );
+}
+
+// Remove (soft, reversible) or permanently delete a worker. Permanent delete of a PAID worker
+// needs the action password; a never-paid worker can be deleted freely. Both keep a hidden archive.
+function DangerZone({ emp, busy, user, onBack }) {
+  const paid = workerEverPaid(emp);
+  const [working, setWorking] = useState(false);
+  async function softRemove() {
+    if (!confirm(`Remove ${emp.name} from the active list?\nAll history is kept and you can restore them later.`)) return;
+    setWorking(true);
+    try { await removeWorker(emp.code, user.email); onBack(); } finally { setWorking(false); }
+  }
+  async function hardDelete() {
+    if (paid) {
+      const pw = prompt(`⚠ ${emp.name} has PAID/locked months — deleting ERASES that salary history and cannot be undone.\nEnter the action password to permanently delete:`);
+      if (pw == null) return;
+      const ok = await checkActionPassword(pw);
+      if (ok === 'unset') { alert('No action password set yet — set one in ⚙ Settings before permanently deleting a paid worker.'); return; }
+      if (!ok) { alert('Wrong password.'); return; }
+      if (!confirm(`Final check: permanently delete ${emp.name} and their salary history? This cannot be undone.`)) return;
+    } else if (!confirm(`Permanently delete ${emp.name}?\nThey were never paid, so no payroll history is lost. This cannot be undone.`)) return;
+    setWorking(true);
+    try { await deleteWorkerHard(emp.code); onBack(); } finally { setWorking(false); }
+  }
+  const dis = busy || working;
+  return (
+    <div className="border border-red-200 rounded-xl p-3 space-y-2 mt-2">
+      <div className="text-sm font-semibold text-red-700">Remove / delete worker</div>
+      {emp.active === false && (
+        <p className="text-xs text-gray-500">Currently removed{emp.removedAt ? ` (${emp.removedAt})` : emp.resignedAt ? ` · resigned ${emp.resignedAt}` : ''}. <button className="text-blue-700 underline" disabled={dis} onClick={async () => { setWorking(true); try { await restoreWorker(emp.code); onBack(); } finally { setWorking(false); } }}>Restore to active</button></p>
+      )}
+      <div className="flex gap-2">
+        <button disabled={dis} onClick={softRemove} className="flex-1 border border-amber-300 text-amber-800 rounded-lg py-2 text-sm disabled:opacity-40">Remove (keep history)</button>
+        <button disabled={dis} onClick={hardDelete} className="flex-1 border border-red-300 text-red-700 rounded-lg py-2 text-sm disabled:opacity-40">Delete permanently{paid ? ' 🔒' : ''}</button>
+      </div>
+      <p className="text-[11px] text-gray-400">“Remove” hides them but keeps every record (reversible). “Delete permanently” erases the salary record and cannot be undone{paid ? ' — needs the action password because they have paid months' : ' (free for a never-paid worker)'}.</p>
     </div>
   );
 }

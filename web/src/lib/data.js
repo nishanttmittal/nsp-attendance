@@ -501,6 +501,41 @@ export async function resignEmployee(code, by) {
   await saveEmployee(code, { active: false, resignedAt: new Date().toISOString().slice(0, 10) });
   return queueJob('resign_employee', { code }, by);
 }
+
+// ---- Manual (app-only) workers + worker removal ----------------------------------------------
+// Add a worker who is NOT on the biometric machine (e.g. Radhey, Dinesh). Owner fills their days/OT
+// each month via the month override. type: 'monthly' (amount ₹/mo) or 'daily' (wage ₹/day).
+export async function addManualWorker({ name, dept = '', type = 'monthly', amount = 0, shift = 'GEN', standardHours = 8.5 }, by) {
+  const code = 'MAN-' + Date.now().toString(36).toUpperCase() + Math.floor(Math.random() * 1000);
+  const patch = {
+    name: (name || '').trim(), dept, shift, standardHours: Number(standardHours) || 8.5,
+    type: type === 'daily' ? 'daily' : 'monthly',
+    ...(type === 'daily' ? { wage: Number(amount) || 0 } : { amount: Number(amount) || 0 }),
+    appOnly: true, onMachine: false, manual: true, active: true,
+    createdBy: by || '', createdAt: new Date().toISOString(), months: {}, advances: [], increments: [],
+  };
+  await saveEmployee(code, patch);
+  return code;
+}
+// Soft remove: hide from the active salary list but KEEP all history (reversible via active:true).
+export async function removeWorker(code, by) {
+  await saveEmployee(code, { active: false, removedAt: new Date().toISOString().slice(0, 10), removedBy: by || '' });
+}
+export async function restoreWorker(code) {
+  await saveEmployee(code, { active: true, removedAt: null });
+}
+// Hard delete: permanently erase the worker's salary record (att_salary). Caller must gate this
+// (never-paid, or action password) — see Person page. att_attendance/att_punch are Admin-SDK-only
+// (rules block client writes), so they stay on the admin side but are invisible in the app.
+export async function deleteWorkerHard(code) {
+  if (!isConfigured || !db) return;
+  const { deleteDoc } = await import('firebase/firestore');
+  await deleteDoc(doc(db, 'att_salary', code));
+}
+// Has this worker been PAID (locked) in any month? (blocks free permanent-delete)
+export function workerEverPaid(emp) {
+  return Object.values((emp && emp.months) || {}).some((m) => m && (m.payment || m.locked));
+}
 // Archived (resigned + removed-from-machine) workers, newest first. Their full history is kept
 // in att_archive/{code} by the worker before the machine record is deleted.
 export async function loadArchive() {

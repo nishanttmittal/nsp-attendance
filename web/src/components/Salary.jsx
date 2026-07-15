@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
-import { loadEmployees, loadAllAttendance, loadAllPunches, loadEmployee, setOtSource, saveEmployee, loadPayout, queueMarkPaid, queueAdvance, loadRoster, approveSalary, unapproveSalary, holdSalary, releaseSalary, ensureApprovalBackup, istMonth, queueJob, queueFinalizeHisab, checkActionPassword, lockMonthDirect, unlockMonthDirect, queueLock, queueUnlock } from '../lib/data';
+import { loadEmployees, loadAllAttendance, loadAllPunches, loadEmployee, setOtSource, saveEmployee, loadPayout, queueMarkPaid, queueAdvance, loadRoster, approveSalary, unapproveSalary, holdSalary, releaseSalary, ensureApprovalBackup, istMonth, queueJob, queueFinalizeHisab, checkActionPassword, lockMonthDirect, unlockMonthDirect, queueLock, queueUnlock, addManualWorker } from '../lib/data';
 import { monthOptions, monthCtx, payFor, rupee, paymentBreakdown } from '../lib/paycalc';
 import Person from './Person.jsx';
 import SelfPunchCard from './SelfPunchCard.jsx';
 import NamePick from './NamePick.jsx';
-import { payslipAllPdf, sharePdf, advanceSplit } from '../lib/salaryPdf';
+import { payslipAllPdf, lockedRegisterPdf, sharePdf, advanceSplit } from '../lib/salaryPdf';
 import { shareCheckSheet } from '../lib/checksheet';
 import WorkerSummary from './WorkerSummary.jsx';
 
@@ -195,6 +195,7 @@ function OwnerSalary({ user }) {
       </div>
 
       <AdvanceCard user={user} />
+      <AddWorkerCard user={user} onAdded={reload} />
       {mk === istMonth() && <SelfPunchCard />}
       {noSalary.length > 0 && <NoSalaryList list={noSalary} onSaved={reload} />}
       {showReport && <ReportModal user={user} mk={mk} rows={rows} onClose={() => setShowReport(false)} />}
@@ -280,6 +281,8 @@ function OwnerRow({ r, mk, busy, queued, justPaidMode, onName, onPay, onUndo }) 
           <button onClick={onName} className="text-left block">
             <span className="font-semibold text-gray-900 text-[15px]">{emp.name || emp.code}{emp.nickname ? <span className="text-gray-400 font-normal"> ({emp.nickname})</span> : null}</span>
             {(r.lateFixed || 0) > 0.25 && <span className="ml-1.5 text-[10px] bg-amber-100 text-amber-800 rounded px-1 py-0.5 align-middle">⚠ punch-fixed +{r.lateFixed}h OT</span>}
+            {r.hasOverride && <span className="ml-1.5 text-[10px] bg-amber-100 text-amber-800 rounded px-1 py-0.5 align-middle">✍️ manual days/OT</span>}
+            {r.emp.manual && <span className="ml-1.5 text-[10px] bg-blue-100 text-blue-700 rounded px-1 py-0.5 align-middle">manual worker</span>}
           </button>
           <div className="text-xs text-gray-500">
             <button onClick={() => setShowDays((s) => !s)} className="text-blue-700 underline decoration-dotted underline-offset-2">{pay.paidDays}d · details {showDays ? '▾' : '▸'}</button>
@@ -476,6 +479,44 @@ export function AdvanceCard({ user }) {
   );
 }
 
+// Add a MANUAL worker (not on the biometric machine — e.g. Radhey, Dinesh). Owner then fills their
+// days/OT each month via the person page override, and pays them like anyone else.
+function AddWorkerCard({ user, onAdded }) {
+  const [open, setOpen] = useState(false);
+  const [f, setF] = useState({ name: '', dept: '', type: 'monthly', amount: '', standardHours: '8.5' });
+  const [st, setSt] = useState('');
+  async function go() {
+    if (!f.name.trim()) { setSt('Enter a name.'); return; }
+    if (!Number(f.amount)) { setSt(f.type === 'daily' ? 'Enter the ₹/day.' : 'Enter the ₹/month.'); return; }
+    setSt('saving');
+    try {
+      await addManualWorker({ name: f.name, dept: f.dept, type: f.type, amount: Number(f.amount), standardHours: Number(f.standardHours) || 8.5 }, user.email);
+      setSt('done'); setF({ name: '', dept: '', type: 'monthly', amount: '', standardHours: '8.5' });
+      onAdded && onAdded();
+    } catch { setSt('Could not save — try again.'); }
+  }
+  return (
+    <div className="bg-white rounded-xl shadow p-3">
+      <button onClick={() => setOpen((o) => !o)} className="w-full text-left font-semibold text-gray-800 text-sm">➕ Add a manual worker <span className="font-normal text-xs text-gray-400">— not on the machine (Radhey, Dinesh…)</span> {open ? '▲' : '▼'}</button>
+      {open && (
+        <div className="grid grid-cols-2 gap-2 mt-2">
+          <input className="border rounded px-2 py-2 text-sm col-span-2" placeholder="Name" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} />
+          <input className="border rounded px-2 py-2 text-sm" placeholder="Department (optional)" value={f.dept} onChange={(e) => setF({ ...f, dept: e.target.value })} />
+          <select className="border rounded px-2 py-2 text-sm" value={f.type} onChange={(e) => setF({ ...f, type: e.target.value })}>
+            <option value="monthly">₹ / month</option><option value="daily">₹ / day</option>
+          </select>
+          <input className="border rounded px-2 py-2 text-sm" type="number" inputMode="numeric" placeholder={f.type === 'daily' ? 'Wage ₹/day' : 'Salary ₹/month'} value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} />
+          <input className="border rounded px-2 py-2 text-sm" type="number" inputMode="decimal" placeholder="Shift hours (8.5)" value={f.standardHours} onChange={(e) => setF({ ...f, standardHours: e.target.value })} />
+          <button onClick={go} disabled={st === 'saving'} className="col-span-2 bg-gray-800 text-white rounded-lg py-2 text-sm font-medium disabled:opacity-50">Add worker</button>
+          <p className="col-span-2 text-[11px] text-gray-500">After adding, open the worker and use <b>✍️ Override days / OT</b> each month to set their days & overtime, then pay them from the Salary list.</p>
+        </div>
+      )}
+      {st === 'done' && <p className="text-xs text-green-700 mt-1">✓ Added — find them in the list above and set this month's days/OT.</p>}
+      {st && !['saving', 'done'].includes(st) && <p className="text-xs text-red-600 mt-1">{st}</p>}
+    </div>
+  );
+}
+
 /* ---------------- report modal ---------------- */
 const REPORTS = [
   { v: 'perfbtn', label: 'Performance Report' },
@@ -507,6 +548,28 @@ function ReportModal({ user, mk, rows, onClose }) {
     }));
     await sharePdf(payslipAllPdf(list, mk), `salary-register-${mk}.pdf`);
   }
+  // LOCKED-month salary + payments: only workers whose salary is locked, with days/OT/advance/
+  // payable/net/cash/account/carried — a full record of what was paid for the month, till now.
+  async function lockedReg() {
+    const locked = (rows || []).filter((r) => r.md.payment || r.md.locked);
+    if (!locked.length) { setSt('nolock'); return; }
+    const list = locked.map((r) => {
+      const p = r.md.payment || {};
+      const adv = advanceSplit(r.advs);
+      return {
+        name: r.emp.name || r.emp.code,
+        days: r.pay.paidDays,          // same paid-days figure shown in the list (not the lower present-days)
+        ot: r.pay.otHrsNet,
+        advance: adv.bank + adv.cash,
+        payable: p.payable ?? r.pay.payable,
+        net: p.breakdown?.net ?? p.net ?? r.pay.net,
+        cash: p.cash || 0,
+        account: p.account || 0,
+        carried: p.closing ?? r.pay.advanceBalanceCarried,
+      };
+    });
+    await sharePdf(lockedRegisterPdf(list, mk), `salary-locked-${mk}.pdf`);
+  }
   return (
     <div className="fixed inset-0 bg-black/40 z-20 grid place-items-center p-4" onClick={onClose}>
       <div className="bg-white rounded-2xl p-4 w-full max-w-sm space-y-3" onClick={(e) => e.stopPropagation()}>
@@ -524,6 +587,8 @@ function ReportModal({ user, mk, rows, onClose }) {
           <button onClick={send} disabled={st === 'sending'} className="w-full bg-red-700 text-white rounded-lg py-2.5 font-medium disabled:opacity-50">✈️ Send to Telegram</button>
         )}
         <button onClick={register} className="w-full border border-green-300 text-green-700 rounded-lg py-2.5 font-medium">🟢 Salary register PDF — share / WhatsApp</button>
+        <button onClick={lockedReg} className="w-full border border-gray-800 text-gray-800 rounded-lg py-2.5 font-medium">🔒 Locked salary + payments PDF <span className="font-normal text-xs text-gray-500">(days·OT·adv·payable·net·cash·account·carry)</span></button>
+        {st === 'nolock' && <p className="text-xs text-amber-700">No salary is locked yet for {monthOptions(3).find((m) => m.mk === mk)?.label || mk}. Lock/pay some workers first.</p>}
         {st === 'error' && <p className="text-xs text-red-600">Failed — try again.</p>}
       </div>
     </div>
