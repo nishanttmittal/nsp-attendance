@@ -88,7 +88,7 @@ export function payslipAllPdf(rows, monthLabel) {
 
 // LOCKED-MONTH register: for every worker whose salary is LOCKED for the month, one row with
 // Days · OT · Advance · Payable · Net · Cash paid · Account paid · Carried forward.
-// rows: { name, days, ot, advance, payable, net, cash, account, carried }
+// rows: { name, salary, days, ot, advance, payable, net, cash, account, carried }
 export function lockedRegisterPdf(rows, monthLabel) {
   const doc = new jsPDF({ orientation: 'landscape' });
   doc.setFontSize(14); doc.text('NSP ENTERPRISES  -  Salary & Payments (Locked)  -  ' + monthLabel, 14, 16);
@@ -97,15 +97,16 @@ export function lockedRegisterPdf(rows, monthLabel) {
   doc.setTextColor(0);
   autoTable(doc, {
     startY: 26,
-    head: [['Name', 'Days', 'OT (h)', 'Advance', 'Payable', 'Net', 'Cash paid', 'Account paid', 'Carried fwd']],
-    body: rows.map(r => [r.name, r.days, r.ot, rs(r.advance), rs(r.payable), rs(r.net), rs(r.cash), rs(r.account), rs(r.carried)]),
+    head: [['Name', 'Salary', 'Days', 'OT (h)', 'Advance', 'Payable', 'Net', 'Cash paid', 'Account paid', 'Carried fwd']],
+    body: rows.map(r => [r.name, rs(r.salary), r.days, r.ot, rs(r.advance), rs(r.payable), rs(r.net), rs(r.cash), rs(r.account), rs(r.carried)]),
     theme: 'striped', styles: { fontSize: 8 }, headStyles: { fillColor: [192, 57, 43] },
   });
   const t = rows.reduce((a, r) => ({
+    salary: a.salary + Number(r.salary || 0),
     payable: a.payable + Number(r.payable || 0), net: a.net + Number(r.net || 0),
     cash: a.cash + Number(r.cash || 0), account: a.account + Number(r.account || 0),
     advance: a.advance + Number(r.advance || 0), carried: a.carried + Number(r.carried || 0),
-  }), { payable: 0, net: 0, cash: 0, account: 0, advance: 0, carried: 0 });
+  }), { salary: 0, payable: 0, net: 0, cash: 0, account: 0, advance: 0, carried: 0 });
   const y = (doc.lastAutoTable?.finalY || 30) + 8;
   doc.setFontSize(10);
   doc.text(`TOTALS  -  Payable ${rs(t.payable)}   Net ${rs(t.net)}   Cash paid ${rs(t.cash)}   Account paid ${rs(t.account)}   Advance ${rs(t.advance)}   Carried ${rs(t.carried)}`, 14, y);

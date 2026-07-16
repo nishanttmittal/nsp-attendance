@@ -30,6 +30,8 @@ function OwnerSalary({ user }) {
   const [showRemoved, setShowRemoved] = useState(false);   // include resigned/removed (kept for costing)
   const [pending, setPending] = useState({});   // code -> paidSoFar-before-tap; a payment is queued (5-min worker)
   const ctx = useMemo(() => monthCtx(mk), [mk]);
+  // manual/off-machine workers — passed to the advance card so they can be picked for advances
+  const manualPeople = useMemo(() => (emps || []).filter((e) => e.manual || e.appOnly).map((e) => ({ code: e.code, name: e.name || e.code, dept: e.dept || '' })), [emps]);
 
   async function reload() {
     const [list, am, pu] = await Promise.all([loadEmployees(showRemoved), loadAllAttendance(), loadAllPunches()]);
@@ -194,7 +196,7 @@ function OwnerSalary({ user }) {
         ))}
       </div>
 
-      <AdvanceCard user={user} />
+      <AdvanceCard user={user} extra={manualPeople} />
       <AddWorkerCard user={user} onAdded={reload} />
       {mk === istMonth() && <SelfPunchCard />}
       {noSalary.length > 0 && <NoSalaryList list={noSalary} onSaved={reload} />}
@@ -442,12 +444,17 @@ function ManagerSalary({ user }) {
 
 // quick advance entry (manager + owner): date, amount, mode, remark; blocked once that
 // month's salary is already paid for the person.
-export function AdvanceCard({ user }) {
+export function AdvanceCard({ user, extra = [] }) {
   const today = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
   const [roster, setRoster] = useState([]);
   const [f, setF] = useState({ code: null, name: '', amount: '', mode: 'cash', date: today, remark: '' });
   const [st, setSt] = useState('');
   useEffect(() => { loadRoster().then(setRoster); }, []);
+  // include manual/off-machine workers (Radhey/Dinesh) — they aren't in the machine roster
+  const pickList = useMemo(() => {
+    const codes = new Set(roster.map((e) => e.code));
+    return [...roster, ...extra.filter((e) => e && e.code && !codes.has(e.code))];
+  }, [roster, extra]);
   async function go() {
     if (!f.code) { setSt('Pick a person (type the name).'); return; }
     if (!Number(f.amount) || !f.date) { setSt('Fill date and amount.'); return; }
@@ -463,7 +470,7 @@ export function AdvanceCard({ user }) {
     <div className="bg-white rounded-xl shadow p-3 space-y-2">
       <div className="font-semibold text-gray-800 text-sm">💸 Give advance</div>
       <div className="grid grid-cols-2 gap-2">
-        <NamePick roster={roster} value={f.name} onChange={(code, name) => setF({ ...f, code, name })} className="col-span-2" />
+        <NamePick roster={pickList} value={f.name} onChange={(code, name) => setF({ ...f, code, name })} className="col-span-2" />
         <input className="border rounded px-2 py-2 text-sm" type="date" value={f.date} onChange={(e) => setF({ ...f, date: e.target.value })} />
         <input className="border rounded px-2 py-2 text-sm" type="number" placeholder="Amount ₹" value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} />
         <select className="border rounded px-2 py-2 text-sm" value={f.mode} onChange={(e) => setF({ ...f, mode: e.target.value })}>
@@ -558,6 +565,7 @@ function ReportModal({ user, mk, rows, onClose }) {
       const adv = advanceSplit(r.advs);
       return {
         name: r.emp.name || r.emp.code,
+        salary: r.emp.type === 'daily' ? Number(r.emp.wage || 0) : Number(r.emp.amount || 0),   // current rate
         days: r.pay.paidDays,          // same paid-days figure shown in the list (not the lower present-days)
         ot: r.pay.otHrsNet,
         advance: adv.bank + adv.cash,

@@ -144,12 +144,13 @@ export function payFor(emp, attMap, mk, ctx, graceDelta = 0, punchDoc = null) {
   if (hasDaysOv) {
     const ovDays = Number(ov.days) || 0;
     const elapsed = ctx.elapsedDays || 0;
-    // monthly base is prorated by elapsed (can't pay future days mid-month); daily pays every entered day.
-    const paidDaysShown = emp.type === 'daily' ? ovDays : Math.min(ovDays, elapsed || ovDays);
+    // Honor the override LITERALLY: pay exactly `ovDays` days (monthly base = perDay×ovDays, even if
+    // ovDays > days-in-month → the owner can pay an extra day). absentDays is left un-floored so the
+    // engine's max(0, elapsed − absent) resolves to ovDays; display paidDays = ovDays (matches pay).
     effAtt = { ...effAtt,
-      presentDays: paidDaysShown, equivalentDays: ovDays,   // equivalentDays drives daily/app-only base
+      presentDays: ovDays, equivalentDays: ovDays,   // equivalentDays drives daily/app-only base
       weeklyOff: 0, weeklyOffPresent: 0, holiday: 0, unpaidWorkedSat: 0,
-      absentDays: Math.max(0, elapsed - ovDays), noRecord: false };
+      absentDays: elapsed - ovDays, noRecord: false };
   }
   if (hasOtOv) {
     effAtt = { ...effAtt, otHrs: Number(ov.ot) || 0, lateHrs: 0, earlyHrs: 0 };   // owner's net OT is final
