@@ -64,6 +64,12 @@ function OwnerSalary({ user }) {
   const totalPayable = rows.reduce((s, r) => s + Number((r.md.locked || r.md.payment) ? (r.md.payment?.net || 0) : (r.pay.payable || 0)), 0);
   const paidNet = locked.reduce((s, r) => s + Number(r.md.payment?.net || 0), 0);
   const pendingNet = rows.filter((r) => !(r.md.locked || r.md.payment)).reduce((s, r) => s + Number(r.pay.payable || 0), 0);
+  // Total money GIVEN OUT this month = advances handed out during the month (ALL people, even
+  // no-salary ones — an advance is cash out regardless) + salary actually paid (locked payment
+  // net = cash+account at lock; part payments via paidSoFar for months not locked yet).
+  const advancesOut = emps.reduce((s, e) => s + (e.advances || []).filter((a) => (a.date || '').startsWith(mk)).reduce((t, a) => t + Number(a.amount || 0), 0), 0);
+  const salaryOut = rows.reduce((s, r) => s + Number(r.md.payment ? (r.md.payment.net || 0) : (r.md.paidSoFar || 0)), 0);
+  const moneyOut = Math.round((advancesOut + salaryOut) * 100) / 100;
 
   async function tick(r) {
     setBusy(r.emp.code);
@@ -171,6 +177,10 @@ function OwnerSalary({ user }) {
             <span>Paid <b className="text-green-700">{rupee(paidNet)}</b></span>
             <span>Pending <b className="text-red-600">{rupee(pendingNet)}</b></span>
             <span>Total {rupee(totalPayable)}{ctx.fullMonth ? '' : ' so far'}</span>
+          </div>
+          <div className="text-xs text-gray-700 bg-gray-50 border border-gray-200 rounded-lg px-2 py-1.5 mt-1.5">
+            💸 <b>Total given this month: {rupee(moneyOut)}</b>
+            <span className="text-gray-500"> = advances {rupee(advancesOut)} + salary paid {rupee(salaryOut)}</span>
           </div>
         </div>
         {!ctx.fullMonth && <p className="text-xs text-gray-400">Running month — figures till yesterday.</p>}
