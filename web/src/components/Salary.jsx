@@ -29,6 +29,8 @@ function OwnerSalary({ user }) {
   const [justPaid, setJustPaid] = useState({});   // code -> mode, paid THIS session (shows ✓ + Undo)
   const [showRemoved, setShowRemoved] = useState(false);   // include resigned/removed (kept for costing)
   const [pending, setPending] = useState({});   // code -> paidSoFar-before-tap; a payment is queued (5-min worker)
+  const [filter, setFilter] = useState('all');       // all | topay | paid — chips above the list
+  const [showMoney, setShowMoney] = useState(false); // 💸 total box tapped open → cash/account detail
   const ctx = useMemo(() => monthCtx(mk), [mk]);
   // manual/off-machine workers — passed to the advance card so they can be picked for advances
   const manualPeople = useMemo(() => (emps || []).filter((e) => e.manual || e.appOnly).map((e) => ({ code: e.code, name: e.name || e.code, dept: e.dept || '' })), [emps]);
@@ -58,7 +60,9 @@ function OwnerSalary({ user }) {
   const rows = emps.filter((e) => e.amount || e.wage).map((e) => ({ emp: e, ...payFor(e, attMap, mk, ctx, 0, punches[e.code]) }));
   const locked = rows.filter((r) => r.md.locked || r.md.payment);   // settled via Lock
   const brokenFix = rows.filter((r) => (r.lateFixed || 0) > 0.25);   // workers auto-corrected for broken-punch fake "late"
-  const visible = rows.filter((r) => !q || (r.emp.name || '').toLowerCase().includes(q.toLowerCase()));
+  const isSettled = (r) => !!(r.md.locked || r.md.payment);
+  const visible = rows.filter((r) => !q || (r.emp.name || '').toLowerCase().includes(q.toLowerCase()))
+    .filter((r) => filter === 'all' ? true : filter === 'paid' ? isSettled(r) : !isSettled(r));
   const noSalary = emps.filter((e) => !(e.amount || e.wage));
   // month payroll totals: payable for the unsettled, actual paid for the locked
   const totalPayable = rows.reduce((s, r) => s + Number((r.md.locked || r.md.payment) ? (r.md.payment?.net || 0) : (r.pay.payable || 0)), 0);
@@ -67,8 +71,12 @@ function OwnerSalary({ user }) {
   // Total money GIVEN OUT this month = advances handed out during the month (ALL people, even
   // no-salary ones — an advance is cash out regardless) + salary actually paid (locked payment
   // net = cash+account at lock; part payments via paidSoFar for months not locked yet).
-  const advancesOut = emps.reduce((s, e) => s + (e.advances || []).filter((a) => (a.date || '').startsWith(mk)).reduce((t, a) => t + Number(a.amount || 0), 0), 0);
+  const advEntries = emps.flatMap((e) => (e.advances || []).filter((a) => (a.date || '').startsWith(mk)));
+  const advancesOut = advEntries.reduce((t, a) => t + Number(a.amount || 0), 0);
+  const advCash = advEntries.filter((a) => a.mode !== 'account').reduce((t, a) => t + Number(a.amount || 0), 0);
   const salaryOut = rows.reduce((s, r) => s + Number(r.md.payment ? (r.md.payment.net || 0) : (r.md.paidSoFar || 0)), 0);
+  const salCash = rows.reduce((s, r) => s + Number(r.md.payment?.cash || 0), 0);
+  const salAcct = rows.reduce((s, r) => s + Number(r.md.payment?.account || 0), 0);
   const moneyOut = Math.round((advancesOut + salaryOut) * 100) / 100;
 
   async function tick(r) {
@@ -178,10 +186,18 @@ function OwnerSalary({ user }) {
             <span>Pending <b className="text-red-600">{rupee(pendingNet)}</b></span>
             <span>Total {rupee(totalPayable)}{ctx.fullMonth ? '' : ' so far'}</span>
           </div>
-          <div className="text-xs text-gray-700 bg-gray-50 border border-gray-200 rounded-lg px-2 py-1.5 mt-1.5">
+          <button onClick={() => setShowMoney((s) => !s)} className="w-full text-left text-xs text-gray-700 bg-gray-50 border border-gray-200 rounded-lg px-2 py-1.5 mt-1.5 active:bg-gray-100">
             💸 <b>Total given this month: {rupee(moneyOut)}</b>
             <span className="text-gray-500"> = advances {rupee(advancesOut)} + salary paid {rupee(salaryOut)}</span>
-          </div>
+            <span className="float-right text-gray-400">{showMoney ? '▾' : '▸'}</span>
+            {showMoney && (
+              <span className="block mt-1.5 pt-1.5 border-t border-gray-200 text-gray-600 space-y-0.5">
+                <span className="block">💵 Cash out: <b className="text-gray-800">{rupee(salCash + advCash)}</b> <span className="text-gray-400">(salary {rupee(salCash)} + advances {rupee(advCash)})</span></span>
+                <span className="block">🏦 Account out: <b className="text-gray-800">{rupee(salAcct + (advancesOut - advCash))}</b> <span className="text-gray-400">(salary {rupee(salAcct)} + advances {rupee(advancesOut - advCash)})</span></span>
+                <span className="block">📝 {advEntries.length} advance{advEntries.length === 1 ? '' : 's'} given · {locked.length} salar{locked.length === 1 ? 'y' : 'ies'} paid &amp; locked</span>
+              </span>
+            )}
+          </button>
         </div>
         {!ctx.fullMonth && <p className="text-xs text-gray-400">Running month — figures till yesterday.</p>}
         {brokenFix.length > 0 && (
@@ -193,10 +209,28 @@ function OwnerSalary({ user }) {
         <p className="text-[11px] text-gray-500">Tap 💵 Cash or 🏦 Account → a box opens: split across <b>Cash + Account</b>, tick <b>🎯 Bonus day</b> on top if giving one, then <b>Pay &amp; lock</b> (Undo if you mis-tap). Tap the <b>name</b> for OT / details. <span className="text-gray-400">(pay v4)</span></p>
       </div>
 
+      {/* filter chips — one tap to see only who is LEFT to pay (the main pay-day question) */}
+      <div className="flex gap-2">
+        {[
+          ['all', `All (${rows.length})`],
+          ['topay', `🔴 To pay (${Math.max(0, rows.length - locked.length)})`],
+          ['paid', `✅ Paid (${locked.length})`],
+        ].map(([key, label]) => (
+          <button key={key} onClick={() => setFilter(key)}
+            className={`flex-1 rounded-xl py-2.5 text-sm font-semibold border transition ${filter === key ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-600 border-gray-300'}`}>
+            {label}
+          </button>
+        ))}
+      </div>
+
       <input className="w-full border rounded-lg px-3 py-2" placeholder="🔍 Search name…" value={q} onChange={(e) => setQ(e.target.value)} />
 
       <div className="bg-white rounded-xl shadow divide-y divide-gray-100">
-        {visible.length === 0 && <p className="p-4 text-sm text-gray-400">No one matches.</p>}
+        {visible.length === 0 && (
+          <p className="p-4 text-sm text-gray-400">
+            {filter === 'topay' && rows.length - locked.length === 0 && !q ? '🎉 Everyone is paid for this month!' : 'No one matches.'}
+          </p>
+        )}
         {visible.map((r) => (
           <OwnerRow key={r.emp.code} r={r} mk={mk} busy={busy === r.emp.code} queued={pending[r.emp.code] != null}
             justPaidMode={justPaid[r.emp.code]}
@@ -287,7 +321,7 @@ function OwnerRow({ r, mk, busy, queued, justPaidMode, onName, onPay, onUndo }) 
     (pay.openingBalance || 0) !== 0 ? `bal ${pay.openingBalance > 0 ? '+' : ''}${rupee(pay.openingBalance)}` : null,
   ].filter(Boolean).join(' · ');
   return (
-    <div className={`p-3 ${justPaidMode ? 'bg-green-50' : ''}`}>
+    <div className={`p-3 ${justPaidMode ? 'bg-green-50' : isLocked ? 'opacity-70' : ''}`}>
       <div className="flex items-start gap-2">
         <div className="flex-1 min-w-0">
           <button onClick={onName} className="text-left block">
