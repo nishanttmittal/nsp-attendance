@@ -45,6 +45,7 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          BACKUP_DEPLOY_KEY: ${{ secrets.BACKUP_DEPLOY_KEY }}
         run: |
           case "${TASK:-$SCHED}" in
             "headcount"|"10 12 * * *")   node eveningHeadcount.js ;;
@@ -55,7 +56,20 @@ jobs:
             "reprocess"|"30 1 * * *")     node dailyReprocess.js ;;
             "salary-data"|"45 1 * * *")   node publishSalaryData.js ;;
             "backup"|"0 2 * * 0")         node backup.js ;;
-            "welder-backup"|"15 21 * * *") node welderBackup.js ;;
+            "welder-backup"|"15 21 * * *")
+              node welderBackup.js
+              # push the JSON to the PRIVATE unico-backups repo (no Telegram on success)
+              mkdir -p ~/.ssh && printf '%s\n' "$BACKUP_DEPLOY_KEY" > ~/.ssh/backup_key && chmod 600 ~/.ssh/backup_key
+              ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
+              export GIT_SSH_COMMAND="ssh -i ~/.ssh/backup_key -o IdentitiesOnly=yes"
+              git clone --depth 1 git@github.com:nishanttmittal/unico-backups.git /tmp/ubk
+              mkdir -p /tmp/ubk/welder && cp downloads/welder-backup-*.json /tmp/ubk/welder/
+              ls /tmp/ubk/welder/*.json | sort | head -n -60 | xargs -r rm --   # keep last 60 nights in the checkout
+              git -C /tmp/ubk config user.email "backup-bot@unico" && git -C /tmp/ubk config user.name "unico-backup-bot"
+              git -C /tmp/ubk add -A
+              git -C /tmp/ubk commit -m "welder nightly backup $(date -u +%F)" || echo "nothing new"
+              git -C /tmp/ubk push
+              ;;
             "sync-employees"|"15 2 * * *") node syncEmployees.js ;;
             "welder-production"|"30 14 * * *") node welderProduction.js ;;
             "plating-summary"|"35 14 * * *")  node platingSummary.js ;;
@@ -63,3 +77,14 @@ jobs:
             "welder-pay"|"30 13 * * 6")        node welderContractorPay.js ;;
             *) echo "no task matched ${TASK:-$SCHED}" ;;
           esac
+      - name: Telegram alert on failure
+        if: failure()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SCHED: ${{ github.event.schedule }}
+          TASK: ${{ github.event.inputs.task }}
+        run: |
+          curl -s "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            -d chat_id="${TELEGRAM_CHAT_ID}" \
+            -d text="⚠️ Scheduled job FAILED: ${TASK:-$SCHED} (nsp-attendance Actions) — backups/alerts may not have run."

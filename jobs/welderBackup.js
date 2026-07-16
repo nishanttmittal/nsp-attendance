@@ -1,10 +1,9 @@
 // Nightly backup of the WELDER contractor app (owner ask 2026-07-16): exports every
-// apps/welder/* collection to JSON and sends it to Telegram as the off-site copy —
-// same pattern as backup.js (attendance). Scheduled in .github/workflows/alerts.yml.
+// apps/welder/* collection to JSON. The workflow step pushes the file to the PRIVATE
+// unico-backups repo (owner 2026-07-17: no daily Telegram files — Telegram only on FAILURE).
 const fs = require('fs');
 const path = require('path');
 const { db } = require('./lib/firestore');
-const { sendTelegramDocument } = require('./lib/notify');
 
 (async () => {
   const root = db().collection('apps').doc('welder');
@@ -20,6 +19,5 @@ const { sendTelegramDocument } = require('./lib/notify');
   const stamp = new Date().toISOString().slice(0, 10);
   const f = path.join(dir, `welder-backup-${stamp}.json`);
   fs.writeFileSync(f, JSON.stringify(out, null, 2));
-  await sendTelegramDocument(f, `🗄️ Welder app nightly backup — ${total} records across ${cols.length} collections (hisab, payments, rates, dispatches…)`);
-  console.log('welder backup sent:', path.basename(f), `${total} records`);
+  console.log('welder backup written:', path.basename(f), `${total} records, ${cols.length} collections`);
 })();
