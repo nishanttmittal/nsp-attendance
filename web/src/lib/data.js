@@ -553,37 +553,10 @@ export async function loadAttendance(code) {
   return MOCK_ATT[code] || { presentDays: 0, absentDays: 0, otHrs: 0, lateHrs: 0, earlyHrs: 0 };
 }
 
-// The app-data collections that make up a full backup (all namespaced att_*).
-const BACKUP_COLLECTIONS = ['att_employees', 'att_salary', 'att_advances', 'att_increments', 'att_loans', 'att_fines', 'att_month_locks'];
-
-// Export everything into one JSON object (for download / off-site backup).
-export async function exportAllData() {
-  const out = { app: 'nsp-attendance', version: 1, exportedAt: new Date().toISOString(), collections: {} };
-  if (!isConfigured || !db) {
-    out.source = 'sample';
-    out.collections = { employees: { '00000018': { type: 'monthly', amount: 18000, shift: 'GEN' } }, advances: [], increments: {}, loans: {}, fines: {}, month_locks: {} };
-    return out;
-  }
-  const { getDocs, collection } = await import('firebase/firestore');
-  for (const name of BACKUP_COLLECTIONS) {
-    const snap = await getDocs(collection(db, name));
-    out.collections[name] = Object.fromEntries(snap.docs.map(d => [d.id, d.data()]));
-  }
-  return out;
-}
-
-// Restore from a previously exported object (overwrites matching docs).
-export async function restoreAllData(obj) {
-  if (!obj || obj.app !== 'nsp-attendance' || !obj.collections) throw new Error('Not a valid NSP Attendance backup file.');
-  if (!isConfigured || !db) return { restored: 0, mock: true };
-  const { doc, setDoc, collection } = await import('firebase/firestore');
-  let restored = 0;
-  for (const [name, docs] of Object.entries(obj.collections)) {
-    if (!BACKUP_COLLECTIONS.includes(name)) continue;
-    for (const [id, data] of Object.entries(docs || {})) { await setDoc(doc(collection(db, name), id), data, { merge: true }); restored++; }
-  }
-  return { restored };
-}
+// In-app export/restore REMOVED 2026-07-17: it referenced retired collections (att_employees,
+// att_advances, …) and missed attendance/punches — an incomplete file that looked like a full
+// backup, next to a Restore that could overwrite live payroll. Real backup = nightly cloud job
+// (jobs/fullBackup.js → private unico-backups repo); restores are done via firebase-admin.
 
 // Queue a job for the GitHub Actions worker to pick up (manual punch / monthly download).
 export async function queueJob(type, payload, requestedBy) {

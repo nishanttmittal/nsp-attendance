@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { loadEmployees, loadAllAttendance, loadAllPunches, loadEmployee, setOtSource, saveEmployee, loadPayout, queueMarkPaid, queueAdvance, loadRoster, approveSalary, unapproveSalary, holdSalary, releaseSalary, ensureApprovalBackup, istMonth, queueJob, queueFinalizeHisab, checkActionPassword, lockMonthDirect, unlockMonthDirect, queueLock, queueUnlock, addManualWorker } from '../lib/data';
+import { loadEmployees, loadAllAttendance, loadAllPunches, loadEmployee, saveEmployee, loadPayout, queueAdvance, loadRoster, istMonth, queueJob, lockMonthDirect, unlockMonthDirect, queueLock, queueUnlock, addManualWorker } from '../lib/data';
 import { monthOptions, monthCtx, payFor, rupee, paymentBreakdown } from '../lib/paycalc';
 import Person from './Person.jsx';
 import SelfPunchCard from './SelfPunchCard.jsx';
@@ -28,7 +28,6 @@ function OwnerSalary({ user }) {
   const [payC, setPayC] = useState(null);   // owner pay&settle dialog: { r, mode, amount, remark }
   const [justPaid, setJustPaid] = useState({});   // code -> mode, paid THIS session (shows ✓ + Undo)
   const [showRemoved, setShowRemoved] = useState(false);   // include resigned/removed (kept for costing)
-  const [pending, setPending] = useState({});   // code -> paidSoFar-before-tap; a payment is queued (5-min worker)
   const [filter, setFilter] = useState('all');       // all | topay | paid — chips above the list
   const [showMoney, setShowMoney] = useState(false); // 💸 total box tapped open → cash/account detail
   const ctx = useMemo(() => monthCtx(mk), [mk]);
@@ -40,19 +39,6 @@ function OwnerSalary({ user }) {
     setEmps(list); setAttMap(am); setPunches(pu);
   }
   useEffect(() => { reload(); }, [showRemoved]);
-  useEffect(() => { setPending({}); }, [mk]);   // queued markers are per selected month
-  // clear a "queued" marker once the worker has applied it (fully paid, or paidSoFar advanced)
-  useEffect(() => {
-    if (!emps) return;
-    setPending((prev) => {
-      const next = { ...prev }; let changed = false;
-      for (const code of Object.keys(prev)) {
-        const md = (emps.find((x) => x.code === code)?.months || {})[mk] || {};
-        if (md.payment || Number(md.paidSoFar || 0) > prev[code]) { delete next[code]; changed = true; }
-      }
-      return changed ? next : prev;
-    });
-  }, [emps, mk]);
 
   if (openCode) return <Person code={openCode} mk={mk} user={user} onBack={() => { setOpenCode(''); reload(); }} />;
   if (emps === null) return <p className="text-gray-500">Loading…</p>;
@@ -79,44 +65,6 @@ function OwnerSalary({ user }) {
   const salAcct = rows.reduce((s, r) => s + Number(r.md.payment?.account || 0), 0);
   const moneyOut = Math.round((advancesOut + salaryOut) * 100) / 100;
 
-  async function tick(r) {
-    setBusy(r.emp.code);
-    try {
-      if (r.md.approved) await unapproveSalary(r.emp.code, mk);
-      else { await ensureApprovalBackup(mk, user.email); await approveSalary(r.emp.code, mk, r.pay, user.email); }
-      await reload();
-    } finally { setBusy(''); }
-  }
-
-  // owner picks which OT to pay (portal vs app-computed) — locks in when the row is ticked/paid
-  async function chooseOt(r, source) {
-    setBusy(r.emp.code);
-    try { await setOtSource(r.emp.code, mk, source); await reload(); }
-    finally { setBusy(''); }
-  }
-
-  async function hold(r) {
-    const reason = prompt(`Hold ${r.emp.name}'s salary for ${mk}.\nReason (required):`);
-    if (!reason || !reason.trim()) return;
-    setBusy(r.emp.code);
-    try { await holdSalary(r.emp.code, mk, reason.trim(), user.email); await reload(); }
-    finally { setBusy(''); }
-  }
-  async function release(r) {
-    setBusy(r.emp.code);
-    try { await releaseSalary(r.emp.code, mk, user.email); await reload(); }
-    finally { setBusy(''); }
-  }
-  // owner pays & settles a ticked month (any month, incl. previous). Supports PART payments.
-  async function doPay(r, mode, remark, amount) {
-    setBusy(r.emp.code);
-    const prevPaid = Number(r.md.paidSoFar || 0);
-    try {
-      await queueMarkPaid(r.emp.code, mk, mode, user.email, remark, amount);
-      setPending((p) => ({ ...p, [r.emp.code]: prevPaid }));   // ⏳ until the worker applies it
-      setPayC(null); await reload();
-    } finally { setBusy(''); }
-  }
   // Settle & lock a month. Supports a SPLIT payment (part cash + part account together) and an
   // optional owner-granted BONUS DAY (+1 day's pay) ticked right in the pay sheet. Nothing is
   // auto-applied — the owner sets cash, account, and the bonus tick before locking.
@@ -261,7 +209,7 @@ function OwnerSalary({ user }) {
           </p>
         )}
         {visible.map((r) => (
-          <OwnerRow key={r.emp.code} r={r} mk={mk} busy={busy === r.emp.code} queued={pending[r.emp.code] != null}
+          <OwnerRow key={r.emp.code} r={r} mk={mk} busy={busy === r.emp.code}
             justPaidMode={justPaid[r.emp.code]}
             onName={() => setOpenCode(r.emp.code)}
             onPay={(mode) => payNow(r, mode)}
@@ -354,7 +302,7 @@ function FastPaySheet({ payC, busy, onChange, onCancel, onConfirm }) {
   );
 }
 
-function OwnerRow({ r, mk, busy, queued, justPaidMode, onName, onPay, onUndo }) {
+function OwnerRow({ r, mk, busy, justPaidMode, onName, onPay, onUndo }) {
   const { emp, md, pay } = r;
   const [showDays, setShowDays] = useState(false);
   const isLocked = !!md.locked || !!md.payment;                  // settled & frozen via Lock
@@ -385,7 +333,6 @@ function OwnerRow({ r, mk, busy, queued, justPaidMode, onName, onPay, onUndo }) 
             {isLocked ? rupee(md.payment?.net || 0) : owes ? `owes ${rupee(Math.abs(payable))}` : rupee(payable)}
           </div>
           {isLocked && !justPaidMode && <span className="text-[11px] text-emerald-700 font-medium">🔒 Locked{md.payment?.closing ? ` · bal ${md.payment.closing >= 0 ? '+' : ''}${rupee(md.payment.closing)}` : ''}</span>}
-          {queued && !isLocked && <span className="text-[11px] text-amber-600 font-medium">⏳ saving…</span>}
         </div>
       </div>
       {/* just paid this session → ✓ confirmation + one-tap Undo for a mis-tap */}
@@ -396,7 +343,7 @@ function OwnerRow({ r, mk, busy, queued, justPaidMode, onName, onPay, onUndo }) 
         </div>
       )}
       {/* not settled → ONE-TAP pay (full amount, that method, locks instantly) */}
-      {!isLocked && !queued && (
+      {!isLocked && (
         <div className="flex gap-2 mt-3">
           {owes ? (
             <button disabled={busy} onClick={() => onPay('cash')} className="flex-1 bg-slate-800 text-white rounded-2xl py-4 font-bold text-sm disabled:opacity-50 active:scale-95 transition-all">Settle &amp; lock <span className="font-normal opacity-80">(carries {rupee(Math.abs(payable))})</span></button>
@@ -412,120 +359,53 @@ function OwnerRow({ r, mk, busy, queued, justPaidMode, onName, onPay, onUndo }) 
   );
 }
 
-// Tap "paid days" to see what makes it up — straight from the Realtime sheet:
-//  • monthly: Present + Paid Saturday (ALL Saturdays — salaried) + Holiday. Worked Saturdays
-//    are in OT (their own line), not an extra day.
-//  • daily: only present working days; Saturdays/holidays unpaid (working one → OT).
-function DaysBreakdown({ pay }) {
-  const daily = pay.type === 'daily';
-  const lines = [
-    ['Present', pay.presentDays, true],
-    [daily ? 'Saturday' : 'Paid Saturday', pay.weeklyOffAll, !daily],
-    ['Holiday', pay.holiday, !daily],
-  ];
-  return (
-    <div className="mt-1 bg-gray-50 rounded-lg p-2 text-[11px] text-gray-600 space-y-0.5">
-      {lines.map(([label, val, paid]) => (
-        <div key={label} className="flex justify-between">
-          <span>{label}</span>
-          <span className={paid ? 'text-gray-800 font-medium' : 'text-gray-400'}>{val || 0}d{paid ? '' : ' · unpaid'}</span>
-        </div>
-      ))}
-      {pay.absentDays > 0 && <div className="flex justify-between"><span>Absent</span><span className="text-red-500">−{pay.absentDays}d</span></div>}
-      {!daily && pay.saturdaysCut > 0 && <div className="flex justify-between"><span>Saturdays cut (low attendance)</span><span className="text-red-500">{pay.saturdaysCut} of {pay.saturdaysInPeriod}</span></div>}
-      <div className="flex justify-between border-t border-gray-200 pt-0.5 mt-0.5 font-semibold text-gray-800"><span>Paid days</span><span>{pay.paidDays}d</span></div>
-      {pay.otHrsNet > 0 && <div className="flex justify-between text-blue-700"><span>Overtime{pay.weeklyOffPresent > 0 ? ` (incl. ${pay.weeklyOffPresent} Sat worked)` : ''}</span><span>{pay.otHrsNet}h</span></div>}
-      <div className="text-gray-400 pt-0.5 leading-snug">
-        {daily
-          ? 'Daily wage: only worked days are paid. Saturdays & holidays are unpaid — working one earns OT, not a paid day.'
-          : pay.saturdaysCut > 0
-            ? `A Saturday is paid only when that week's attendance earns it. ${pay.saturdaysCut} of ${pay.saturdaysInPeriod} Saturday${pay.saturdaysInPeriod > 1 ? 's' : ''} were cut for low attendance. Working a Saturday earns overtime on top — not an extra day.`
-            : 'Saturdays are paid when the week\'s attendance earns them. Working a Saturday earns overtime on top — not an extra day.'}
-      </div>
-    </div>
-  );
-}
-
-/* ---------------- manager view ---------------- */
+/* ---------------- manager view (READ-ONLY since 2026-07-17) ----------------
+   The owner pays & locks everything himself; the manager (incharge) only needs to SEE
+   who is paid. Built from the payout mirror docs (att_meta/payout_YYYY-MM) the cloud
+   worker refreshes every cycle — managers cannot read att_salary directly (rules), and
+   the mirror carries paid-status only, no amounts. */
 function ManagerSalary({ user }) {
   const [mk, setMk] = useState(istMonth());
   const [payout, setPayout] = useState(null);
-  const [done, setDone] = useState({});       // optimistic: code -> mode
-  const [busy, setBusy] = useState('');
-  const [confirm, setConfirm] = useState(null); // { item, mode, remark } before paying
+  const [filter, setFilter] = useState('all');   // all | topay | paid
 
   useEffect(() => { setPayout(null); loadPayout(mk).then(setPayout); }, [mk]);
-  if (payout === null) return <p className="text-gray-500">Loading…</p>;
+  if (payout === null) return <p className="text-slate-500">Loading…</p>;
 
   const items = Object.entries(payout.items || {}).map(([code, v]) => ({ code, ...v }))
     .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-  const pending = items.filter((i) => !i.paid && !done[i.code]);
-
-  async function pay(i, mode, remark, amount) {
-    setBusy(i.code);
-    try { await queueMarkPaid(i.code, mk, mode, user.email, remark, amount); setDone({ ...done, [i.code]: mode }); setConfirm(null); }
-    finally { setBusy(''); }
-  }
+  const paid = items.filter((i) => i.paid);
+  const visible = items.filter((i) => filter === 'all' ? true : filter === 'paid' ? i.paid : !i.paid);
 
   return (
     <div className="space-y-3 pb-6">
       <select className="w-full bg-white border-2 border-slate-200 rounded-2xl px-3 py-3 font-bold text-slate-800 text-center" value={mk} onChange={(e) => setMk(e.target.value)}>
         {monthOptions(3).map((m) => <option key={m.mk} value={m.mk}>{m.label}</option>)}
       </select>
-      <p className="text-sm text-slate-600 font-semibold px-1">{pending.length} left to pay · {items.length - pending.length} done</p>
-      <div className="space-y-2">
-        {items.length === 0 && <p className="bg-white rounded-2xl border-2 border-slate-200 p-4 text-sm text-slate-400 text-center">Nothing approved for this month yet.</p>}
-        {items.map((i) => {
-          const paidMode = i.paid?.mode || done[i.code];
-          const remaining = Math.max(0, Number(i.net) - Number(i.paidSoFar || 0));
-          const isPartial = !i.paid && Number(i.paidSoFar || 0) > 0;
-          return (
-            <div key={i.code} className={`flex items-center p-3 gap-2 rounded-2xl bg-white border-2 ${paidMode ? 'border-slate-100 opacity-70' : 'border-slate-200 shadow-sm'}`}>
-              <div className="flex-1">
-                <div className="font-bold text-slate-900">{i.name}{i.nickname ? <span className="text-slate-400 font-normal"> ({i.nickname})</span> : null}</div>
-                <div className="text-xs text-slate-500">{i.dept}{isPartial ? <span className="text-blue-700"> · {rupee(Number(i.paidSoFar))} paid, {rupee(remaining)} left</span> : null}</div>
-              </div>
-              <div className={`font-extrabold mr-1 ${paidMode ? 'text-emerald-700' : 'text-rose-600'}`}>{rupee(isPartial ? remaining : i.net)}</div>
-              {paidMode ? <span className="text-xs text-emerald-700 font-medium">✓ {paidMode}</span> : (
-                <div className="flex gap-1.5">
-                  <button disabled={busy === i.code} onClick={() => setConfirm({ item: i, mode: 'cash', remark: '', amount: String(remaining) })} className="bg-emerald-600 text-white text-sm rounded-xl px-3 py-3 font-bold shadow shadow-emerald-200 disabled:opacity-50 active:scale-95 transition-all">💵 Cash</button>
-                  <button disabled={busy === i.code} onClick={() => setConfirm({ item: i, mode: 'bank', remark: '', amount: String(remaining) })} className="bg-slate-800 text-white text-sm rounded-xl px-3 py-3 font-bold shadow shadow-slate-200 disabled:opacity-50 active:scale-95 transition-all">🏦 Bank</button>
-                </div>
-              )}
-            </div>
-          );
-        })}
+      <div className="flex gap-2">
+        {[['all', `All (${items.length})`], ['topay', `🔴 Not paid (${items.length - paid.length})`], ['paid', `✅ Paid (${paid.length})`]].map(([key, label]) => (
+          <button key={key} onClick={() => setFilter(key)}
+            className={`flex-1 rounded-2xl py-3 text-sm font-bold transition ${filter === key ? 'bg-emerald-600 text-white shadow' : 'bg-white text-slate-600 border-2 border-slate-200'}`}>
+            {label}
+          </button>
+        ))}
       </div>
-      <AdvanceCard user={user} />
-      {confirm && (
-        <div className="fixed inset-0 z-50 bg-black/40 flex items-end sm:items-center justify-center p-4" onClick={() => busy ? null : setConfirm(null)}>
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-5 space-y-4" onClick={(e) => e.stopPropagation()}>
-            <div className="text-center">
-              <div className="text-3xl mb-1">{confirm.mode === 'cash' ? '💵' : '🏦'}</div>
-              <p className="text-gray-600 text-sm">Pay salary by {confirm.mode === 'cash' ? 'Cash' : 'Bank'}?</p>
-              <p className="font-bold text-gray-800 text-lg mt-1">{confirm.item.name}</p>
-              {(() => { const rem = Math.max(0, Number(confirm.item.net) - Number(confirm.item.paidSoFar || 0)); return (
-                <p className="text-xs text-gray-500">{Number(confirm.item.paidSoFar || 0) > 0 ? <>{rupee(Number(confirm.item.paidSoFar))} paid · </> : null}Due: <b className="text-red-700">{rupee(rem)}</b> · {monthOptions(3).find((m) => m.mk === mk)?.label || mk}</p>
-              ); })()}
+      <div className="space-y-2">
+        {visible.length === 0 && <p className="bg-white rounded-2xl border-2 border-slate-200 p-4 text-sm text-slate-400 text-center">{items.length === 0 ? 'The list refreshes every few minutes — check back shortly.' : 'No one here.'}</p>}
+        {visible.map((i) => (
+          <div key={i.code} className={`flex items-center p-3 gap-2 rounded-2xl bg-white border-2 ${i.paid ? 'border-slate-100 opacity-70' : 'border-slate-200 shadow-sm'}`}>
+            <div className="flex-1">
+              <div className="font-bold text-slate-900">{i.name}{i.nickname ? <span className="text-slate-400 font-normal"> ({i.nickname})</span> : null}</div>
+              <div className="text-xs text-slate-500">{i.dept}</div>
             </div>
-            <label className="block text-xs text-gray-500">Amount paid now ₹
-              <input type="number" value={confirm.amount} onChange={(e) => setConfirm({ ...confirm, amount: e.target.value })}
-                className="mt-1 w-full border-2 border-slate-200 rounded-xl px-3 py-2.5 text-lg font-bold text-slate-800" />
-            </label>
-            {(() => { const rem = Math.max(0, Number(confirm.item.net) - Number(confirm.item.paidSoFar || 0)); const amt = Number(confirm.amount) || 0; return (<>
-              {amt > 0 && amt < rem - 0.5 && <p className="text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded-lg p-2">Part payment — <b>{rupee(rem - amt)}</b> stays pending. Hisab stays open until fully paid.</p>}
-              {amt > rem + 0.5 && <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2">Paying {rupee(amt - rem)} extra → recorded as an <b>advance carried forward</b> to next month.</p>}
-            </>); })()}
-            <input value={confirm.remark} onChange={(e) => setConfirm({ ...confirm, remark: e.target.value })} placeholder="Remark (optional)"
-              className="w-full border-2 border-slate-200 rounded-xl px-3 py-2.5 text-sm" />
-            <div className="flex gap-2">
-              <button disabled={!!busy} onClick={() => setConfirm(null)} className="flex-1 border rounded-xl py-3 font-medium text-gray-600 disabled:opacity-50">Cancel</button>
-              <button disabled={!!busy || !(Number(confirm.amount) >= 0)} onClick={() => pay(confirm.item, confirm.mode, confirm.remark.trim(), Number(confirm.amount))}
-                className="flex-1 bg-emerald-600 text-white rounded-2xl py-3.5 font-bold shadow-lg shadow-emerald-300 disabled:opacity-50 disabled:shadow-none active:bg-emerald-700 active:scale-95 transition-all">{busy ? 'Paying…' : `Pay ${rupee(Number(confirm.amount) || 0)}`}</button>
-            </div>
+            {i.paid
+              ? <span className="text-xs text-emerald-700 font-bold">✓ Paid {i.paid.mode === 'split' ? '💵+🏦' : i.paid.mode === 'account' ? '🏦' : '💵'}{i.paid.date ? ` · ${i.paid.date.slice(8)}/${i.paid.date.slice(5, 7)}` : ''}</span>
+              : <span className="text-xs text-rose-600 font-bold">🔴 Not paid</span>}
           </div>
-        </div>
-      )}
+        ))}
+      </div>
+      <p className="text-[11px] text-slate-400 px-1">Salary is paid & locked by the owner. This list shows paid/not-paid only (updates every few minutes).</p>
+      <AdvanceCard user={user} />
     </div>
   );
 }

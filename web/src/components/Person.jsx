@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { loadEmployee, loadAllAttendance, loadPunchDoc, saveEmployee, saveMonth, addAdvance, addIncrement, resignEmployee, settleAndResign, checkActionPassword, queueJob, queueLock, queueUnlock, lockMonthDirect, unlockMonthDirect, editNameDept, istMonth, removeWorker, restoreWorker, deleteWorkerHard, workerEverPaid } from '../lib/data';
+import { loadEmployee, loadAllAttendance, loadPunchDoc, saveEmployee, saveMonth, addAdvance, addIncrement, settleAndResign, checkActionPassword, queueJob, queueLock, queueUnlock, lockMonthDirect, unlockMonthDirect, editNameDept, istMonth, removeWorker, restoreWorker, deleteWorkerHard, workerEverPaid } from '../lib/data';
 import { monthCtx, payFor, rupee, paymentBreakdown } from '../lib/paycalc';
 import { payslipOnePdf, sharePdf } from '../lib/salaryPdf';
 import { graceDeltaDays } from '../lib/attendanceEngine';
@@ -251,25 +251,8 @@ export default function Person({ code, mk, user, onBack }) {
         onSaveNameDept={(nd) => act(() => editNameDept(code, nd, user.email))} />
 
       {emp.active !== false ? (
-        <button disabled={busy || locked} onClick={async () => {
-          const last = prompt(`Final settlement for ${emp.name}.\nLast working day (YYYY-MM-DD):`, today);
-          if (!last || !/^\d{4}-\d{2}-\d{2}$/.test(last)) { if (last != null) alert('Enter the date as YYYY-MM-DD.'); return; }
-          // recompute pay capped at the last working day (prorates a mid-month exit)
-          const sp = payFor({ ...emp, exitDate: last }, attMap, mk, ctx).pay;
-          const net = sp.net;
-          if (!confirm(`Final settlement for ${emp.name}:\n\n` +
-            `Days: ${sp.presentDays} present / ${sp.absentDays} absent\n` +
-            `Base ₹${sp.base} + OT ₹${sp.otPay}` + (sp.perfectBonus ? ` + bonus ₹${sp.perfectBonus}` : '') + (sp.bonus ? ` + bonus ₹${sp.bonus}` : '') + '\n' +
-            (sp.advanceRecovered ? `− Advance ₹${sp.advanceRecovered}\n` : '') +
-            `\nFINAL PAYABLE: ₹${net.toLocaleString('en-IN')}\n\n` +
-            `This pays & locks ${mk}, removes the worker (last day ${last}). Continue?`)) return;
-          const pw = prompt('Enter the action password to confirm:');
-          if (pw == null) return;
-          const ok = await checkActionPassword(pw);
-          if (ok === 'unset') { if (!confirm('No action password set yet (set one in ⚙ Settings). Settle & resign anyway?')) return; }
-          else if (!ok) { alert('Wrong password.'); return; }
-          act(() => settleAndResign(code, mk, sp, last, user.email));
-        }} className="w-full border border-red-200 text-red-700 rounded-lg py-2 text-sm disabled:opacity-40">Final settlement &amp; resign {emp.name}</button>
+        <SettleResign emp={emp} mk={mk} attMap={attMap} ctx={ctx} disabled={busy || locked} today={today}
+          onConfirm={(sp, last) => act(() => settleAndResign(code, mk, sp, last, user.email))} />
       ) : (
         <div className="text-center text-xs text-gray-400">
           Resigned {emp.resignedAt || emp.exitDate || ''}{md.payment?.settlement ? ` · final settled ${rupee(md.payment.net)}` : ''}
@@ -309,24 +292,24 @@ function MonthOverride({ md, pay, busy, onSet, onClear }) {
 
 // Remove (soft, reversible) or permanently delete a worker. Permanent delete of a PAID worker
 // needs the action password; a never-paid worker can be deleted freely. Both keep a hidden archive.
+// 2026-07-17: window.prompt/confirm popups replaced with app-style AskSheet dialogs (same steps).
 function DangerZone({ emp, busy, user, onBack }) {
   const paid = workerEverPaid(emp);
   const [working, setWorking] = useState(false);
-  async function softRemove() {
-    if (!confirm(`Remove ${emp.name} from the active list?\nAll history is kept and you can restore them later.`)) return;
-    setWorking(true);
+  const [ask, setAsk] = useState(null);   // 'remove' | 'delete'
+  const [pw, setPw] = useState('');
+  const [err, setErr] = useState('');
+  async function doRemove() {
+    setAsk(null); setWorking(true);
     try { await removeWorker(emp.code, user.email); onBack(); } finally { setWorking(false); }
   }
-  async function hardDelete() {
+  async function doDelete() {
     if (paid) {
-      const pw = prompt(`⚠ ${emp.name} has PAID/locked months — deleting ERASES that salary history and cannot be undone.\nEnter the action password to permanently delete:`);
-      if (pw == null) return;
       const ok = await checkActionPassword(pw);
-      if (ok === 'unset') { alert('No action password set yet — set one in ⚙ Settings before permanently deleting a paid worker.'); return; }
-      if (!ok) { alert('Wrong password.'); return; }
-      if (!confirm(`Final check: permanently delete ${emp.name} and their salary history? This cannot be undone.`)) return;
-    } else if (!confirm(`Permanently delete ${emp.name}?\nThey were never paid, so no payroll history is lost. This cannot be undone.`)) return;
-    setWorking(true);
+      if (ok === 'unset') { setErr('No action password set yet — set one in ⚙ Settings before deleting a paid worker.'); return; }
+      if (ok !== true) { setErr('Wrong password.'); return; }
+    }
+    setAsk(null); setWorking(true);
     try { await deleteWorkerHard(emp.code); onBack(); } finally { setWorking(false); }
   }
   const dis = busy || working;
@@ -337,11 +320,97 @@ function DangerZone({ emp, busy, user, onBack }) {
         <p className="text-xs text-gray-500">Currently removed{emp.removedAt ? ` (${emp.removedAt})` : emp.resignedAt ? ` · resigned ${emp.resignedAt}` : ''}. <button className="text-blue-700 underline" disabled={dis} onClick={async () => { setWorking(true); try { await restoreWorker(emp.code); onBack(); } finally { setWorking(false); } }}>Restore to active</button></p>
       )}
       <div className="flex gap-2">
-        <button disabled={dis} onClick={softRemove} className="flex-1 border border-amber-300 text-amber-800 rounded-lg py-2 text-sm disabled:opacity-40">Remove (keep history)</button>
-        <button disabled={dis} onClick={hardDelete} className="flex-1 border border-red-300 text-red-700 rounded-lg py-2 text-sm disabled:opacity-40">Delete permanently{paid ? ' 🔒' : ''}</button>
+        <button disabled={dis} onClick={() => setAsk('remove')} className="flex-1 border border-amber-300 text-amber-800 rounded-lg py-2 text-sm disabled:opacity-40">Remove (keep history)</button>
+        <button disabled={dis} onClick={() => { setPw(''); setErr(''); setAsk('delete'); }} className="flex-1 border border-red-300 text-red-700 rounded-lg py-2 text-sm disabled:opacity-40">Delete permanently{paid ? ' 🔒' : ''}</button>
       </div>
       <p className="text-[11px] text-gray-400">“Remove” hides them but keeps every record (reversible). “Delete permanently” erases the salary record and cannot be undone{paid ? ' — needs the action password because they have paid months' : ' (free for a never-paid worker)'}.</p>
+      {ask === 'remove' && (
+        <AskSheet title={`Remove ${emp.name}?`} okLabel="Remove" okDanger busy={working} onCancel={() => setAsk(null)} onOk={doRemove}>
+          <p className="text-sm text-slate-600">Taken off the active list. <b>All history is kept</b> and you can restore them any time.</p>
+        </AskSheet>
+      )}
+      {ask === 'delete' && (
+        <AskSheet title={`⚠ Delete ${emp.name} permanently?`} okLabel="Delete permanently" okDanger busy={working}
+          okDisabled={paid && !pw} onCancel={() => setAsk(null)} onOk={doDelete}>
+          {paid
+            ? <p className="text-sm text-slate-600">{emp.name} has <b>paid/locked months</b> — deleting erases that salary history and <b>cannot be undone</b>.</p>
+            : <p className="text-sm text-slate-600">They were never paid, so no payroll history is lost. This cannot be undone.</p>}
+          {paid && <input type="password" className="w-full border-2 border-slate-200 rounded-xl px-3 py-2.5 text-sm" placeholder="Action password" value={pw} onChange={(e) => { setPw(e.target.value); setErr(''); }} />}
+          {err && <p className="text-xs text-rose-600">{err}</p>}
+        </AskSheet>
+      )}
     </div>
+  );
+}
+
+// App-style dialog — replaces the old tiny window.prompt/confirm popups (2026-07-17).
+function AskSheet({ title, children, okLabel = 'OK', okDanger, okDisabled, busy, onOk, onCancel }) {
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-end sm:items-center justify-center p-4" onClick={() => busy ? null : onCancel()}>
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-5 space-y-3" onClick={(e) => e.stopPropagation()}>
+        <div className="font-bold text-lg text-slate-800">{title}</div>
+        {children}
+        <div className="flex gap-2 pt-1">
+          <button disabled={busy} onClick={onCancel} className="flex-1 bg-white border-2 border-slate-200 text-slate-600 rounded-2xl py-3 font-bold disabled:opacity-50">Cancel</button>
+          <button disabled={busy || okDisabled} onClick={onOk}
+            className={`flex-1 text-white rounded-2xl py-3 font-bold disabled:opacity-50 active:scale-95 transition-all shadow-lg ${okDanger ? 'bg-rose-600 active:bg-rose-700 shadow-rose-200' : 'bg-emerald-600 active:bg-emerald-700 shadow-emerald-200'}`}>
+            {busy ? '…' : okLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Final settlement & resign — date picker → review + password, in app dialogs (was 3 window.prompts).
+function SettleResign({ emp, mk, attMap, ctx, disabled, today, onConfirm }) {
+  const [step, setStep] = useState(null);   // null | 'date' | 'confirm'
+  const [last, setLast] = useState(today);
+  const [sp, setSp] = useState(null);
+  const [pw, setPw] = useState('');
+  const [err, setErr] = useState('');
+  const [checking, setChecking] = useState(false);
+  const toReview = () => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(last)) { setErr('Pick the last working day.'); return; }
+    // recompute pay capped at the last working day (prorates a mid-month exit)
+    setSp(payFor({ ...emp, exitDate: last }, attMap, mk, ctx).pay); setErr(''); setPw(''); setStep('confirm');
+  };
+  const go = async () => {
+    setChecking(true);
+    try {
+      const ok = await checkActionPassword(pw);
+      if (ok !== true && ok !== 'unset') { setErr('Wrong password.'); return; }
+      setStep(null); onConfirm(sp, last);
+    } finally { setChecking(false); }
+  };
+  return (
+    <>
+      <button disabled={disabled} onClick={() => { setLast(today); setErr(''); setStep('date'); }}
+        className="w-full border border-red-200 text-red-700 rounded-lg py-2 text-sm disabled:opacity-40">Final settlement &amp; resign {emp.name}</button>
+      {step === 'date' && (
+        <AskSheet title={`Final settlement — ${emp.name}`} okLabel="Next →" onCancel={() => setStep(null)} onOk={toReview}>
+          <p className="text-sm text-slate-600">Pays everything due up to the last working day, locks {mk}, and removes the worker.</p>
+          <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide">Last working day
+            <input type="date" className="mt-1 w-full border-2 border-slate-200 rounded-xl px-3 py-2.5 text-base font-semibold" value={last} onChange={(e) => setLast(e.target.value)} />
+          </label>
+          {err && <p className="text-xs text-rose-600">{err}</p>}
+        </AskSheet>
+      )}
+      {step === 'confirm' && sp && (
+        <AskSheet title={`Settle & resign ${emp.name}?`} okLabel={checking ? 'Checking…' : `Pay ${rupee(sp.net)} & resign`} okDanger busy={checking} onCancel={() => setStep(null)} onOk={go}>
+          <div className="bg-slate-50 rounded-xl p-3 text-sm text-slate-700 space-y-1">
+            <div className="flex justify-between"><span>Days</span><b>{sp.presentDays} present · {sp.absentDays} absent</b></div>
+            <div className="flex justify-between"><span>Base + OT</span><b>{rupee(sp.base)} + {rupee(sp.otPay)}</b></div>
+            {(sp.perfectBonus > 0 || sp.bonus > 0) && <div className="flex justify-between"><span>Bonus</span><b>{rupee((sp.perfectBonus || 0) + (sp.bonus || 0))}</b></div>}
+            {sp.advanceRecovered > 0 && <div className="flex justify-between text-amber-700"><span>− Advance</span><b>{rupee(sp.advanceRecovered)}</b></div>}
+            <div className="flex justify-between border-t border-slate-200 pt-1 text-base"><span>FINAL PAYABLE</span><b>{rupee(sp.net)}</b></div>
+          </div>
+          <p className="text-xs text-slate-500">Locks {mk} · last day {last} · worker removed (history kept).</p>
+          <input type="password" className="w-full border-2 border-slate-200 rounded-xl px-3 py-2.5 text-sm" placeholder="Action password (if set)" value={pw} onChange={(e) => { setPw(e.target.value); setErr(''); }} />
+          {err && <p className="text-xs text-rose-600">{err}</p>}
+        </AskSheet>
+      )}
+    </>
   );
 }
 
@@ -350,6 +419,8 @@ function DangerZone({ emp, busy, user, onBack }) {
 function SettleLockCard({ pay, md, busy, onLock, onUnlock }) {
   const [cash, setCash] = useState('');
   const [account, setAccount] = useState('');
+  const [unlockAsk, setUnlockAsk] = useState(false);
+  const [unlockReason, setUnlockReason] = useState('');
   const opening = pay.openingBalance || 0;
   const payable = pay.payable || 0;
   const advCut = pay.advanceRecovered || 0;                 // full outstanding advance, auto-cut at settle
@@ -365,8 +436,15 @@ function SettleLockCard({ pay, md, busy, onLock, onUnlock }) {
         <Row k="Payable was" v={rupee(p.payable)} />
         <Row k="Balance carried" v={`${(p.closing || 0) >= 0 ? '+' : ''}${rupee(p.closing)} → next month`} />
         <p className="text-xs text-gray-500 mt-1">{p.date} · by {String(p.by || '').split('@')[0]}{p.reason ? ` · “${p.reason}”` : ''}</p>
-        <button disabled={!!busy} onClick={() => { const r = prompt('Unlock this month to edit?\nReason (required):'); if (r == null) return; if (!r.trim()) return alert('Reason required.'); onUnlock(r.trim()); }}
+        <button disabled={!!busy} onClick={() => { setUnlockReason(''); setUnlockAsk(true); }}
           className="mt-2 text-xs border border-red-300 text-red-700 rounded-lg px-3 py-1.5 disabled:opacity-50">🔓 Unlock to edit</button>
+        {unlockAsk && (
+          <AskSheet title="🔓 Unlock this month?" okLabel="Unlock" okDanger okDisabled={!unlockReason.trim()} busy={!!busy}
+            onCancel={() => setUnlockAsk(false)} onOk={() => { setUnlockAsk(false); onUnlock(unlockReason.trim()); }}>
+            <p className="text-sm text-slate-600">Reopens the paid month for editing. The reason goes in the audit log.</p>
+            <input className="w-full border-2 border-slate-200 rounded-xl px-3 py-2.5 text-sm" placeholder="Reason (required)" value={unlockReason} onChange={(e) => setUnlockReason(e.target.value)} />
+          </AskSheet>
+        )}
       </div>
     );
   }

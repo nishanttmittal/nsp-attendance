@@ -264,6 +264,15 @@ async function handle(type, p) {
   if (type === 'add_advance') {  // manager-created; applied with admin SDK (bypasses rules)
     const ref = db().collection('att_salary').doc(p.code);
     const snap = await ref.get();
+    // GUARD (2026-07-17): never record an advance dated into a LOCKED month — the month's payment
+    // is frozen, so the advance would be handed out but never deducted from any salary (money leak).
+    // This is the authoritative check; the app's own check is best-effort UX only.
+    const advMk = String(p.advance.date || '').slice(0, 7);
+    const mdAdv = ((snap.exists && snap.data().months) || {})[advMk] || {};
+    if (mdAdv.locked || mdAdv.payment) {
+      await sendTelegram(`🚫 Advance ₹${p.advance.amount} to ${(snap.exists && snap.data().name) || p.code} NOT saved — ${advMk} salary is already paid & locked. Date it in the current month instead. (by ${p.advance.paidBy || '?'})`);
+      return `REJECTED — ${advMk} is locked; advance not recorded`;
+    }
     const advances = (snap.exists && snap.data().advances) || [];
     advances.push(p.advance);
     await ref.set({ advances }, { merge: true });
@@ -338,7 +347,11 @@ async function main() {
   try { const r = await runDueTasks(); if (r.length) console.log(`scheduler ran: ${r.join(', ')}`); }
   catch (e) { console.error('scheduler failed:', e.message); }
 
-  // mirror approved salaries into the manager-readable payout docs (att_meta/payout_YYYY-MM)
+  // Mirror paid/unpaid status into the manager-readable payout docs (att_meta/payout_YYYY-MM).
+  // REWRITTEN 2026-07-17: the old mirror only included md.approved months, but the approve/tick
+  // flow was retired (owner locks directly) — so the docs sat empty, which silently killed both
+  // the manager's salary view AND the app's advance-after-paid guard. Now mirrors EVERY active
+  // salary worker with paid-status only (no amounts — manager view is read-only).
   try {
     const ist = new Date(Date.now() + 5.5 * 3600 * 1000);
     const cur = ist.toISOString().slice(0, 7);
@@ -347,9 +360,12 @@ async function main() {
     for (const mk of [prev, cur]) {
       const items = {};
       sal.forEach(d => {
-        const md = (d.data().months || {})[mk];
-        if (!md || !md.approved || md.hold) return;  // held salaries never reach the manager's pay list
-        items[d.id] = { name: d.data().name || d.id, nickname: d.data().nickname || '', dept: d.data().dept || '', net: Number(md.approvedNet || 0), paidSoFar: Number(md.paidSoFar || 0), paid: md.payment ? { mode: md.payment.mode, date: md.payment.date } : null };
+        const e = d.data();
+        if (e.active === false || !(e.amount || e.wage)) return;   // active salary workers only
+        const md = (e.months || {})[mk] || {};
+        const pmt = md.payment;
+        items[d.id] = { name: e.name || d.id, nickname: e.nickname || '', dept: e.dept || '',
+          paid: pmt ? { mode: pmt.cash > 0 && pmt.account > 0 ? 'split' : pmt.account > 0 ? 'account' : 'cash', date: (md.lockedAt || '').slice(0, 10) } : null };
       });
       await db().collection('att_meta').doc('payout_' + mk).set({ month: mk, items, updatedAt: new Date().toISOString() });
     }
