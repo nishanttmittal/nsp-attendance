@@ -304,8 +304,15 @@ function FastPaySheet({ payC, busy, onChange, onCancel, onConfirm }) {
         </div>
 
         {/* BONUS DAY — tick on top; adds one day's pay and bumps the pay field to cover it.
-            Pre-ticked when the worker earned it (full attendance — owner rule); untick to refuse. */}
-        {perDay > 0 && (
+            Pre-ticked when the worker earned it (full attendance — owner rule); untick to refuse.
+            If the bonus is ALREADY in the payable (worker-page setting, e.g. Balaji), say so
+            instead of showing an unticked box — ticking again would pay the day twice. */}
+        {perDay > 0 && pay.perfectBonus > 0 && (
+          <div className="bg-emerald-50 border-2 border-emerald-200 rounded-xl px-3 py-2.5 text-sm font-semibold text-emerald-800">
+            🎯 Bonus day already included <span className="font-normal text-emerald-700">— +{rupee(pay.perfectBonus)} (full attendance) is inside the amount via the worker's page. No tick needed.</span>
+          </div>
+        )}
+        {perDay > 0 && !(pay.perfectBonus > 0) && (
           <label className="flex items-center justify-between bg-amber-50 border-2 border-amber-200 rounded-xl px-3 py-2.5 cursor-pointer">
             <span className="text-sm font-semibold text-amber-900">🎯 Bonus day <span className="font-normal text-amber-700">+{rupee(perDay)} (1 day)</span>{pay.perfectEligible ? <span className="block text-[11px] font-normal text-amber-700">full attendance ✓ — auto-ticked, untick to refuse</span> : null}</span>
             <input type="checkbox" className="w-6 h-6 accent-amber-600" checked={!!bonusDay} disabled={busy}
