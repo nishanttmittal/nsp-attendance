@@ -147,9 +147,13 @@ function OwnerSalary({ user }) {
   }
   // Tap a row's Cash/Account → open the pay sheet PRE-FILLED with the full payable in that method
   // (owner can then split part to the other method, edit amounts, or tick a bonus day).
+  // OWNER RULE (2026-07-17): full attendance = +1 day's pay → 🎯 comes PRE-TICKED for eligible
+  // workers (full month, zero absent), amount included in the prefill; owner unticks to refuse.
+  // Skipped when the bonus is already in payable via md.perfectBonusPaid (would double it).
   const payNow = (r, mode) => {
-    const full = String(Math.max(0, r.pay.payable || 0));
-    setPayC({ r, cash: mode === 'account' ? '0' : full, account: mode === 'account' ? full : '0', bonusDay: false });
+    const bonus = !!r.pay.perfectEligible && !(r.pay.perfectBonus > 0) && (r.pay.perDay || 0) > 0;
+    const full = String(Math.max(0, Math.round(((r.pay.payable || 0) + (bonus ? r.pay.perDay : 0)) * 100) / 100));
+    setPayC({ r, cash: mode === 'account' ? '0' : full, account: mode === 'account' ? full : '0', bonusDay: bonus });
   };
   // Undo a just-paid worker (mis-tap): instant unlock + refresh just that row.
   async function undoPay(r) {
@@ -299,15 +303,20 @@ function FastPaySheet({ payC, busy, onChange, onCancel, onConfirm }) {
           <p className="text-xs text-slate-500 mt-0.5">Payable {rupee(Math.abs(effPayable))}{owes ? ' — he owes us' : ''}{bonusDay ? ` · incl. +${rupee(perDay)} bonus` : ''}</p>
         </div>
 
-        {/* BONUS DAY — tick on top; adds one day's pay and bumps the cash field to cover it */}
+        {/* BONUS DAY — tick on top; adds one day's pay and bumps the pay field to cover it.
+            Pre-ticked when the worker earned it (full attendance — owner rule); untick to refuse. */}
         {perDay > 0 && (
           <label className="flex items-center justify-between bg-amber-50 border-2 border-amber-200 rounded-xl px-3 py-2.5 cursor-pointer">
-            <span className="text-sm font-semibold text-amber-900">🎯 Bonus day <span className="font-normal text-amber-700">+{rupee(perDay)} (1 day)</span></span>
+            <span className="text-sm font-semibold text-amber-900">🎯 Bonus day <span className="font-normal text-amber-700">+{rupee(perDay)} (1 day)</span>{pay.perfectEligible ? <span className="block text-[11px] font-normal text-amber-700">full attendance ✓ — auto-ticked, untick to refuse</span> : null}</span>
             <input type="checkbox" className="w-6 h-6 accent-amber-600" checked={!!bonusDay} disabled={busy}
               onChange={(e) => {
                 const on = e.target.checked;
                 const bump = on ? perDay : -perDay;
-                onChange({ ...payC, bonusDay: on, cash: String(Math.max(0, Math.round(((Number(cash) || 0) + bump) * 100) / 100)) });
+                const cashN = Number(cash) || 0;
+                const acctN = Number(account) || 0;
+                // adjust whichever field holds the money (account for an account-only pay)
+                if (cashN === 0 && acctN > 0) onChange({ ...payC, bonusDay: on, account: String(Math.max(0, Math.round((acctN + bump) * 100) / 100)) });
+                else onChange({ ...payC, bonusDay: on, cash: String(Math.max(0, Math.round((cashN + bump) * 100) / 100)) });
               }} />
           </label>
         )}
