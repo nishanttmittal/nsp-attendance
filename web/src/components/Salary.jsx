@@ -163,51 +163,76 @@ function OwnerSalary({ user }) {
       if (fresh) setEmps((prev) => prev.map((e) => (e.code === code ? fresh : e)));
     } finally { setBusy(''); }
   }
+  // month navigator (visual only): monthOptions() is newest-first, so ◀ older = index+1
+  const mos = monthOptions();
+  const mi = mos.findIndex((m) => m.mk === mk);
+  const allPaid = rows.length > 0 && locked.length === rows.length;
   return (
-    <div className="space-y-3">
-      <div className="bg-white rounded-xl shadow p-3 space-y-2">
-        <div className="flex gap-2">
-          <select className="flex-1 border rounded-lg px-3 py-2 bg-white font-medium" value={mk} onChange={(e) => setMk(e.target.value)}>
-            {monthOptions().map((m) => <option key={m.mk} value={m.mk}>{m.label}{m.mk === istMonth() ? ' (running)' : ''}</option>)}
+    <div className="space-y-3 pb-6">
+      {/* month navigator — big ◀ ▶ taps, month itself is still a dropdown for far jumps */}
+      <div className="flex items-center justify-between bg-white rounded-2xl border-2 border-slate-200 p-2">
+        <button onClick={() => mi >= 0 && mi < mos.length - 1 && setMk(mos[mi + 1].mk)} disabled={!(mi >= 0 && mi < mos.length - 1)}
+          className={`w-12 h-12 rounded-xl text-2xl font-bold ${mi >= 0 && mi < mos.length - 1 ? 'bg-slate-100 active:bg-slate-200' : 'bg-slate-50 text-slate-300'}`}>◀</button>
+        <div className="text-center">
+          <select className="appearance-none bg-transparent text-center font-bold text-slate-800 text-base focus:outline-none" value={mk} onChange={(e) => setMk(e.target.value)}>
+            {mos.map((m) => <option key={m.mk} value={m.mk}>{m.label}{m.mk === istMonth() ? ' (running)' : ''}</option>)}
           </select>
-          <button onClick={() => setShowReport(true)} className="border border-gray-300 rounded-lg px-3 text-sm font-medium">📄 Report</button>
+          {!ctx.fullMonth && <div className="text-[11px] text-slate-400">running month — figures till yesterday</div>}
         </div>
-        <button onClick={() => shareCheckSheet(rows, mk)} className="w-full bg-blue-600 text-white rounded-lg py-2.5 text-sm font-semibold">📋 Days &amp; OT check-sheet → WhatsApp <span className="font-normal opacity-90">(staff verify before pay)</span></button>
-        <div className="pt-1">
-          <div className="flex items-baseline justify-between">
-            <span className="text-base font-bold text-gray-800">{locked.length} of {rows.length} paid</span>
-            <span className="text-sm text-gray-500">{Math.max(0, rows.length - locked.length)} left</span>
-          </div>
-          <div className="h-2 bg-gray-100 rounded-full mt-1.5 overflow-hidden">
-            <div className="h-full bg-green-600 rounded-full transition-all" style={{ width: `${rows.length ? Math.round((locked.length / rows.length) * 100) : 0}%` }} />
-          </div>
-          <div className="flex gap-4 text-xs text-gray-500 mt-1.5">
-            <span>Paid <b className="text-green-700">{rupee(paidNet)}</b></span>
-            <span>Pending <b className="text-red-600">{rupee(pendingNet)}</b></span>
-            <span>Total {rupee(totalPayable)}{ctx.fullMonth ? '' : ' so far'}</span>
-          </div>
-          <button onClick={() => setShowMoney((s) => !s)} className="w-full text-left text-xs text-gray-700 bg-gray-50 border border-gray-200 rounded-lg px-2 py-1.5 mt-1.5 active:bg-gray-100">
-            💸 <b>Total given this month: {rupee(moneyOut)}</b>
-            <span className="text-gray-500"> = advances {rupee(advancesOut)} + salary paid {rupee(salaryOut)}</span>
-            <span className="float-right text-gray-400">{showMoney ? '▾' : '▸'}</span>
-            {showMoney && (
-              <span className="block mt-1.5 pt-1.5 border-t border-gray-200 text-gray-600 space-y-0.5">
-                <span className="block">💵 Cash out: <b className="text-gray-800">{rupee(salCash + advCash)}</b> <span className="text-gray-400">(salary {rupee(salCash)} + advances {rupee(advCash)})</span></span>
-                <span className="block">🏦 Account out: <b className="text-gray-800">{rupee(salAcct + (advancesOut - advCash))}</b> <span className="text-gray-400">(salary {rupee(salAcct)} + advances {rupee(advancesOut - advCash)})</span></span>
-                <span className="block">📝 {advEntries.length} advance{advEntries.length === 1 ? '' : 's'} given · {locked.length} salar{locked.length === 1 ? 'y' : 'ies'} paid &amp; locked</span>
-              </span>
-            )}
-          </button>
-        </div>
-        {!ctx.fullMonth && <p className="text-xs text-gray-400">Running month — figures till yesterday.</p>}
-        {brokenFix.length > 0 && (
-          <p className="text-xs bg-amber-50 text-amber-800 rounded-lg px-2 py-1.5">
-            ⚠ <b>{brokenFix.length}</b> worker{brokenFix.length > 1 ? 's' : ''} had a <b>broken-punch day</b> this month — the app auto-restored their overtime (machine missed a punch, portal wrongly cut OT). Tagged <b>“punch-fixed”</b> below; open each to see the day.
-          </p>
-        )}
-        <label className="flex items-center gap-1.5 text-xs text-gray-500"><input type="checkbox" checked={showRemoved} onChange={(e) => setShowRemoved(e.target.checked)} /> Show removed/resigned staff (kept in the sheet for costing)</label>
-        <p className="text-[11px] text-gray-500">Tap 💵 Cash or 🏦 Account → a box opens: split across <b>Cash + Account</b>, tick <b>🎯 Bonus day</b> on top if giving one, then <b>Pay &amp; lock</b> (Undo if you mis-tap). Tap the <b>name</b> for OT / details. <span className="text-gray-400">(pay v4)</span></p>
+        <button onClick={() => mi > 0 && setMk(mos[mi - 1].mk)} disabled={mi <= 0}
+          className={`w-12 h-12 rounded-xl text-2xl font-bold ${mi > 0 ? 'bg-slate-100 active:bg-slate-200' : 'bg-slate-50 text-slate-300'}`}>▶</button>
       </div>
+
+      {/* hero — the one pay-day number: what is LEFT to pay */}
+      <div className={`rounded-2xl shadow-sm p-5 text-center ${allPaid ? 'bg-emerald-50' : 'bg-rose-50'}`}>
+        {allPaid ? (
+          <>
+            <div className="text-xs text-slate-500 font-semibold">EVERYONE PAID 🎉</div>
+            <div className="text-4xl font-extrabold mt-1 text-emerald-700">{rupee(paidNet)}</div>
+            <div className="text-[11px] text-slate-500 mt-1">{locked.length} workers · full month settled</div>
+          </>
+        ) : (
+          <>
+            <div className="text-xs text-slate-500 font-semibold">LEFT TO PAY — {Math.max(0, rows.length - locked.length)} worker{rows.length - locked.length === 1 ? '' : 's'}</div>
+            <div className="text-4xl font-extrabold mt-1 text-rose-600">{rupee(pendingNet)}</div>
+          </>
+        )}
+        <div className="h-2.5 bg-white/70 rounded-full mt-3 overflow-hidden">
+          <div className="h-full bg-emerald-600 rounded-full transition-all" style={{ width: `${rows.length ? Math.round((locked.length / rows.length) * 100) : 0}%` }} />
+        </div>
+        <div className="flex justify-between text-[11px] text-slate-500 mt-1.5">
+          <span>{locked.length} of {rows.length} paid · <b className="text-emerald-700">{rupee(paidNet)}</b></span>
+          <span>Total {rupee(totalPayable)}{ctx.fullMonth ? '' : ' so far'}</span>
+        </div>
+      </div>
+
+      {/* 💸 total money OUT this month (tap for cash/account split) */}
+      <button onClick={() => setShowMoney((s) => !s)} className="w-full text-left bg-white rounded-2xl border-2 border-slate-200 p-3 active:bg-slate-50">
+        <div className="flex justify-between items-baseline">
+          <span className="text-sm font-bold text-slate-700">💸 Total given this month</span>
+          <span className="font-extrabold text-slate-900">{rupee(moneyOut)}</span>
+        </div>
+        <div className="text-[11px] text-slate-500 mt-0.5">advances {rupee(advancesOut)} + salary paid {rupee(salaryOut)} <span className="float-right">{showMoney ? '▲' : '▼'}</span></div>
+        {showMoney && (
+          <div className="mt-2 pt-2 border-t border-slate-100 text-xs text-slate-600 space-y-1">
+            <div className="flex justify-between"><span>💵 Cash out <span className="text-slate-400">(salary {rupee(salCash)} + adv {rupee(advCash)})</span></span><b className="text-slate-800">{rupee(salCash + advCash)}</b></div>
+            <div className="flex justify-between"><span>🏦 Account out <span className="text-slate-400">(salary {rupee(salAcct)} + adv {rupee(advancesOut - advCash)})</span></span><b className="text-slate-800">{rupee(salAcct + (advancesOut - advCash))}</b></div>
+            <div className="text-slate-500">📝 {advEntries.length} advance{advEntries.length === 1 ? '' : 's'} given · {locked.length} salar{locked.length === 1 ? 'y' : 'ies'} paid &amp; locked</div>
+          </div>
+        )}
+      </button>
+
+      {/* actions */}
+      <div className="grid grid-cols-2 gap-2">
+        <button onClick={() => shareCheckSheet(rows, mk)} className="bg-blue-600 text-white rounded-2xl py-4 font-bold shadow-lg shadow-blue-300 active:bg-blue-700 active:scale-95 transition-all">📋 Check-sheet<div className="text-[11px] font-normal opacity-90">days &amp; OT → WhatsApp</div></button>
+        <button onClick={() => setShowReport(true)} className="bg-white text-slate-600 border-2 border-slate-200 rounded-2xl py-4 font-bold active:bg-slate-50 active:scale-95 transition-all">📄 Reports<div className="text-[11px] font-normal text-slate-400">register · locked PDF</div></button>
+      </div>
+
+      {brokenFix.length > 0 && (
+        <p className="text-xs bg-amber-50 border-2 border-amber-200 text-amber-800 rounded-2xl px-3 py-2">
+          ⚠ <b>{brokenFix.length}</b> worker{brokenFix.length > 1 ? 's' : ''} had a <b>broken-punch day</b> this month — the app auto-restored their overtime (machine missed a punch, portal wrongly cut OT). Tagged <b>“punch-fixed”</b> below; open each to see the day.
+        </p>
+      )}
 
       {/* filter chips — one tap to see only who is LEFT to pay (the main pay-day question) */}
       <div className="flex gap-2">
@@ -217,17 +242,17 @@ function OwnerSalary({ user }) {
           ['paid', `✅ Paid (${locked.length})`],
         ].map(([key, label]) => (
           <button key={key} onClick={() => setFilter(key)}
-            className={`flex-1 rounded-xl py-2.5 text-sm font-semibold border transition ${filter === key ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-600 border-gray-300'}`}>
+            className={`flex-1 rounded-2xl py-3 text-sm font-bold transition ${filter === key ? 'bg-emerald-600 text-white shadow' : 'bg-white text-slate-600 border-2 border-slate-200'}`}>
             {label}
           </button>
         ))}
       </div>
 
-      <input className="w-full border rounded-lg px-3 py-2" placeholder="🔍 Search name…" value={q} onChange={(e) => setQ(e.target.value)} />
+      <input className="w-full bg-white border-2 border-slate-200 rounded-2xl px-4 py-3 text-base focus:outline-none focus:border-slate-400" placeholder="🔍 Search name…" value={q} onChange={(e) => setQ(e.target.value)} />
 
-      <div className="bg-white rounded-xl shadow divide-y divide-gray-100">
+      <div className="space-y-2">
         {visible.length === 0 && (
-          <p className="p-4 text-sm text-gray-400">
+          <p className="bg-white rounded-2xl border-2 border-slate-200 p-4 text-sm text-slate-400 text-center">
             {filter === 'topay' && rows.length - locked.length === 0 && !q ? '🎉 Everyone is paid for this month!' : 'No one matches.'}
           </p>
         )}
@@ -239,6 +264,9 @@ function OwnerSalary({ user }) {
             onUndo={() => undoPay(r)} />
         ))}
       </div>
+
+      <label className="flex items-center gap-2 text-xs text-slate-500 px-1"><input type="checkbox" className="w-5 h-5 accent-slate-700" checked={showRemoved} onChange={(e) => setShowRemoved(e.target.checked)} /> Show removed/resigned staff (kept in the sheet for costing)</label>
+      <p className="text-[11px] text-slate-500 px-1">Tap 💵 Cash or 🏦 Account → a box opens: split across <b>Cash + Account</b>, tick <b>🎯 Bonus day</b> on top if giving one, then <b>Pay &amp; lock</b> (Undo if you mis-tap). Tap the <b>name</b> for OT / details. <span className="text-slate-400">(pay v5)</span></p>
 
       <AdvanceCard user={user} extra={manualPeople} />
       <AddWorkerCard user={user} onAdded={reload} />
@@ -267,13 +295,13 @@ function FastPaySheet({ payC, busy, onChange, onCancel, onConfirm }) {
     <div className="fixed inset-0 z-50 bg-black/40 flex items-end sm:items-center justify-center p-4" onClick={() => busy ? null : onCancel()}>
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-5 space-y-3" onClick={(e) => e.stopPropagation()}>
         <div className="text-center">
-          <p className="font-bold text-gray-900 text-xl">{r.emp.name || r.emp.code}</p>
-          <p className="text-xs text-gray-500 mt-0.5">Payable {rupee(Math.abs(effPayable))}{owes ? ' — he owes us' : ''}{bonusDay ? ` · incl. +${rupee(perDay)} bonus` : ''}</p>
+          <p className="font-bold text-slate-900 text-xl">{r.emp.name || r.emp.code}</p>
+          <p className="text-xs text-slate-500 mt-0.5">Payable {rupee(Math.abs(effPayable))}{owes ? ' — he owes us' : ''}{bonusDay ? ` · incl. +${rupee(perDay)} bonus` : ''}</p>
         </div>
 
         {/* BONUS DAY — tick on top; adds one day's pay and bumps the cash field to cover it */}
         {perDay > 0 && (
-          <label className="flex items-center justify-between bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 cursor-pointer">
+          <label className="flex items-center justify-between bg-amber-50 border-2 border-amber-200 rounded-xl px-3 py-2.5 cursor-pointer">
             <span className="text-sm font-semibold text-amber-900">🎯 Bonus day <span className="font-normal text-amber-700">+{rupee(perDay)} (1 day)</span></span>
             <input type="checkbox" className="w-6 h-6 accent-amber-600" checked={!!bonusDay} disabled={busy}
               onChange={(e) => {
@@ -286,25 +314,25 @@ function FastPaySheet({ payC, busy, onChange, onCancel, onConfirm }) {
 
         {/* SPLIT — Cash + Account, both editable at once */}
         <div className="grid grid-cols-2 gap-2">
-          <label className="block text-xs font-semibold text-gray-600 text-center">💵 Cash ₹
+          <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide text-center">💵 Cash ₹
             <input type="number" inputMode="numeric" autoFocus value={cash} onChange={(e) => onChange({ ...payC, cash: e.target.value })} onFocus={(e) => e.target.select()}
-              className="mt-1 w-full border-2 border-green-600 rounded-lg px-2 py-2.5 text-2xl font-bold text-gray-900 text-center focus:outline-none focus:ring-2 focus:ring-green-400" />
+              className="mt-1 w-full border-2 border-emerald-600 rounded-xl px-2 py-3 text-2xl font-bold text-slate-900 text-center focus:outline-none focus:ring-2 focus:ring-emerald-400" />
           </label>
-          <label className="block text-xs font-semibold text-gray-600 text-center">🏦 Account ₹
+          <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide text-center">🏦 Account ₹
             <input type="number" inputMode="numeric" value={account} onChange={(e) => onChange({ ...payC, account: e.target.value })} onFocus={(e) => e.target.select()}
-              className="mt-1 w-full border-2 border-gray-700 rounded-lg px-2 py-2.5 text-2xl font-bold text-gray-900 text-center focus:outline-none focus:ring-2 focus:ring-gray-400" />
+              className="mt-1 w-full border-2 border-slate-700 rounded-xl px-2 py-3 text-2xl font-bold text-slate-900 text-center focus:outline-none focus:ring-2 focus:ring-slate-400" />
           </label>
         </div>
 
-        <p className="text-xs text-center text-gray-600">
-          Paying now <b className="text-gray-900">{rupee(total)}</b> · Balance <b className={closing >= 0 ? 'text-red-700' : 'text-green-700'}>{closing >= 0 ? '+' : ''}{rupee(closing)}</b> {closing >= 0 ? 'stays owed to him' : 'he owes us'} → carries next month.
+        <p className="text-xs text-center text-slate-600">
+          Paying now <b className="text-slate-900">{rupee(total)}</b> · Balance <b className={closing >= 0 ? 'text-rose-600' : 'text-emerald-700'}>{closing >= 0 ? '+' : ''}{rupee(closing)}</b> {closing >= 0 ? 'stays owed to him' : 'he owes us'} → carries next month.
         </p>
 
         <button disabled={busy} onClick={() => onConfirm(r, cashN, acctN, !!bonusDay)}
-          className="w-full bg-green-700 text-white rounded-xl py-4 text-base font-bold disabled:opacity-50 active:scale-95 transition">
+          className="w-full bg-emerald-600 text-white rounded-2xl py-4 text-lg font-bold shadow-lg shadow-emerald-300 disabled:opacity-50 disabled:shadow-none active:bg-emerald-700 active:scale-95 transition-all">
           {busy ? 'Paying…' : `Pay ${rupee(total)} & lock`}
         </button>
-        <button disabled={busy} onClick={onCancel} className="w-full text-sm text-gray-500 py-1 disabled:opacity-50">Cancel</button>
+        <button disabled={busy} onClick={onCancel} className="w-full text-sm text-slate-500 py-2 disabled:opacity-50">Cancel</button>
       </div>
     </div>
   );
@@ -321,45 +349,45 @@ function OwnerRow({ r, mk, busy, queued, justPaidMode, onName, onPay, onUndo }) 
     (pay.openingBalance || 0) !== 0 ? `bal ${pay.openingBalance > 0 ? '+' : ''}${rupee(pay.openingBalance)}` : null,
   ].filter(Boolean).join(' · ');
   return (
-    <div className={`p-3 ${justPaidMode ? 'bg-green-50' : isLocked ? 'opacity-70' : ''}`}>
+    <div className={`rounded-2xl p-3 ${justPaidMode ? 'bg-emerald-50 border-2 border-emerald-200' : isLocked ? 'bg-white border-2 border-slate-100 opacity-70' : 'bg-white border-2 border-slate-200 shadow-sm'}`}>
       <div className="flex items-start gap-2">
         <div className="flex-1 min-w-0">
           <button onClick={onName} className="text-left block">
-            <span className="font-semibold text-gray-900 text-[15px]">{emp.name || emp.code}{emp.nickname ? <span className="text-gray-400 font-normal"> ({emp.nickname})</span> : null}</span>
+            <span className="font-bold text-slate-900 text-base">{emp.name || emp.code}{emp.nickname ? <span className="text-slate-400 font-normal"> ({emp.nickname})</span> : null}</span>
             {(r.lateFixed || 0) > 0.25 && <span className="ml-1.5 text-[10px] bg-amber-100 text-amber-800 rounded px-1 py-0.5 align-middle">⚠ punch-fixed +{r.lateFixed}h OT</span>}
             {r.hasOverride && <span className="ml-1.5 text-[10px] bg-amber-100 text-amber-800 rounded px-1 py-0.5 align-middle">✍️ manual days/OT</span>}
             {r.emp.manual && <span className="ml-1.5 text-[10px] bg-blue-100 text-blue-700 rounded px-1 py-0.5 align-middle">manual worker</span>}
           </button>
-          <div className="text-xs text-gray-500">
+          <div className="text-xs text-slate-500">
             <button onClick={() => setShowDays((s) => !s)} className="text-blue-700 underline decoration-dotted underline-offset-2">{pay.paidDays}d · details {showDays ? '▾' : '▸'}</button>
             {sub2 ? ` · ${sub2}` : ''}
           </div>
           {showDays && <WorkerSummary r={r} mk={mk} />}
         </div>
         <div className="text-right shrink-0">
-          <div className={`font-bold text-lg ${owes && !isLocked ? 'text-green-700' : 'text-red-700'}`}>
+          <div className={`font-extrabold text-xl ${isLocked ? 'text-emerald-700' : owes ? 'text-amber-700' : 'text-rose-600'}`}>
             {isLocked ? rupee(md.payment?.net || 0) : owes ? `owes ${rupee(Math.abs(payable))}` : rupee(payable)}
           </div>
-          {isLocked && !justPaidMode && <span className="text-[11px] text-green-700 font-medium">🔒 Locked{md.payment?.closing ? ` · bal ${md.payment.closing >= 0 ? '+' : ''}${rupee(md.payment.closing)}` : ''}</span>}
+          {isLocked && !justPaidMode && <span className="text-[11px] text-emerald-700 font-medium">🔒 Locked{md.payment?.closing ? ` · bal ${md.payment.closing >= 0 ? '+' : ''}${rupee(md.payment.closing)}` : ''}</span>}
           {queued && !isLocked && <span className="text-[11px] text-amber-600 font-medium">⏳ saving…</span>}
         </div>
       </div>
       {/* just paid this session → ✓ confirmation + one-tap Undo for a mis-tap */}
       {justPaidMode && (
         <div className="flex items-center justify-between mt-2 text-sm">
-          <span className="text-green-700 font-semibold">✓ Paid {justPaidMode === 'split' ? '💵+🏦 split' : justPaidMode === 'account' ? '🏦 account' : '💵 cash'}{md.payment?.closing ? ` · bal ${md.payment.closing >= 0 ? '+' : ''}${rupee(md.payment.closing)}` : ''}</span>
-          <button disabled={busy} onClick={onUndo} className="text-gray-500 underline underline-offset-2 px-2 py-1 disabled:opacity-50">Undo</button>
+          <span className="text-emerald-700 font-semibold">✓ Paid {justPaidMode === 'split' ? '💵+🏦 split' : justPaidMode === 'account' ? '🏦 account' : '💵 cash'}{md.payment?.closing ? ` · bal ${md.payment.closing >= 0 ? '+' : ''}${rupee(md.payment.closing)}` : ''}</span>
+          <button disabled={busy} onClick={onUndo} className="text-slate-500 underline underline-offset-2 px-2 py-1 disabled:opacity-50">Undo</button>
         </div>
       )}
       {/* not settled → ONE-TAP pay (full amount, that method, locks instantly) */}
       {!isLocked && !queued && (
-        <div className="flex gap-2 mt-2.5">
+        <div className="flex gap-2 mt-3">
           {owes ? (
-            <button disabled={busy} onClick={() => onPay('cash')} className="flex-1 bg-gray-800 text-white rounded-xl py-3 font-semibold text-sm disabled:opacity-50">Settle &amp; lock <span className="font-normal opacity-80">(carries {rupee(Math.abs(payable))})</span></button>
+            <button disabled={busy} onClick={() => onPay('cash')} className="flex-1 bg-slate-800 text-white rounded-2xl py-4 font-bold text-sm disabled:opacity-50 active:scale-95 transition-all">Settle &amp; lock <span className="font-normal opacity-80">(carries {rupee(Math.abs(payable))})</span></button>
           ) : (
             <>
-              <button disabled={busy} onClick={() => onPay('cash')} className="flex-1 bg-green-700 text-white rounded-xl py-3 font-bold text-base disabled:opacity-50 active:scale-95 transition">💵 Cash</button>
-              <button disabled={busy} onClick={() => onPay('account')} className="flex-1 bg-gray-800 text-white rounded-xl py-3 font-bold text-base disabled:opacity-50 active:scale-95 transition">🏦 Account</button>
+              <button disabled={busy} onClick={() => onPay('cash')} className="flex-1 bg-emerald-600 text-white rounded-2xl py-4 font-bold text-lg shadow-lg shadow-emerald-300 disabled:opacity-50 disabled:shadow-none active:bg-emerald-700 active:scale-95 transition-all">💵 Cash</button>
+              <button disabled={busy} onClick={() => onPay('account')} className="flex-1 bg-slate-800 text-white rounded-2xl py-4 font-bold text-lg shadow-lg shadow-slate-300 disabled:opacity-50 disabled:shadow-none active:bg-slate-900 active:scale-95 transition-all">🏦 Account</button>
             </>
           )}
         </div>
@@ -424,28 +452,28 @@ function ManagerSalary({ user }) {
   }
 
   return (
-    <div className="space-y-3">
-      <select className="w-full border rounded-lg px-3 py-2 bg-white font-medium" value={mk} onChange={(e) => setMk(e.target.value)}>
+    <div className="space-y-3 pb-6">
+      <select className="w-full bg-white border-2 border-slate-200 rounded-2xl px-3 py-3 font-bold text-slate-800 text-center" value={mk} onChange={(e) => setMk(e.target.value)}>
         {monthOptions(3).map((m) => <option key={m.mk} value={m.mk}>{m.label}</option>)}
       </select>
-      <p className="text-sm text-gray-600">{pending.length} left to pay · {items.length - pending.length} done</p>
-      <div className="bg-white rounded-xl shadow divide-y divide-gray-100">
-        {items.length === 0 && <p className="p-4 text-sm text-gray-400">Nothing approved for this month yet.</p>}
+      <p className="text-sm text-slate-600 font-semibold px-1">{pending.length} left to pay · {items.length - pending.length} done</p>
+      <div className="space-y-2">
+        {items.length === 0 && <p className="bg-white rounded-2xl border-2 border-slate-200 p-4 text-sm text-slate-400 text-center">Nothing approved for this month yet.</p>}
         {items.map((i) => {
           const paidMode = i.paid?.mode || done[i.code];
           const remaining = Math.max(0, Number(i.net) - Number(i.paidSoFar || 0));
           const isPartial = !i.paid && Number(i.paidSoFar || 0) > 0;
           return (
-            <div key={i.code} className="flex items-center p-3 gap-2">
+            <div key={i.code} className={`flex items-center p-3 gap-2 rounded-2xl bg-white border-2 ${paidMode ? 'border-slate-100 opacity-70' : 'border-slate-200 shadow-sm'}`}>
               <div className="flex-1">
-                <div className="font-medium text-gray-800">{i.name}{i.nickname ? <span className="text-gray-400 font-normal"> ({i.nickname})</span> : null}</div>
-                <div className="text-xs text-gray-500">{i.dept}{isPartial ? <span className="text-blue-700"> · {rupee(Number(i.paidSoFar))} paid, {rupee(remaining)} left</span> : null}</div>
+                <div className="font-bold text-slate-900">{i.name}{i.nickname ? <span className="text-slate-400 font-normal"> ({i.nickname})</span> : null}</div>
+                <div className="text-xs text-slate-500">{i.dept}{isPartial ? <span className="text-blue-700"> · {rupee(Number(i.paidSoFar))} paid, {rupee(remaining)} left</span> : null}</div>
               </div>
-              <div className="font-bold text-red-700 mr-1">{rupee(isPartial ? remaining : i.net)}</div>
-              {paidMode ? <span className="text-xs text-green-700 font-medium">✓ {paidMode}</span> : (
-                <div className="flex gap-1">
-                  <button disabled={busy === i.code} onClick={() => setConfirm({ item: i, mode: 'cash', remark: '', amount: String(remaining) })} className="bg-green-700 text-white text-xs rounded-lg px-2.5 py-2 font-medium disabled:opacity-50">💵 Cash</button>
-                  <button disabled={busy === i.code} onClick={() => setConfirm({ item: i, mode: 'bank', remark: '', amount: String(remaining) })} className="bg-gray-800 text-white text-xs rounded-lg px-2.5 py-2 font-medium disabled:opacity-50">🏦 Bank</button>
+              <div className={`font-extrabold mr-1 ${paidMode ? 'text-emerald-700' : 'text-rose-600'}`}>{rupee(isPartial ? remaining : i.net)}</div>
+              {paidMode ? <span className="text-xs text-emerald-700 font-medium">✓ {paidMode}</span> : (
+                <div className="flex gap-1.5">
+                  <button disabled={busy === i.code} onClick={() => setConfirm({ item: i, mode: 'cash', remark: '', amount: String(remaining) })} className="bg-emerald-600 text-white text-sm rounded-xl px-3 py-3 font-bold shadow shadow-emerald-200 disabled:opacity-50 active:scale-95 transition-all">💵 Cash</button>
+                  <button disabled={busy === i.code} onClick={() => setConfirm({ item: i, mode: 'bank', remark: '', amount: String(remaining) })} className="bg-slate-800 text-white text-sm rounded-xl px-3 py-3 font-bold shadow shadow-slate-200 disabled:opacity-50 active:scale-95 transition-all">🏦 Bank</button>
                 </div>
               )}
             </div>
@@ -466,18 +494,18 @@ function ManagerSalary({ user }) {
             </div>
             <label className="block text-xs text-gray-500">Amount paid now ₹
               <input type="number" value={confirm.amount} onChange={(e) => setConfirm({ ...confirm, amount: e.target.value })}
-                className="mt-1 w-full border rounded-lg px-3 py-2 text-lg font-bold text-gray-800" />
+                className="mt-1 w-full border-2 border-slate-200 rounded-xl px-3 py-2.5 text-lg font-bold text-slate-800" />
             </label>
             {(() => { const rem = Math.max(0, Number(confirm.item.net) - Number(confirm.item.paidSoFar || 0)); const amt = Number(confirm.amount) || 0; return (<>
               {amt > 0 && amt < rem - 0.5 && <p className="text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded-lg p-2">Part payment — <b>{rupee(rem - amt)}</b> stays pending. Hisab stays open until fully paid.</p>}
               {amt > rem + 0.5 && <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2">Paying {rupee(amt - rem)} extra → recorded as an <b>advance carried forward</b> to next month.</p>}
             </>); })()}
             <input value={confirm.remark} onChange={(e) => setConfirm({ ...confirm, remark: e.target.value })} placeholder="Remark (optional)"
-              className="w-full border rounded-lg px-3 py-2 text-sm" />
+              className="w-full border-2 border-slate-200 rounded-xl px-3 py-2.5 text-sm" />
             <div className="flex gap-2">
               <button disabled={!!busy} onClick={() => setConfirm(null)} className="flex-1 border rounded-xl py-3 font-medium text-gray-600 disabled:opacity-50">Cancel</button>
               <button disabled={!!busy || !(Number(confirm.amount) >= 0)} onClick={() => pay(confirm.item, confirm.mode, confirm.remark.trim(), Number(confirm.amount))}
-                className="flex-1 bg-green-700 text-white rounded-xl py-3 font-semibold disabled:opacity-50">{busy ? 'Paying…' : `Pay ${rupee(Number(confirm.amount) || 0)}`}</button>
+                className="flex-1 bg-emerald-600 text-white rounded-2xl py-3.5 font-bold shadow-lg shadow-emerald-300 disabled:opacity-50 disabled:shadow-none active:bg-emerald-700 active:scale-95 transition-all">{busy ? 'Paying…' : `Pay ${rupee(Number(confirm.amount) || 0)}`}</button>
             </div>
           </div>
         </div>
@@ -511,17 +539,17 @@ export function AdvanceCard({ user, extra = [] }) {
     } catch (e) { setSt('Could not save — try again.'); }
   }
   return (
-    <div className="bg-white rounded-xl shadow p-3 space-y-2">
-      <div className="font-semibold text-gray-800 text-sm">💸 Give advance</div>
+    <div className="bg-white rounded-2xl border-2 border-slate-200 p-3 space-y-2">
+      <div className="font-bold text-slate-700">💸 Give advance</div>
       <div className="grid grid-cols-2 gap-2">
         <NamePick roster={pickList} value={f.name} onChange={(code, name) => setF({ ...f, code, name })} className="col-span-2" />
-        <input className="border rounded px-2 py-2 text-sm" type="date" value={f.date} onChange={(e) => setF({ ...f, date: e.target.value })} />
-        <input className="border rounded px-2 py-2 text-sm" type="number" placeholder="Amount ₹" value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} />
-        <select className="border rounded px-2 py-2 text-sm" value={f.mode} onChange={(e) => setF({ ...f, mode: e.target.value })}>
+        <input className="border-2 border-slate-200 rounded-xl px-2 py-2.5 text-sm" type="date" value={f.date} onChange={(e) => setF({ ...f, date: e.target.value })} />
+        <input className="border-2 border-slate-200 rounded-xl px-2 py-2.5 text-sm" type="number" placeholder="Amount ₹" value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} />
+        <select className="border-2 border-slate-200 rounded-xl px-2 py-2.5 text-sm bg-white" value={f.mode} onChange={(e) => setF({ ...f, mode: e.target.value })}>
           <option value="cash">Cash</option><option value="account">Bank</option>
         </select>
-        <input className="border rounded px-2 py-2 text-sm" placeholder="Remark (optional)" value={f.remark} onChange={(e) => setF({ ...f, remark: e.target.value })} />
-        <button onClick={go} disabled={st === 'saving'} className="col-span-2 bg-red-700 text-white rounded-lg py-2 text-sm font-medium disabled:opacity-50">Record advance</button>
+        <input className="border-2 border-slate-200 rounded-xl px-2 py-2.5 text-sm" placeholder="Remark (optional)" value={f.remark} onChange={(e) => setF({ ...f, remark: e.target.value })} />
+        <button onClick={go} disabled={st === 'saving'} className="col-span-2 bg-amber-500 text-white rounded-2xl py-3.5 font-bold shadow-lg shadow-amber-200 disabled:opacity-50 disabled:shadow-none active:bg-amber-600 active:scale-95 transition-all">＋ Record advance</button>
       </div>
       {f.name && !f.code && <p className="text-xs text-amber-700">Keep typing — more than one name matches.</p>}
       {st === 'done' && <p className="text-xs text-green-700">✓ Recorded — owner gets a Telegram alert.</p>}
@@ -547,19 +575,19 @@ function AddWorkerCard({ user, onAdded }) {
     } catch { setSt('Could not save — try again.'); }
   }
   return (
-    <div className="bg-white rounded-xl shadow p-3">
-      <button onClick={() => setOpen((o) => !o)} className="w-full text-left font-semibold text-gray-800 text-sm">➕ Add a manual worker <span className="font-normal text-xs text-gray-400">— not on the machine (Radhey, Dinesh…)</span> {open ? '▲' : '▼'}</button>
+    <div className="bg-white rounded-2xl border-2 border-slate-200 p-3">
+      <button onClick={() => setOpen((o) => !o)} className="w-full text-left font-bold text-slate-700">➕ Add a manual worker <span className="font-normal text-xs text-slate-400">— not on the machine (Radhey, Dinesh…)</span> <span className="float-right text-slate-400">{open ? '▲' : '▼'}</span></button>
       {open && (
         <div className="grid grid-cols-2 gap-2 mt-2">
-          <input className="border rounded px-2 py-2 text-sm col-span-2" placeholder="Name" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} />
-          <input className="border rounded px-2 py-2 text-sm" placeholder="Department (optional)" value={f.dept} onChange={(e) => setF({ ...f, dept: e.target.value })} />
-          <select className="border rounded px-2 py-2 text-sm" value={f.type} onChange={(e) => setF({ ...f, type: e.target.value })}>
+          <input className="border-2 border-slate-200 rounded-xl px-2 py-2.5 text-sm col-span-2" placeholder="Name" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} />
+          <input className="border-2 border-slate-200 rounded-xl px-2 py-2.5 text-sm" placeholder="Department (optional)" value={f.dept} onChange={(e) => setF({ ...f, dept: e.target.value })} />
+          <select className="border-2 border-slate-200 rounded-xl px-2 py-2.5 text-sm bg-white" value={f.type} onChange={(e) => setF({ ...f, type: e.target.value })}>
             <option value="monthly">₹ / month</option><option value="daily">₹ / day</option>
           </select>
-          <input className="border rounded px-2 py-2 text-sm" type="number" inputMode="numeric" placeholder={f.type === 'daily' ? 'Wage ₹/day' : 'Salary ₹/month'} value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} />
-          <input className="border rounded px-2 py-2 text-sm" type="number" inputMode="decimal" placeholder="Shift hours (8.5)" value={f.standardHours} onChange={(e) => setF({ ...f, standardHours: e.target.value })} />
-          <button onClick={go} disabled={st === 'saving'} className="col-span-2 bg-gray-800 text-white rounded-lg py-2 text-sm font-medium disabled:opacity-50">Add worker</button>
-          <p className="col-span-2 text-[11px] text-gray-500">After adding, open the worker and use <b>✍️ Override days / OT</b> each month to set their days & overtime, then pay them from the Salary list.</p>
+          <input className="border-2 border-slate-200 rounded-xl px-2 py-2.5 text-sm" type="number" inputMode="numeric" placeholder={f.type === 'daily' ? 'Wage ₹/day' : 'Salary ₹/month'} value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} />
+          <input className="border-2 border-slate-200 rounded-xl px-2 py-2.5 text-sm" type="number" inputMode="decimal" placeholder="Shift hours (8.5)" value={f.standardHours} onChange={(e) => setF({ ...f, standardHours: e.target.value })} />
+          <button onClick={go} disabled={st === 'saving'} className="col-span-2 bg-slate-800 text-white rounded-2xl py-3.5 font-bold shadow-lg shadow-slate-300 disabled:opacity-50 disabled:shadow-none active:bg-slate-900 active:scale-95 transition-all">Add worker</button>
+          <p className="col-span-2 text-[11px] text-slate-500">After adding, open the worker and use <b>✍️ Override days / OT</b> each month to set their days & overtime, then pay them from the Salary list.</p>
         </div>
       )}
       {st === 'done' && <p className="text-xs text-green-700 mt-1">✓ Added — find them in the list above and set this month's days/OT.</p>}
@@ -625,21 +653,21 @@ function ReportModal({ user, mk, rows, onClose }) {
   return (
     <div className="fixed inset-0 bg-black/40 z-20 grid place-items-center p-4" onClick={onClose}>
       <div className="bg-white rounded-2xl p-4 w-full max-w-sm space-y-3" onClick={(e) => e.stopPropagation()}>
-        <div className="font-semibold text-gray-800">📄 Reports</div>
-        <select className="w-full border rounded px-3 py-2" value={f.report} onChange={(e) => setF({ ...f, report: e.target.value })}>
+        <div className="font-bold text-lg text-slate-800">📄 Reports</div>
+        <select className="w-full border-2 border-slate-200 rounded-xl px-3 py-2.5 bg-white" value={f.report} onChange={(e) => setF({ ...f, report: e.target.value })}>
           {REPORTS.map((r) => <option key={r.v} value={r.v}>{r.label}</option>)}
         </select>
-        <select className="w-full border rounded px-3 py-2" value={f.month} onChange={(e) => setF({ ...f, month: e.target.value })}>
+        <select className="w-full border-2 border-slate-200 rounded-xl px-3 py-2.5 bg-white" value={f.month} onChange={(e) => setF({ ...f, month: e.target.value })}>
           {monthOptions(3).map((m, i) => <option key={m.mk} value={i}>{m.label}</option>)}
         </select>
         <NamePick roster={roster} value={f.name} onChange={(code, name) => setF({ ...f, code, name })}
           placeholder="Type a name… (empty = everyone)" className="w-full" />
         {f.name && !f.code && <p className="text-xs text-amber-700">Keep typing — more than one name matches.</p>}
-        {st === 'sent' ? <p className="text-sm text-green-700">✓ On its way to Telegram (1–2 min). Forward it to WhatsApp from there.</p> : (
-          <button onClick={send} disabled={st === 'sending'} className="w-full bg-red-700 text-white rounded-lg py-2.5 font-medium disabled:opacity-50">✈️ Send to Telegram</button>
+        {st === 'sent' ? <p className="text-sm text-emerald-700">✓ On its way to Telegram (1–2 min). Forward it to WhatsApp from there.</p> : (
+          <button onClick={send} disabled={st === 'sending'} className="w-full bg-blue-600 text-white rounded-2xl py-3 font-bold shadow-lg shadow-blue-300 disabled:opacity-50 disabled:shadow-none active:bg-blue-700 active:scale-95 transition-all">✈️ Send to Telegram</button>
         )}
-        <button onClick={register} className="w-full border border-green-300 text-green-700 rounded-lg py-2.5 font-medium">🟢 Salary register PDF — share / WhatsApp</button>
-        <button onClick={lockedReg} className="w-full border border-gray-800 text-gray-800 rounded-lg py-2.5 font-medium">🔒 Locked salary + payments PDF <span className="font-normal text-xs text-gray-500">(days·OT·adv·payable·net·cash·account·carry)</span></button>
+        <button onClick={register} className="w-full bg-white border-2 border-emerald-300 text-emerald-700 rounded-2xl py-3 font-bold active:bg-emerald-50 active:scale-95 transition-all">🟢 Salary register PDF — share / WhatsApp</button>
+        <button onClick={lockedReg} className="w-full bg-white border-2 border-slate-300 text-slate-800 rounded-2xl py-3 font-bold active:bg-slate-50 active:scale-95 transition-all">🔒 Locked salary + payments PDF <span className="font-normal text-xs text-slate-500">(days·OT·adv·payable·net·cash·account·carry)</span></button>
         {st === 'nolock' && <p className="text-xs text-amber-700">No salary is locked yet for {monthOptions(3).find((m) => m.mk === mk)?.label || mk}. Lock/pay some workers first.</p>}
         {st === 'error' && <p className="text-xs text-red-600">Failed — try again.</p>}
       </div>
@@ -652,9 +680,9 @@ function NoSalaryList({ list, onSaved }) {
   const [show, setShow] = useState(false);
   const [vals, setVals] = useState({});
   return (
-    <div className="bg-white rounded-xl shadow p-3">
-      <button onClick={() => setShow(!show)} className="w-full text-left text-sm font-semibold text-gray-600">
-        No salary set ({list.length}) {show ? '▲' : '▼'} <span className="font-normal text-xs text-gray-400">— piece-rate welders can stay empty</span>
+    <div className="bg-white rounded-2xl border-2 border-slate-200 p-3">
+      <button onClick={() => setShow(!show)} className="w-full text-left font-bold text-slate-600">
+        No salary set ({list.length}) <span className="font-normal text-xs text-slate-400">— piece-rate welders can stay empty</span> <span className="float-right text-slate-400">{show ? '▲' : '▼'}</span>
       </button>
       {show && (
         <ul className="mt-2 divide-y divide-gray-100">
