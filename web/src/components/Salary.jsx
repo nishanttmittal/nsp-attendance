@@ -85,7 +85,7 @@ function OwnerSalary({ user }) {
         : paymentBreakdown(pay);
       const args = { cash: cashN, account: acctN, payable, advanceCarry: pay.advanceBalanceCarried, reason: `Salary ${mk}${bonusDay ? ' +bonus day' : ''}` };
       await lockMonthDirect(code, mk, { ...args, breakdown }, user.email);   // instant freeze + carry
-      queueLock(code, mk, args, user.email).catch(() => {});                 // register + Telegram
+      queueLock(code, mk, { ...args, breakdown }, user.email).catch(() => {});   // register + Telegram (snapshot rides along)
       // FAST: update ONLY this worker (1 read) instead of reloading the whole roster.
       setPayC(null);
       setJustPaid((p) => ({ ...p, [code]: cashN > 0 && acctN > 0 ? 'split' : (acctN > 0 ? 'account' : 'cash') }));

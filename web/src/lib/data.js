@@ -382,8 +382,9 @@ export async function queueFinalizeHisab(month, by) {
 // carried forward to next month.
 // Cashier settle: record cash+account, freeze the month, carry the running balance. payable = the
 // client-computed net + opening balance (what to settle). Applied by the worker with admin rights.
-export async function queueLock(code, month, { cash, account, payable, advanceCarry, reason }, by) {
-  return queueJob('lock_month', { code, month, cash: Number(cash || 0), account: Number(account || 0), payable: Number(payable || 0), advanceCarry: Number(advanceCarry || 0), reason: reason || '' }, by);
+export async function queueLock(code, month, { cash, account, payable, advanceCarry, breakdown, reason }, by) {
+  // breakdown rides along so even the robot's fallback lock stores the full salary snapshot
+  return queueJob('lock_month', { code, month, cash: Number(cash || 0), account: Number(account || 0), payable: Number(payable || 0), advanceCarry: Number(advanceCarry || 0), ...(breakdown ? { breakdown } : {}), reason: reason || '' }, by);
 }
 export async function queueUnlock(code, month, reason, by) {
   return queueJob('unlock_month', { code, month, reason: reason || '' }, by);

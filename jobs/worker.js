@@ -196,6 +196,12 @@ async function handle(type, p) {
     } else if (md.locked) {
       return `already locked (${p.month})`;
     } else {
+      // STALE-REPLAY GUARD (2026-07-18, the Kamla case): if the owner UNLOCKED this month AFTER
+      // this job was queued, the direct lock this job mirrors was deliberately undone — re-locking
+      // here would resurrect it (and without the app's breakdown snapshot). Skip it.
+      if (md.unlockedAt && p._createdAt && md.unlockedAt > p._createdAt) {
+        return `stale lock skipped — ${p.month} was unlocked after this job was queued`;
+      }
       // legacy queue-only path (no direct write): do the full lock + carry here.
       cash = Number(p.cash || 0); account = Number(p.account || 0); paid = cash + account;
       const payable = Number(p.payable || 0);
@@ -205,7 +211,7 @@ async function handle(type, p) {
       const months = { ...(e.months || {}) };
       const prevNextOpening = Number((months[next] || {}).openingBalance || 0), prevNextAdvance = Number((months[next] || {}).advanceBalanceIn || 0);
       months[p.month] = { ...md, locked: true, lockedAt: new Date().toISOString(),
-        payment: { cash, account, net: paid, payable, closing, date, mode: 'lock', prevNextOpening, prevNextAdvance, by: p._by || 'owner', reason: p.reason || '' } };
+        payment: { cash, account, net: paid, payable, closing, date, mode: 'lock', prevNextOpening, prevNextAdvance, ...(p.breakdown ? { breakdown: p.breakdown } : {}), by: p._by || 'owner', reason: p.reason || '' } };
       months[next] = { ...(months[next] || {}), openingBalance: closing, advanceBalanceIn: Number(p.advanceCarry || 0) };
       const entry = { at: new Date().toISOString(), by: p._by || 'owner', code: p.code, name: e.name || p.code, month: p.month, field: 'lock', from: `payable ₹${payable}`, to: `paid ₹${paid} (cash ${cash}+acct ${account}); carry ₹${closing}`, reason: p.reason || '' };
       await ref.set({ months, decisions: [...(e.decisions || []), entry] }, { merge: true });
@@ -416,7 +422,7 @@ async function main() {
     }
     await doc.ref.update({ status: 'running', startedAt: new Date().toISOString() });
     try {
-      const result = await handle(type, { ...(payload || {}), _by: requestedBy || '' });
+      const result = await handle(type, { ...(payload || {}), _by: requestedBy || '', _createdAt: doc.data().createdAt?.toDate?.()?.toISOString() || '' });
       await doc.ref.update({ status: 'done', result, finishedAt: new Date().toISOString() });
       console.log(`[done] ${type}: ${result}`);
     } catch (e) {

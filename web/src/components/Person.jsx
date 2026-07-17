@@ -87,7 +87,7 @@ export default function Person({ code, mk, user, onBack }) {
     // INSTANT: write the lock directly (owner has att_salary write); it freezes + carries right away.
     await lockMonthDirect(code, mk, { cash, account, payable: pay.payable, advanceCarry: pay.advanceBalanceCarried, breakdown, reason }, user.email);
     // background (best-effort): the robot adds the salary-register snapshot + Telegram alert.
-    queueLock(code, mk, { cash, account, payable: pay.payable, advanceCarry: pay.advanceBalanceCarried, reason }, user.email).catch(() => {});
+    queueLock(code, mk, { cash, account, payable: pay.payable, advanceCarry: pay.advanceBalanceCarried, breakdown, reason }, user.email).catch(() => {});
   });
   const doUnlock = (reason) => act(async () => {
     await unlockMonthDirect(code, mk, reason, user.email);        // INSTANT reopen (no robot dependency)
