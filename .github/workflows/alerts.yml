@@ -9,8 +9,9 @@ on:
     - cron: '0 7 * * *'     # 12:30 IST — morning attendance summary (after portal rolls to today; also date-guarded)
     - cron: '30 1 * * *'    # 07:00 IST — reprocess yesterday
     - cron: '45 1 * * *'    # 07:15 IST — publish salary attendance (att_attendance)
-    - cron: '0 2 * * 0'     # Sun 07:30 IST — weekly backup
-    - cron: '15 21 * * *'   # 02:45 IST nightly — welder app backup → Telegram
+    # weekly Sun Telegram backup REMOVED 2026-07-17 (owner: no backup files on Telegram) —
+    # replaced by the nightly private-repo backup below; "backup" stays as a manual task.
+    - cron: '15 21 * * *'   # 02:45 IST nightly — welder + attendance backup → private unico-backups repo
     - cron: '15 2 * * *'    # 07:45 IST daily — sync employee names/dept from Realtime portal (att_salary)
     - cron: '30 14 * * *'   # 20:00 IST — welder daily production summary
     - cron: '35 14 * * *'   # 20:05 IST — plating daily summary
@@ -55,19 +56,23 @@ jobs:
             "long-absence"|"30 3 * * *")  THRESHOLD=4 node longAbsence.js ;;
             "reprocess"|"30 1 * * *")     node dailyReprocess.js ;;
             "salary-data"|"45 1 * * *")   node publishSalaryData.js ;;
-            "backup"|"0 2 * * 0")         node backup.js ;;
+            "backup")                     node backup.js ;;   # manual only — Telegram file on demand
             "welder-backup"|"15 21 * * *")
               node welderBackup.js
-              # push the JSON to the PRIVATE unico-backups repo (no Telegram on success)
+              node attendanceBackup.js
+              # push the JSONs to the PRIVATE unico-backups repo (no Telegram on success)
               mkdir -p ~/.ssh && printf '%s\n' "$BACKUP_DEPLOY_KEY" > ~/.ssh/backup_key && chmod 600 ~/.ssh/backup_key
               ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
               export GIT_SSH_COMMAND="ssh -i ~/.ssh/backup_key -o IdentitiesOnly=yes"
               git clone --depth 1 git@github.com:nishanttmittal/unico-backups.git /tmp/ubk
-              mkdir -p /tmp/ubk/welder && cp downloads/welder-backup-*.json /tmp/ubk/welder/
-              ls /tmp/ubk/welder/*.json | sort | head -n -60 | xargs -r rm --   # keep last 60 nights in the checkout
+              mkdir -p /tmp/ubk/welder /tmp/ubk/attendance
+              cp downloads/welder-backup-*.json /tmp/ubk/welder/
+              cp downloads/nsp-attendance-backup-*.json /tmp/ubk/attendance/
+              ls /tmp/ubk/welder/*.json | sort | head -n -60 | xargs -r rm --       # keep last 60 nights
+              ls /tmp/ubk/attendance/*.json | sort | head -n -60 | xargs -r rm --   # keep last 60 nights
               git -C /tmp/ubk config user.email "backup-bot@unico" && git -C /tmp/ubk config user.name "unico-backup-bot"
               git -C /tmp/ubk add -A
-              git -C /tmp/ubk commit -m "welder nightly backup $(date -u +%F)" || echo "nothing new"
+              git -C /tmp/ubk commit -m "nightly backup $(date -u +%F)" || echo "nothing new"
               git -C /tmp/ubk push
               ;;
             "sync-employees"|"15 2 * * *") node syncEmployees.js ;;
