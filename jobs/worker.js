@@ -74,6 +74,13 @@ async function handle(type, p) {
     return 'backup sent';
   }
   if (type === 'onboard_employee') {
+    // best-effort duplicate guard (2026-07-18): a stale-recovery re-run must not create the same
+    // card number twice on the machine. Roster syncs daily, so a same-day retry can still slip
+    // through — but this catches the common case cheaply.
+    const rosterDoc = (await db().collection('att_meta').doc('roster').get()).data() || {};
+    if ((rosterDoc.employees || []).some((x) => String(Number(x.code)) === String(Number(p.cardno)))) {
+      return `cardno ${p.cardno} already on the machine roster — skipped (duplicate guard)`;
+    }
     run('onboardEmployee.js', { NAME: p.name, CARDNO: p.cardno, DEPT: p.dept, SHIFT: p.shift, GENDER: p.gender, DRY: 'false' });
     await sendTelegram(`🧑‍🏭 New employee added: ${p.name} (${p.cardno}) · ${p.dept} · ${p.shift}.`);
     return 'employee created on machine';
@@ -286,6 +293,11 @@ async function handle(type, p) {
       return `REJECTED — ${advMk} is locked; advance not recorded`;
     }
     const advances = (snap.exists && snap.data().advances) || [];
+    // DEDUPE (fix 2026-07-18): a stale-recovery re-run (runner killed after the write, before
+    // 'done') must not record the same advance twice — worker would be double-deducted at salary.
+    if (p.advance.id && advances.some((a) => a.id === p.advance.id)) {
+      return `advance ${p.advance.id} already recorded — duplicate ignored`;
+    }
     advances.push(p.advance);
     await ref.set({ advances }, { merge: true });
     await sendTelegram(`💸 Advance ₹${p.advance.amount} to ${p.code} (${p.advance.mode}) by ${p.advance.paidBy || '?'}.`);

@@ -252,6 +252,7 @@ export default function Person({ code, mk, user, onBack }) {
 
       {emp.active !== false ? (
         <SettleResign emp={emp} mk={mk} attMap={attMap} ctx={ctx} disabled={busy || locked} today={today}
+          graceDelta={graceDelta} punchDoc={punchDoc}
           onConfirm={(sp, last) => act(() => settleAndResign(code, mk, sp, last, user.email))} />
       ) : (
         <div className="text-center text-xs text-gray-400">
@@ -363,7 +364,7 @@ function AskSheet({ title, children, okLabel = 'OK', okDanger, okDisabled, busy,
 }
 
 // Final settlement & resign — date picker → review + password, in app dialogs (was 3 window.prompts).
-function SettleResign({ emp, mk, attMap, ctx, disabled, today, onConfirm }) {
+function SettleResign({ emp, mk, attMap, ctx, disabled, today, graceDelta, punchDoc, onConfirm }) {
   const [step, setStep] = useState(null);   // null | 'date' | 'confirm'
   const [last, setLast] = useState(today);
   const [sp, setSp] = useState(null);
@@ -372,8 +373,10 @@ function SettleResign({ emp, mk, attMap, ctx, disabled, today, onConfirm }) {
   const [checking, setChecking] = useState(false);
   const toReview = () => {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(last)) { setErr('Pick the last working day.'); return; }
-    // recompute pay capped at the last working day (prorates a mid-month exit)
-    setSp(payFor({ ...emp, exitDate: last }, attMap, mk, ctx).pay); setErr(''); setPw(''); setStep('confirm');
+    // recompute pay capped at the last working day (prorates a mid-month exit). Fix 2026-07-18:
+    // pass graceDelta + punchDoc so the settlement keeps the broken-punch OT restore and grace —
+    // the 4-arg call silently offered LESS than the worker's own page showed.
+    setSp(payFor({ ...emp, exitDate: last }, attMap, mk, ctx, graceDelta, punchDoc).pay); setErr(''); setPw(''); setStep('confirm');
   };
   const go = async () => {
     setChecking(true);

@@ -111,7 +111,12 @@ export async function removeManager(email) {
   await deleteDoc(doc(db, 'att_users', email.toLowerCase()));
 }
 // Manager advance → job queue (worker applies with admin rights so salary stays admin-only)
-export async function queueAdvance(code, advance, by) { return queueJob('add_advance', { code, advance }, by); }
+export async function queueAdvance(code, advance, by) {
+  // Stable id (fix 2026-07-18): the worker dedupes on it, so a cloud run killed after saving and
+  // retried can never record the same advance twice (mark_paid already had this via payId).
+  const id = advance.id || ('adv-' + (advance.date || '') + '-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7));
+  return queueJob('add_advance', { code, advance: { ...advance, id } }, by);
+}
 
 // All employees' monthly attendance at once (for the salary register PDF).
 export async function loadAllAttendance() {

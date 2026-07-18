@@ -47,8 +47,10 @@ function OwnerSalary({ user }) {
   const locked = rows.filter((r) => r.md.locked || r.md.payment);   // settled via Lock
   const brokenFix = rows.filter((r) => (r.lateFixed || 0) > 0.25);   // workers auto-corrected for broken-punch fake "late"
   const isSettled = (r) => !!(r.md.locked || r.md.payment);
+  // just-paid rows stay visible on EVERY filter (fix 2026-07-18): on "🔴 To pay" a worker used to
+  // vanish the instant he was paid, hiding the ✓/Undo — a mis-tap couldn't be undone from there.
   const visible = rows.filter((r) => !q || (r.emp.name || '').toLowerCase().includes(q.toLowerCase()))
-    .filter((r) => filter === 'all' ? true : filter === 'paid' ? isSettled(r) : !isSettled(r));
+    .filter((r) => justPaid[r.emp.code] ? true : filter === 'all' ? true : filter === 'paid' ? isSettled(r) : !isSettled(r));
   const noSalary = emps.filter((e) => !(e.amount || e.wage));
   // month payroll totals: payable for the unsettled, actual paid for the locked
   const totalPayable = rows.reduce((s, r) => s + Number((r.md.locked || r.md.payment) ? (r.md.payment?.net || 0) : (r.pay.payable || 0)), 0);
@@ -88,7 +90,7 @@ function OwnerSalary({ user }) {
       queueLock(code, mk, { ...args, breakdown }, user.email).catch(() => {});   // register + Telegram (snapshot rides along)
       // FAST: update ONLY this worker (1 read) instead of reloading the whole roster.
       setPayC(null);
-      setJustPaid((p) => ({ ...p, [code]: cashN > 0 && acctN > 0 ? 'split' : (acctN > 0 ? 'account' : 'cash') }));
+      setJustPaid((p) => ({ ...p, [code]: cashN + acctN <= 0 ? 'settled' : cashN > 0 && acctN > 0 ? 'split' : (acctN > 0 ? 'account' : 'cash') }));
       const fresh = await loadEmployee(code).catch(() => null);
       if (fresh) setEmps((prev) => prev.map((e) => (e.code === code ? fresh : e)));
     } finally { setBusy(''); }
@@ -338,7 +340,7 @@ function OwnerRow({ r, mk, busy, justPaidMode, onName, onPay, onUndo }) {
       {/* just paid this session → ✓ confirmation + one-tap Undo for a mis-tap */}
       {justPaidMode && (
         <div className="flex items-center justify-between mt-2 text-sm">
-          <span className="text-emerald-700 font-semibold">✓ Paid {justPaidMode === 'split' ? '💵+🏦 split' : justPaidMode === 'account' ? '🏦 account' : '💵 cash'}{md.payment?.closing ? ` · bal ${md.payment.closing >= 0 ? '+' : ''}${rupee(md.payment.closing)}` : ''}</span>
+          <span className="text-emerald-700 font-semibold">{justPaidMode === 'settled' ? '✓ Settled — ₹0 paid' : `✓ Paid ${justPaidMode === 'split' ? '💵+🏦 split' : justPaidMode === 'account' ? '🏦 account' : '💵 cash'}`}{md.payment?.closing ? ` · bal ${md.payment.closing >= 0 ? '+' : ''}${rupee(md.payment.closing)}` : ''}</span>
           <button disabled={busy} onClick={onUndo} className="text-slate-500 underline underline-offset-2 px-2 py-1 disabled:opacity-50">Undo</button>
         </div>
       )}

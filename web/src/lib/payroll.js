@@ -37,12 +37,18 @@ export function computePay({ emp, att, daysInMonth, elapsedDays, fullMonth, adva
   // weekly-off audit). It reduces the paid days but NOT the OT (OT already includes those hrs).
   const unpaidSat = emp.type === 'daily' ? 0 : Number(att.unpaidWorkedSat || 0);
 
+  // Absents for BASE are capped to the employment window (fix 2026-07-18): the portal counts
+  // whole-month absents, so a mid-month joiner/leaver had out-of-window days counted absent and
+  // base collapsed to ₹0 (it also broke the LITERAL days-override whenever join/exit clamped the
+  // window). In-window absents can never exceed effElapsed − presentDays; min() deliberately keeps
+  // a NEGATIVE override-absent intact (override.days > elapsed pays the extra days by design).
+  const absentForBase = Math.min(Number(att.absentDays || 0), Math.max(0, effElapsed - (att.presentDays || 0)));
   // app-only daily-wager: pay = wage × equivalent-days (Σ hours/11, each day capped at 1).
   // machine daily-wage: wage × present days. monthly: prorated, deduct absences + unpaid worked Sats.
   const base = emp.type === 'daily'
     ? (emp.appOnly ? rate * (att.equivalentDays || 0) : rate * (att.presentDays || 0))
     : att.noRecord ? 0                                    // no attendance this month (joined later) -> pay 0, never a full month
-    : perDay * Math.max(0, effElapsed - (att.absentDays || 0) - unpaidSat);
+    : perDay * Math.max(0, effElapsed - absentForBase - unpaidSat);
 
   // Net OT = raw OT − late − early, floored at 0 (lateness is also handled by the penalty tab)
   const netOtHrs = emp.appOnly ? 0 : Math.max(0, (att.otHrs || 0) - (att.lateHrs || 0) - (att.earlyHrs || 0));
