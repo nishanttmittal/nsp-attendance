@@ -232,6 +232,12 @@ async function handle(type, p) {
     const ref = db().collection('att_salary').doc(p.code);
     const e = (await ref.get()).data(); const md = (e.months || {})[p.month] || {};
     if (!md.locked) return `not locked (${p.month})`;
+    // STALE-REPLAY GUARD (2026-07-18, the akshay case — mirror of the lock_month guard): if the
+    // owner LOCKED this month again AFTER this unlock was queued, the current lock is a NEWER
+    // decision — replaying the old unlock here would silently wipe a recorded payment.
+    if (md.lockedAt && p._createdAt && md.lockedAt > p._createdAt) {
+      return `stale unlock skipped — ${p.month} was re-locked after this job was queued`;
+    }
     const [y, m] = p.month.split('-').map(Number);
     const next = m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`;
     const months = { ...(e.months || {}) };
