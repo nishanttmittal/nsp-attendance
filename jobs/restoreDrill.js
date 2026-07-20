@@ -102,7 +102,11 @@ function legA(backup) {
   const s = summarise(backup);
 
   check('backup parses as JSON with a collections map', true, `${s.collections} collections, ${s.docs} docs`);
-  check('export is marked complete', backup.full === true, `full=${backup.full}, exportedAt=${backup.exportedAt}`);
+  // NOTE: `full` means "this was the WEEKLY run that also includes laser_jobs"
+  // (see fullBackup.js) — it does NOT mean "this export is complete". A nightly
+  // backup is legitimately full=false. Only the timestamp is a real health signal.
+  check('export carries a timestamp', !!backup.exportedAt,
+    `exportedAt=${backup.exportedAt}, weeklyFullRun=${backup.full === true}`);
   check('every collection has at least one document',
     Object.values(s.perCollection).every(n => n > 0),
     Object.entries(s.perCollection).map(([k, v]) => `${k}:${v}`).join(' '));
@@ -148,6 +152,17 @@ async function legB(backup, srcSummary) {
   const { getFirestore } = require('firebase-admin/firestore');
   const app = getApps().length ? getApps()[0] : initializeApp({ projectId: DRILL_PROJECT });
   const db = getFirestore(app);
+
+  // Wipe the emulator FIRST. Different apps share collection names (logs, users,
+  // meta, products), so restoring several in a row without clearing makes each
+  // read-back include the previous app's documents and every count check lies.
+  const host = process.env.FIRESTORE_EMULATOR_HOST;
+  const wipe = await fetch(
+    `http://${host}/emulator/v1/projects/${DRILL_PROJECT}/databases/(default)/documents`,
+    { method: 'DELETE' });
+  if (!wipe.ok) die(`Could not wipe emulator before restore (HTTP ${wipe.status}). Refusing — counts would be wrong.`);
+  const leftover = (await db.listCollections()).length;
+  check('emulator empty before restore', leftover === 0, `${leftover} collections remain`);
 
   let written = 0;
   for (const [name, coll] of Object.entries(backup.collections)) {
