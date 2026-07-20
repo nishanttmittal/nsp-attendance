@@ -217,11 +217,7 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
     match /apps/transportfreight/meta/{id}         { allow read, write: if tfIsManager(); }
     match /apps/transportfreight/logs/{id}         { allow read: if tfIsManager(); allow create: if nonAnon(); }
     match /apps/transportfreight/entries/{id} {
-      // resource == null (fix 2026-07-19): the gaadiwala upload's idempotency guard READS the
-      // entry doc BEFORE creating it; on a missing doc `resource.data` dereferences null →
-      // permission-denied → his trip sits queued forever ("saved on phone" but never uploads).
-      // Reading a nonexistent doc leaks nothing.
-      allow read:   if tfIsManager() || (tfIsGaadiwala() && (resource == null || resource.data.transporterId == tfMyTid()));
+      allow read:   if tfIsManager() || (tfIsGaadiwala() && resource.data.transporterId == tfMyTid());
       // gaadiwala may only submit HIS OWN pending trip, with no challan/approval injected.
       // Every entry write (manager or gaadiwala) must have non-negative charges (P1-2).
       allow create: if (tfIsManager() || (tfIsGaadiwala()
@@ -264,11 +260,6 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
     match /costing_prices/{id}        { allow read: if costStaff(); allow write: if costOwner(); }
     match /costing_price_history/{id} { allow read: if costOwner(); allow create: if costOwner(); allow update, delete: if false; }
     match /apps/costing/users/{id}    { allow read: if nonAnon(); allow write: if costOwner(); }
-    // Quote builder (Phase 1): cut-rates read-only for staff (admin SDK writes them);
-    // quotes staff-readable/owner-write; cost snapshot owner-only (two-vault).
-    match /costing_cut_rates/{id}     { allow read: if costStaff(); allow write: if false; }
-    match /costing_quotes/{id}        { allow read: if costStaff(); allow write: if costOwner(); }
-    match /costing_quote_costs/{id}   { allow read, write: if costOwner(); }
 
     // Lock everything else.
     match /{document=**} { allow read, write: if false; }

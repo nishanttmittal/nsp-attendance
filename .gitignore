@@ -14,3 +14,6 @@ jobs/lib/nativelibs/
 jobs/.nativelibs/
 jobs/nspops.local.json
 jobs/telegram.local.bak.json
+
+# restore drill output (contains financial totals)
+jobs/restore_drill_reports/

@@ -217,11 +217,7 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
     match /apps/transportfreight/meta/{id}         { allow read, write: if tfIsManager(); }
     match /apps/transportfreight/logs/{id}         { allow read: if tfIsManager(); allow create: if nonAnon(); }
     match /apps/transportfreight/entries/{id} {
-      // resource == null (fix 2026-07-19): the gaadiwala upload's idempotency guard READS the
-      // entry doc BEFORE creating it; on a missing doc `resource.data` dereferences null →
-      // permission-denied → his trip sits queued forever ("saved on phone" but never uploads).
-      // Reading a nonexistent doc leaks nothing.
-      allow read:   if tfIsManager() || (tfIsGaadiwala() && (resource == null || resource.data.transporterId == tfMyTid()));
+      allow read:   if tfIsManager() || (tfIsGaadiwala() && resource.data.transporterId == tfMyTid());
       // gaadiwala may only submit HIS OWN pending trip, with no challan/approval injected.
       // Every entry write (manager or gaadiwala) must have non-negative charges (P1-2).
       allow create: if (tfIsManager() || (tfIsGaadiwala()

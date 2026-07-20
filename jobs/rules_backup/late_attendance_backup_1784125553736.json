@@ -1,0 +1,78 @@
+{
+  "when": "2026-07-15T14:25:20.351Z",
+  "dry": false,
+  "policies": {
+    "GEN": {
+      "before": {
+        "chkLateactive": true,
+        "RdCutDays": true,
+        "RdCutLeave": false,
+        "Cbonooflate": "4",
+        "txtequaltoday": "0",
+        "txtlatearrival": "00:15"
+      },
+      "after": {
+        "chkLateactive": false,
+        "RdCutDays": true,
+        "RdCutLeave": false,
+        "Cbonooflate": "4",
+        "txtequaltoday": "0",
+        "txtlatearrival": "00:15"
+      }
+    },
+    "10H": {
+      "before": {
+        "chkLateactive": true,
+        "RdCutDays": true,
+        "RdCutLeave": false,
+        "Cbonooflate": "4",
+        "txtequaltoday": "0",
+        "txtlatearrival": "00:15"
+      },
+      "after": {
+        "chkLateactive": false,
+        "RdCutDays": true,
+        "RdCutLeave": false,
+        "Cbonooflate": "4",
+        "txtequaltoday": "0",
+        "txtlatearrival": "00:15"
+      }
+    },
+    "12H": {
+      "before": {
+        "chkLateactive": true,
+        "RdCutDays": true,
+        "RdCutLeave": false,
+        "Cbonooflate": "4",
+        "txtequaltoday": "0",
+        "txtlatearrival": "00:15"
+      },
+      "after": {
+        "chkLateactive": false,
+        "RdCutDays": true,
+        "RdCutLeave": false,
+        "Cbonooflate": "4",
+        "txtequaltoday": "0",
+        "txtlatearrival": "00:15"
+      }
+    },
+    "amarjeet": {
+      "before": {
+        "chkLateactive": true,
+        "RdCutDays": true,
+        "RdCutLeave": false,
+        "Cbonooflate": "4",
+        "txtequaltoday": "0",
+        "txtlatearrival": "00:15"
+      },
+      "after": {
+        "chkLateactive": false,
+        "RdCutDays": true,
+        "RdCutLeave": false,
+        "Cbonooflate": "4",
+        "txtequaltoday": "0",
+        "txtlatearrival": "00:15"
+      }
+    }
+  }
+}
