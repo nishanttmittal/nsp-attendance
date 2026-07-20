@@ -142,9 +142,12 @@ function legA(backup) {
 // ── Leg B: real restore into the emulator, then read back and compare ────────
 async function legB(backup, srcSummary) {
   console.log('\nLEG B — real restore into emulator, then verify\n');
-  const admin = require('firebase-admin');
-  admin.initializeApp({ projectId: DRILL_PROJECT });
-  const db = admin.firestore();
+  // Modular API, matching jobs/lib/firestore.js. No credential is passed on
+  // purpose — with FIRESTORE_EMULATOR_HOST set, the SDK talks only to the emulator.
+  const { initializeApp, getApps } = require('firebase-admin/app');
+  const { getFirestore } = require('firebase-admin/firestore');
+  const app = getApps().length ? getApps()[0] : initializeApp({ projectId: DRILL_PROJECT });
+  const db = getFirestore(app);
 
   let written = 0;
   for (const [name, coll] of Object.entries(backup.collections)) {
