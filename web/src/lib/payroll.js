@@ -43,16 +43,23 @@ export function computePay({ emp, att, daysInMonth, elapsedDays, fullMonth, adva
   // window). In-window absents can never exceed effElapsed − presentDays; min() deliberately keeps
   // a NEGATIVE override-absent intact (override.days > elapsed pays the extra days by design).
   const absentForBase = Math.min(Number(att.absentDays || 0), Math.max(0, effElapsed - (att.presentDays || 0)));
-  // app-only daily-wager: pay = wage × equivalent-days (Σ hours/11, each day capped at 1).
-  // machine daily-wage: wage × present days. monthly: prorated, deduct absences + unpaid worked Sats.
+  // Daily-wager pay = wage × equivalent-days (standard-days-worth of actual hours):
+  //  • machine daily (owner rule 2026-07-22): equivalentDays = actual working hours ÷ standard-day
+  //    hours (11). Pay scales by the hour — work less → paid less, work more → paid more at the SAME
+  //    ₹/hr (₹700 ÷ 11 ≈ ₹63.6). workHrs already excludes the 30-min lunch and already includes any
+  //    overtime hours, so there is NO separate OT line (netOtHrs forced to 0 below — see the note).
+  //  • app-only daily: Σ min(hours,11)/11 (each manual day capped at 1) from dailyAtt.
+  //  • owner override (md.override.days) presets equivalentDays → pay exactly N full days.
+  const dailyStdHrs = Number(emp.stdHours) || DAILY_WAGER_HOURS;
+  const dailyEquivDays = att.equivalentDays != null ? att.equivalentDays : (att.workHrs || 0) / dailyStdHrs;
   const base = emp.type === 'daily'
-    ? (emp.appOnly ? rate * (att.equivalentDays || 0) : rate * (att.presentDays || 0))
+    ? rate * dailyEquivDays
     : att.noRecord ? 0                                    // no attendance this month (joined later) -> pay 0, never a full month
     : perDay * Math.max(0, effElapsed - absentForBase - unpaidSat);
 
   // Net OT = raw OT − late − early, floored at 0 (lateness is also handled by the penalty tab).
-  // Daily-wagers (owner rule 2026-07-22): FLAT daily wage only — the long day is priced into the
-  // ₹/day, so the machine's OT hours never add pay. appOnly manual workers also carry no OT.
+  // Daily-wagers get NO separate OT: their overtime hours are ALREADY inside workHrs and paid at 1×
+  // by the hours-based base above, so an OT line would double-pay. (appOnly manual workers: no OT.)
   const netOtHrs = (emp.appOnly || emp.type === 'daily') ? 0 : Math.max(0, (att.otHrs || 0) - (att.lateHrs || 0) - (att.earlyHrs || 0));
   const hourlyRate = perDay / (SHIFT_HOURS[emp.shift] || 8);
   const otPay = netOtHrs * hourlyRate;
@@ -110,13 +117,14 @@ export function computePay({ emp, att, daysInMonth, elapsedDays, fullMonth, adva
   }
   const saturdaysCut = emp.type === 'daily' ? 0 : Math.max(0, round(saturdaysInPeriod - weeklyOffAll));
   const paidDays = emp.type === 'daily'
-    ? round(present)                                        // daily: only worked weekdays; off/holiday → OT, not paid days
+    ? round(dailyEquivDays)                                 // daily: hours ÷ standard-day (workHrs/11) = paid full-day equivalents
     : round(present + weeklyOffAll + holiday - unpaidSat);  // monthly: paid Saturdays minus those worked in an unearned week (OT only)
 
   return {
     type: emp.type, effectiveRate: rate, effectiveRemark: eff.remark, perDay: round(perDay), noAttendance: !!att.noRecord,
     payableDays: effElapsed, presentDays: att.presentDays || 0, absentDays: att.absentDays || 0,
     weeklyOff, weeklyOffPresent, weeklyOffAll, holiday, paidDays, unpaidWorkedSat: unpaidSat,
+    workHrs: round(att.workHrs || 0), dailyStdHrs, equivalentDays: emp.type === 'daily' ? round(dailyEquivDays) : undefined,
     saturdaysInPeriod, saturdaysCut,
     restoreSaturdayDays: restoreSatDays, restoreSaturdayPay: round(restoreSaturdayPay),
     graceDays: graceDaysN, gracePay: round(gracePay),

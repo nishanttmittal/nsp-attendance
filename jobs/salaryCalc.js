@@ -54,8 +54,13 @@ function computePay({ emp, att, daysInMonth, elapsedDays, fullMonth, advances, a
   // (<4 present days that week) is paid as OT only — the day stays absent. att.unpaidWorkedSat
   // (from the daily weekly-off audit) reduces paid days but NOT OT.
   const unpaidSat = emp.type === 'daily' ? 0 : Number(att.unpaidWorkedSat || 0);
+  // Daily-wager pay = wage × equivalent-days (owner rule 2026-07-22): machine daily = actual working
+  // hours ÷ standard-day hours (11) → pay scales by the hour at 1×; workHrs already excludes lunch and
+  // includes OT hours (so netOtHrs=0 below). appOnly = Σ min(hrs,11)/11; override presets equivalentDays.
+  const dailyStdHrs = Number(emp.stdHours) || 11;
+  const dailyEquivDays = att.equivalentDays != null ? att.equivalentDays : (att.workHrs || 0) / dailyStdHrs;
   const base = emp.type === 'daily'
-    ? (emp.appOnly ? rate * (att.equivalentDays || 0) : rate * att.presentDays)
+    ? rate * dailyEquivDays
     : perDay * Math.max(0, effElapsed - att.absentDays - unpaidSat);
   // net OT = Realtime OT (capped Working−Shift) minus late/early shortfall; can go negative.
   // Daily-wagers (owner rule 2026-07-22): FLAT daily wage only — OT hours never add pay.
