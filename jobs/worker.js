@@ -293,9 +293,16 @@ async function handle(type, p) {
       return `REJECTED — ${advMk} is locked; advance not recorded`;
     }
     const advances = (snap.exists && snap.data().advances) || [];
+    const already = p.advance.id && advances.some((a) => a.id === p.advance.id);
+    // notifyOnly (2026-07-22): the OWNER app already wrote this advance directly (addAdvanceDirect)
+    // for instant display; this job exists only to fire the Telegram alert in the background.
+    if (p.notifyOnly) {
+      await sendTelegram(`💸 Advance ₹${p.advance.amount} to ${p.code} (${p.advance.mode}) by ${p.advance.paidBy || '?'}.`);
+      return already ? 'advance already applied — notified' : 'advance notified';
+    }
     // DEDUPE (fix 2026-07-18): a stale-recovery re-run (runner killed after the write, before
     // 'done') must not record the same advance twice — worker would be double-deducted at salary.
-    if (p.advance.id && advances.some((a) => a.id === p.advance.id)) {
+    if (already) {
       return `advance ${p.advance.id} already recorded — duplicate ignored`;
     }
     advances.push(p.advance);

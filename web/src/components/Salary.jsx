@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { loadEmployees, loadAllAttendance, loadAllPunches, loadEmployee, saveEmployee, loadPayout, queueAdvance, loadRoster, istMonth, queueJob, lockMonthDirect, unlockMonthDirect, queueLock, queueUnlock, addManualWorker } from '../lib/data';
+import { loadEmployees, loadAllAttendance, loadAllPunches, loadEmployee, saveEmployee, loadPayout, queueAdvance, addAdvanceDirect, loadRoster, istMonth, queueJob, lockMonthDirect, unlockMonthDirect, queueLock, queueUnlock, addManualWorker } from '../lib/data';
 import { monthOptions, monthCtx, payFor, rupee, paymentBreakdown } from '../lib/paycalc';
 import Person from './Person.jsx';
 import SelfPunchCard from './SelfPunchCard.jsx';
@@ -39,6 +39,8 @@ function OwnerSalary({ user }) {
     setEmps(list); setAttMap(am); setPunches(pu);
   }
   useEffect(() => { reload(); }, [showRemoved]);
+  // instant reflection after an owner records an advance (addAdvanceDirect already wrote it)
+  const onAdvanceSaved = (code, adv) => setEmps((prev) => (prev || []).map((e) => e.code === code ? { ...e, advances: [...(e.advances || []), adv] } : e));
 
   if (openCode) return <Person code={openCode} mk={mk} user={user} onBack={() => { setOpenCode(''); reload(); }} />;
   if (emps === null) return <p className="text-gray-500">Loading…</p>;
@@ -215,6 +217,7 @@ function OwnerSalary({ user }) {
             justPaidMode={justPaid[r.emp.code]}
             onName={() => setOpenCode(r.emp.code)}
             onPay={(mode) => payNow(r, mode)}
+            onAdvanceSaved={onAdvanceSaved}
             onUndo={() => undoPay(r)} />
         ))}
       </div>
@@ -222,7 +225,7 @@ function OwnerSalary({ user }) {
       <label className="flex items-center gap-2 text-xs text-slate-500 px-1"><input type="checkbox" className="w-5 h-5 accent-slate-700" checked={showRemoved} onChange={(e) => setShowRemoved(e.target.checked)} /> Show removed/resigned staff (kept in the sheet for costing)</label>
       <p className="text-[11px] text-slate-500 px-1">Tap 💵 Cash or 🏦 Account → a box opens: split across <b>Cash + Account</b>, tick <b>🎯 Bonus day</b> on top if giving one, then <b>Pay &amp; lock</b> (Undo if you mis-tap). Tap the <b>name</b> for OT / details. <span className="text-slate-400">(pay v5)</span></p>
 
-      <AdvanceCard user={user} extra={manualPeople} />
+      <AdvanceCard user={user} extra={manualPeople} onSaved={onAdvanceSaved} />
       <AdvancesExportCard emps={emps} />
       <AddWorkerCard user={user} onAdded={reload} />
       {mk === istMonth() && <SelfPunchCard />}
@@ -305,22 +308,28 @@ function FastPaySheet({ payC, busy, onChange, onCancel, onConfirm }) {
   );
 }
 
-function OwnerRow({ r, mk, busy, justPaidMode, user, onName, onPay, onUndo }) {
+function OwnerRow({ r, mk, busy, justPaidMode, user, onName, onPay, onUndo, onAdvanceSaved }) {
   const { emp, md, pay } = r;
   const [showDays, setShowDays] = useState(false);
-  // 💸 inline advance box (null = closed). Records an advance for THIS worker via the same
-  // queueAdvance path the "Give advance" card uses — additive, no salary math touched.
+  // 💸 inline advance box (null = closed). Owner writes the advance DIRECTLY (addAdvanceDirect) so
+  // it shows INSTANTLY — no 5-min queue wait — then reflects in this row + the money totals at once.
   const advToday = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
   const [adv, setAdv] = useState(null);   // { amount, date, mode, st }
   async function saveAdv() {
     if (!Number(adv.amount) || Number(adv.amount) <= 0 || !adv.date) { setAdv({ ...adv, st: 'Fill amount and date.' }); return; }
     setAdv({ ...adv, st: 'saving' });
+    const advance = { date: adv.date, mode: adv.mode, amount: Number(adv.amount), remark: '', paidBy: user.email };
     try {
-      const po = await loadPayout(adv.date.slice(0, 7));
-      if (po.items?.[emp.code]?.paid) { setAdv({ ...adv, st: `Salary for ${adv.date.slice(0, 7)} is already PAID — advance not allowed for that month.` }); return; }
-      await queueAdvance(emp.code, { date: adv.date, mode: adv.mode, amount: Number(adv.amount), remark: '', paidBy: user.email }, user.email);
+      const saved = await addAdvanceDirect(emp.code, advance, user.email);
+      onAdvanceSaved?.(emp.code, saved);   // update parent state → instant reflection
       setAdv({ amount: '', date: advToday, mode: adv.mode, st: 'done' });
-    } catch { setAdv({ ...adv, st: 'Could not save — try again.' }); }
+    } catch (e) {
+      const m = String(e?.message || '');
+      if (m.startsWith('LOCKED:')) { setAdv({ ...adv, st: `Salary for ${m.slice(7)} is already paid & locked — advance not allowed.` }); return; }
+      // network blip → never lose it: fall back to the offline-safe queue (reflects in a few min)
+      try { await queueAdvance(emp.code, advance, user.email); setAdv({ amount: '', date: advToday, mode: adv.mode, st: 'done' }); }
+      catch { setAdv({ ...adv, st: 'Could not save — try again.' }); }
+    }
   }
   // this worker's advances already given ON OR BEFORE the box's date (newest first) + total
   const advDate = adv?.date || advToday;
@@ -411,7 +420,7 @@ function OwnerRow({ r, mk, busy, justPaidMode, user, onName, onPay, onUndo }) {
           )}
           {adv && adv.st === 'done' && (
             <div className="rounded-2xl border-2 border-emerald-200 bg-emerald-50 p-3 flex items-center justify-between">
-              <span className="text-sm text-emerald-700 font-semibold">✓ Advance saved — shows up in a few minutes</span>
+              <span className="text-sm text-emerald-700 font-semibold">✓ Advance saved</span>
               <button onClick={() => setAdv(null)} className="text-slate-500 underline underline-offset-2 text-sm px-2 py-1">Close</button>
             </div>
           )}
@@ -505,7 +514,7 @@ function AdvancesExportCard({ emps }) {
 
 // quick advance entry (manager + owner): date, amount, mode, remark; blocked once that
 // month's salary is already paid for the person.
-export function AdvanceCard({ user, extra = [] }) {
+export function AdvanceCard({ user, extra = [], onSaved }) {
   const today = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
   const [roster, setRoster] = useState([]);
   const [f, setF] = useState({ code: null, name: '', amount: '', mode: 'cash', date: today, remark: '' });
@@ -520,12 +529,27 @@ export function AdvanceCard({ user, extra = [] }) {
     if (!f.code) { setSt('Pick a person (type the name).'); return; }
     if (!Number(f.amount) || !f.date) { setSt('Fill date and amount.'); return; }
     setSt('saving');
+    const advance = { date: f.date, mode: f.mode, amount: Number(f.amount), remark: f.remark || '', paidBy: user.email };
     try {
-      const po = await loadPayout(f.date.slice(0, 7));
-      if (po.items?.[f.code]?.paid) { setSt(`Salary for ${f.date.slice(0, 7)} is already PAID — advance not allowed for that month.`); return; }
-      await queueAdvance(f.code, { date: f.date, mode: f.mode, amount: Number(f.amount), remark: f.remark || '', paidBy: user.email }, user.email);
+      // OWNER writes directly (instant); MANAGER queues (can't write att_salary) with a best-effort paid check.
+      if (user.role === 'admin') {
+        const saved = await addAdvanceDirect(f.code, advance, user.email);
+        onSaved?.(f.code, saved);
+      } else {
+        const po = await loadPayout(f.date.slice(0, 7));
+        if (po.items?.[f.code]?.paid) { setSt(`Salary for ${f.date.slice(0, 7)} is already PAID — advance not allowed for that month.`); return; }
+        await queueAdvance(f.code, advance, user.email);
+      }
       setSt('done'); setF({ code: null, name: '', amount: '', mode: 'cash', date: today, remark: '' });
-    } catch (e) { setSt('Could not save — try again.'); }
+    } catch (e) {
+      const m = String(e?.message || '');
+      if (m.startsWith('LOCKED:')) { setSt(`Salary for ${m.slice(7)} is already paid & locked — advance not allowed.`); return; }
+      // owner direct-write hit a network blip → never lose it: fall back to the offline-safe queue
+      if (user.role === 'admin') {
+        try { await queueAdvance(f.code, advance, user.email); setSt('done'); setF({ code: null, name: '', amount: '', mode: 'cash', date: today, remark: '' }); return; } catch { /* fall through */ }
+      }
+      setSt('Could not save — try again.');
+    }
   }
   return (
     <div className="bg-white rounded-2xl border-2 border-slate-200 p-3 space-y-2">

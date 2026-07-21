@@ -118,6 +118,36 @@ export async function queueAdvance(code, advance, by) {
   return queueJob('add_advance', { code, advance: { ...advance, id } }, by);
 }
 
+// OWNER advance → write att_salary DIRECTLY so it shows INSTANTLY (no 5-min queue wait), mirroring
+// lockMonthDirect. Only admins can write att_salary (rules) — managers must use queueAdvance.
+// Returns the saved advance {..,id}. Keeps the same LOCKED-MONTH guard + id dedupe as the worker,
+// then fire-and-forget queues a notify-only job so the Telegram alert still fires in the background.
+export async function addAdvanceDirect(code, advance, by) {
+  const id = advance.id || ('adv-' + (advance.date || '') + '-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7));
+  const adv = { ...advance, id };
+  if (!isConfigured || !db) return adv;
+  const ref = doc(db, 'att_salary', code);
+  const snap = await getDoc(ref);
+  const data = snap.exists() ? snap.data() : {};
+  // Authoritative money-leak guard: never record an advance dated into a locked/paid month.
+  const mk = String(adv.date || '').slice(0, 7);
+  const md = (data.months || {})[mk] || {};
+  if (md.locked || md.payment) throw new Error(`LOCKED:${mk}`);
+  const advances = data.advances || [];
+  if (!advances.some((a) => a.id === id)) {   // idempotent: skip if this id is already recorded
+    if (snap.exists()) {
+      // atomic append — never clobbers a concurrent manager advance (unlike a full-array rewrite)
+      const { updateDoc, arrayUnion } = await import('firebase/firestore');
+      await updateDoc(ref, { advances: arrayUnion(adv) });
+    } else {
+      await setDoc(ref, { advances: [adv] }, { merge: true });
+    }
+  }
+  // background: the cloud worker sees the id already present → sends only the Telegram alert.
+  queueJob('add_advance', { code, advance: adv, notifyOnly: true }, by).catch(() => {});
+  return adv;
+}
+
 // All employees' monthly attendance at once (for the salary register PDF).
 export async function loadAllAttendance() {
   if (!isConfigured || !db) return {};
