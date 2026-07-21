@@ -262,7 +262,6 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
     match /costing_recipes/{id}       { allow read: if costOwner(); allow write: if false; }
     match /costing_meta/{id}          { allow read: if costOwner(); allow write: if false; }
     match /costing_prices/{id}        { allow read: if costStaff(); allow write: if costOwner(); }
-    match /costing_material_rates/{id} { allow read: if costStaff(); allow write: if costOwner(); }
     match /costing_price_history/{id} { allow read: if costOwner(); allow create: if costOwner(); allow update, delete: if false; }
     match /apps/costing/users/{id}    { allow read: if nonAnon(); allow write: if costOwner(); }
     // Quote builder (Phase 1): cut-rates read-only for staff (admin SDK writes them);

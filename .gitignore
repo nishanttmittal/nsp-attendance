@@ -17,3 +17,4 @@ jobs/telegram.local.bak.json
 
 # restore drill output (contains financial totals)
 jobs/restore_drill_reports/
+jobs/metals.local.json
