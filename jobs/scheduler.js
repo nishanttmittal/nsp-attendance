@@ -29,6 +29,7 @@ const TASKS = [
   { name: 'welder-pay', min: 19 * 60, day: 6, run: () => run('welderContractorPay.js') },          // Sat 19:00 pay-ready
   { name: 'backup', min: 7 * 60 + 30, run: () => run('backup.js', { REASON: 'daily' }) },             // 07:30 daily backup
   { name: 'live-prices', min: 8 * 60 + 15, run: () => run('fetchDelhiPrices.js') },                     // 08:15 FX+bullion+LME+Delhi scrap → costing Live Rates (+ dated history)
+  { name: 'price-health', min: 8 * 60 + 45, run: () => run('checkPriceHealth.js') },                    // 08:45 alert Telegram if a source broke or a price jumped (silent if OK)
   { name: 'sync-employees', min: 8 * 60, day: 0, run: () => run('syncEmployees.js') },              // Sun 08:00 employee sync
 ];
 

@@ -15,6 +15,7 @@ on:
     - cron: '30 21 * * *'   # 03:00 IST daily — app freshness watchdog (alert if a live app has gone quiet)
     - cron: '15 2 * * *'    # 07:45 IST daily — sync employee names/dept from Realtime portal (att_salary)
     - cron: '30 2 * * *'    # 08:00 IST daily — live prices (FX+bullion+LME+Delhi scrap) → costing Live Rates + dated history
+    - cron: '0 3 * * *'     # 08:30 IST daily — price health check (Telegram alert if a source broke or a price jumped; silent if OK)
     - cron: '30 14 * * *'   # 20:00 IST — welder daily production summary
     - cron: '35 14 * * *'   # 20:05 IST — plating daily summary
     - cron: '40 14 * * *'   # 20:10 IST — transport freight balance alerts (gaadiwala owed too much)
@@ -24,7 +25,7 @@ on:
       task:
         description: which task to run manually
         type: choice
-        options: [headcount, evening-miss, morning-miss, morning-summary, long-absence, reprocess, salary-data, backup, all-backup, welder-backup, sync-employees, welder-production, plating-summary, freight-alerts, welder-pay, app-freshness, live-prices]
+        options: [headcount, evening-miss, morning-miss, morning-summary, long-absence, reprocess, salary-data, backup, all-backup, welder-backup, sync-employees, welder-production, plating-summary, freight-alerts, welder-pay, app-freshness, live-prices, price-health]
 
 jobs:
   run:
@@ -80,6 +81,7 @@ jobs:
             "app-freshness"|"30 21 * * *") node appFreshness.js ;;
             "sync-employees"|"15 2 * * *") node syncEmployees.js ;;
             "live-prices"|"30 2 * * *") node fetchDelhiPrices.js ;;
+            "price-health"|"0 3 * * *") node checkPriceHealth.js ;;
             "welder-production"|"30 14 * * *") node welderProduction.js ;;
             "plating-summary"|"35 14 * * *")  node platingSummary.js ;;
             "freight-alerts"|"40 14 * * *")   node freightAlerts.js ;;
