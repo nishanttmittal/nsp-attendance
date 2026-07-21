@@ -318,7 +318,9 @@ function OwnerRow({ r, mk, busy, justPaidMode, user, onName, onPay, onUndo, onAd
   async function saveAdv() {
     if (!Number(adv.amount) || Number(adv.amount) <= 0 || !adv.date) { setAdv({ ...adv, st: 'Fill amount and date.' }); return; }
     setAdv({ ...adv, st: 'saving' });
-    const advance = { date: adv.date, mode: adv.mode, amount: Number(adv.amount), remark: '', paidBy: user.email };
+    // Mint the id HERE so the direct write and the network-blip fallback share ONE id — a write that
+    // lands but times out is then deduped by the worker on retry (never records the advance twice).
+    const advance = { id: 'adv-' + adv.date + '-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7), date: adv.date, mode: adv.mode, amount: Number(adv.amount), remark: '', paidBy: user.email };
     try {
       const saved = await addAdvanceDirect(emp.code, advance, user.email);
       onAdvanceSaved?.(emp.code, saved);   // update parent state → instant reflection
@@ -529,7 +531,8 @@ export function AdvanceCard({ user, extra = [], onSaved }) {
     if (!f.code) { setSt('Pick a person (type the name).'); return; }
     if (!Number(f.amount) || !f.date) { setSt('Fill date and amount.'); return; }
     setSt('saving');
-    const advance = { date: f.date, mode: f.mode, amount: Number(f.amount), remark: f.remark || '', paidBy: user.email };
+    // one shared id so the direct write + any fallback queue dedupe on retry (no double advance).
+    const advance = { id: 'adv-' + f.date + '-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7), date: f.date, mode: f.mode, amount: Number(f.amount), remark: f.remark || '', paidBy: user.email };
     try {
       // OWNER writes directly (instant); MANAGER queues (can't write att_salary) with a best-effort paid check.
       if (user.role === 'admin') {
