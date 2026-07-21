@@ -609,7 +609,7 @@ function CorrectionsLog({ emp }) {
 
 function SalaryEdit({ emp, onSave, onSaveNameDept, busy }) {
   const [show, setShow] = useState(false);
-  const DEPTS = ['FITTING', 'Frame', 'HELPER', 'POWDER', 'PRESS', 'T', 'DEMO'];
+  const DEPTS = ['FITTING', 'Frame', 'HELPER', 'LOADING', 'POWDER', 'PRESS', 'T', 'DEMO'];
   const [f, setF] = useState({
     type: emp.type || 'monthly', amount: emp.type === 'daily' ? emp.wage : emp.amount, shift: emp.shift || 'GEN',
     phone: emp.phone || '', joinDate: emp.joinDate || '', nickname: emp.nickname || '',
