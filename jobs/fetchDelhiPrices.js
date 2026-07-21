@@ -58,7 +58,7 @@ async function lme() {
 // SHFE (Shanghai Futures Exchange) via Sina Finance — free, no key. Continuous main
 // contract, CNY/tonne. Field[8]=latest, field[10]=prev settlement (fallback).
 // Keys map to the frontend basket. SHFE SS = 304-grade; RB rebar ≈ iron rod proxy.
-const SHFE = { copper: 'CU0', aluminium: 'AL0', zinc: 'ZN0', nickel: 'NI0', ss_304: 'SS0', iron_rod_8mm: 'RB0' };
+const SHFE = { copper: 'CU0', aluminium: 'AL0', zinc: 'ZN0', nickel: 'NI0', ss_304: 'SS0', iron_rod_8mm: 'RB0', hrc: 'HC0' };
 async function shfe(cnyInr) {
   if (!(cnyInr > 0)) throw new Error('no CNY/INR for SHFE conversion');
   const inr = {}, cny = {};
