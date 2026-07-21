@@ -4,7 +4,7 @@ import { monthOptions, monthCtx, payFor, rupee, paymentBreakdown } from '../lib/
 import Person from './Person.jsx';
 import SelfPunchCard from './SelfPunchCard.jsx';
 import NamePick from './NamePick.jsx';
-import { payslipAllPdf, lockedRegisterPdf, sharePdf, advanceSplit } from '../lib/salaryPdf';
+import { payslipAllPdf, lockedRegisterPdf, sharePdf, advanceSplit, advancesPdf } from '../lib/salaryPdf';
 import { shareCheckSheet } from '../lib/checksheet';
 import WorkerSummary from './WorkerSummary.jsx';
 
@@ -223,6 +223,7 @@ function OwnerSalary({ user }) {
       <p className="text-[11px] text-slate-500 px-1">Tap 💵 Cash or 🏦 Account → a box opens: split across <b>Cash + Account</b>, tick <b>🎯 Bonus day</b> on top if giving one, then <b>Pay &amp; lock</b> (Undo if you mis-tap). Tap the <b>name</b> for OT / details. <span className="text-slate-400">(pay v5)</span></p>
 
       <AdvanceCard user={user} extra={manualPeople} />
+      <AdvancesExportCard emps={emps} />
       <AddWorkerCard user={user} onAdded={reload} />
       {mk === istMonth() && <SelfPunchCard />}
       {noSalary.length > 0 && <NoSalaryList list={noSalary} onSaved={reload} />}
@@ -467,6 +468,37 @@ function ManagerSalary({ user }) {
       </div>
       <p className="text-[11px] text-slate-400 px-1">Salary is paid & locked by the owner. This list shows paid/not-paid only (updates every few minutes).</p>
       <AdvanceCard user={user} />
+    </div>
+  );
+}
+
+// Owner export: a PDF of EVERY worker's advances given up to a chosen date, Cash & Account in
+// separate columns, listed date-wise per worker with subtotals + grand totals. Reads emp.advances.
+function AdvancesExportCard({ emps }) {
+  const today = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
+  const [asOf, setAsOf] = useState(today);
+  const [st, setSt] = useState('');
+  async function go() {
+    setSt('building');
+    const groups = (emps || [])
+      .map((e) => ({ name: e.name || e.code, code: e.code, dept: e.dept || '', entries: (e.advances || []).filter((a) => a.date && a.date <= asOf) }))
+      .filter((g) => g.entries.length)
+      .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+    if (!groups.length) { setSt('No advances up to that date.'); return; }
+    const label = `${asOf.slice(8)}/${asOf.slice(5, 7)}/${asOf.slice(0, 4)}`;
+    try { await sharePdf(advancesPdf(groups, label), `advances-till-${asOf}.pdf`); setSt('done'); }
+    catch { setSt('Could not create the PDF — try again.'); }
+  }
+  return (
+    <div className="bg-white rounded-2xl border-2 border-slate-200 p-3 space-y-2">
+      <div className="font-bold text-slate-700">📄 Advances PDF (till a date)</div>
+      <p className="text-[11px] text-slate-500">Every worker's advances up to the date — Cash &amp; Account separate, date-wise, with totals.</p>
+      <div className="flex gap-2 items-center">
+        <input type="date" value={asOf} onChange={(e) => { setAsOf(e.target.value); setSt(''); }} className="flex-1 border-2 border-slate-200 rounded-xl px-3 py-2.5 text-base bg-white" />
+        <button disabled={st === 'building'} onClick={go} className="bg-slate-800 text-white rounded-xl px-5 py-2.5 font-bold text-sm disabled:opacity-50 active:scale-95 transition-all">{st === 'building' ? '…' : 'Export'}</button>
+      </div>
+      {st && st !== 'building' && st !== 'done' && <p className="text-xs text-rose-600 font-medium px-1">{st}</p>}
+      {st === 'done' && <p className="text-xs text-emerald-700 font-semibold px-1">✓ PDF ready</p>}
     </div>
   );
 }

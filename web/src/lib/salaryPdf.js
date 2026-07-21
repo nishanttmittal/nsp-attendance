@@ -113,6 +113,48 @@ export function lockedRegisterPdf(rows, monthLabel) {
   return doc;
 }
 
+// ADVANCES REGISTER — every worker's advances given UP TO a chosen date, listed date-wise with
+// Cash and Account in separate columns, a subtotal per worker, and grand totals at the end.
+// groups: [{ name, code, dept, entries: [{ date, mode, amount, remark, cash?, bank? }] }]
+export function advancesPdf(groups, asOfLabel) {
+  const doc = new jsPDF();
+  doc.setFontSize(16); doc.text('NSP ENTERPRISES', 14, 16);
+  doc.setFontSize(12); doc.text('Advances Register  -  till ' + asOfLabel, 14, 24);
+  doc.setFontSize(9); doc.setTextColor(120);
+  doc.text('Generated ' + new Date().toLocaleString('en-IN'), 14, 30);
+  doc.setTextColor(0);
+
+  const B = (s) => ({ content: s, styles: { fontStyle: 'bold', fillColor: [245, 245, 245] } });
+  const body = [];
+  let gCash = 0, gAcct = 0, gCount = 0;
+  for (const g of groups) {
+    let eCash = 0, eAcct = 0;
+    const entries = [...(g.entries || [])].sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+    entries.forEach((a, i) => {
+      const cash = a.mode === 'cash' ? Number(a.amount || 0) : (a.mode === 'both' ? Number(a.cash || 0) : 0);
+      const acct = a.mode === 'account' ? Number(a.amount || 0) : (a.mode === 'both' ? Number(a.bank || 0) : 0);
+      eCash += cash; eAcct += acct; gCount++;
+      const d = a.date ? `${a.date.slice(8)}/${a.date.slice(5, 7)}/${a.date.slice(0, 4)}` : '-';
+      body.push([i === 0 ? `${g.name}${g.dept ? ` (${g.dept})` : ''}` : '', d, cash ? rs(cash) : '', acct ? rs(acct) : '', a.remark || '']);
+    });
+    body.push([B('Subtotal'), '', B(rs(eCash)), B(rs(eAcct)), B('Total ' + rs(eCash + eAcct))]);
+    gCash += eCash; gAcct += eAcct;
+  }
+  autoTable(doc, {
+    startY: 36,
+    head: [['Name', 'Date', 'Cash', 'Account', 'Remark']],
+    body,
+    theme: 'grid', styles: { fontSize: 9 }, headStyles: { fillColor: [192, 57, 43] },
+    columnStyles: { 2: { halign: 'right' }, 3: { halign: 'right' } },
+  });
+  const y = (doc.lastAutoTable?.finalY || 40) + 10;
+  doc.setFontSize(12);
+  doc.text(`GRAND TOTAL   -   Cash: ${rs(gCash)}     Account: ${rs(gAcct)}     Total: ${rs(gCash + gAcct)}`, 14, y);
+  doc.setFontSize(9); doc.setTextColor(120);
+  doc.text(`${groups.length} worker(s) · ${gCount} advance entr${gCount === 1 ? 'y' : 'ies'} up to ${asOfLabel}`, 14, y + 6);
+  return doc;
+}
+
 // Problems-tab export: a clean one-document summary of every attendance problem so the owner
 // can show/brief staff. data = { monthLabel, missed, short, late, highOt, resigns }.
 export function problemsPdf(data) {
