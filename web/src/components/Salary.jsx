@@ -211,7 +211,7 @@ function OwnerSalary({ user }) {
           </p>
         )}
         {visible.map((r) => (
-          <OwnerRow key={r.emp.code} r={r} mk={mk} busy={busy === r.emp.code}
+          <OwnerRow key={r.emp.code} r={r} mk={mk} busy={busy === r.emp.code} user={user}
             justPaidMode={justPaid[r.emp.code]}
             onName={() => setOpenCode(r.emp.code)}
             onPay={(mode) => payNow(r, mode)}
@@ -304,9 +304,23 @@ function FastPaySheet({ payC, busy, onChange, onCancel, onConfirm }) {
   );
 }
 
-function OwnerRow({ r, mk, busy, justPaidMode, onName, onPay, onUndo }) {
+function OwnerRow({ r, mk, busy, justPaidMode, user, onName, onPay, onUndo }) {
   const { emp, md, pay } = r;
   const [showDays, setShowDays] = useState(false);
+  // 💸 inline advance box (null = closed). Records an advance for THIS worker via the same
+  // queueAdvance path the "Give advance" card uses — additive, no salary math touched.
+  const advToday = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
+  const [adv, setAdv] = useState(null);   // { amount, date, mode, st }
+  async function saveAdv() {
+    if (!Number(adv.amount) || Number(adv.amount) <= 0 || !adv.date) { setAdv({ ...adv, st: 'Fill amount and date.' }); return; }
+    setAdv({ ...adv, st: 'saving' });
+    try {
+      const po = await loadPayout(adv.date.slice(0, 7));
+      if (po.items?.[emp.code]?.paid) { setAdv({ ...adv, st: `Salary for ${adv.date.slice(0, 7)} is already PAID — advance not allowed for that month.` }); return; }
+      await queueAdvance(emp.code, { date: adv.date, mode: adv.mode, amount: Number(adv.amount), remark: '', paidBy: user.email }, user.email);
+      setAdv({ amount: '', date: advToday, mode: adv.mode, st: 'done' });
+    } catch { setAdv({ ...adv, st: 'Could not save — try again.' }); }
+  }
   const isLocked = !!md.locked || !!md.payment;                  // settled & frozen via Lock
   const payable = pay.payable || 0;
   const owes = payable < 0;
@@ -344,16 +358,40 @@ function OwnerRow({ r, mk, busy, justPaidMode, onName, onPay, onUndo }) {
           <button disabled={busy} onClick={onUndo} className="text-slate-500 underline underline-offset-2 px-2 py-1 disabled:opacity-50">Undo</button>
         </div>
       )}
-      {/* not settled → ONE-TAP pay (full amount, that method, locks instantly) */}
+      {/* not settled → ONE-TAP pay (full amount, that method, locks instantly) + 💸 Advance */}
       {!isLocked && (
-        <div className="flex gap-2 mt-3">
-          {owes ? (
-            <button disabled={busy} onClick={() => onPay('cash')} className="flex-1 bg-slate-800 text-white rounded-2xl py-4 font-bold text-sm disabled:opacity-50 active:scale-95 transition-all">Settle &amp; lock <span className="font-normal opacity-80">(carries {rupee(Math.abs(payable))})</span></button>
-          ) : (
-            <>
-              <button disabled={busy} onClick={() => onPay('cash')} className="flex-1 bg-emerald-600 text-white rounded-2xl py-4 font-bold text-lg shadow-lg shadow-emerald-300 disabled:opacity-50 disabled:shadow-none active:bg-emerald-700 active:scale-95 transition-all">💵 Cash</button>
-              <button disabled={busy} onClick={() => onPay('account')} className="flex-1 bg-slate-800 text-white rounded-2xl py-4 font-bold text-lg shadow-lg shadow-slate-300 disabled:opacity-50 disabled:shadow-none active:bg-slate-900 active:scale-95 transition-all">🏦 Account</button>
-            </>
+        <div className="mt-3 space-y-2">
+          <div className="flex gap-2">
+            {owes ? (
+              <button disabled={busy} onClick={() => onPay('cash')} className="flex-1 bg-slate-800 text-white rounded-2xl py-4 font-bold text-sm disabled:opacity-50 active:scale-95 transition-all">Settle &amp; lock <span className="font-normal opacity-80">(carries {rupee(Math.abs(payable))})</span></button>
+            ) : (
+              <>
+                <button disabled={busy} onClick={() => onPay('cash')} className="flex-1 bg-emerald-600 text-white rounded-2xl py-4 font-bold text-base shadow-lg shadow-emerald-300 disabled:opacity-50 disabled:shadow-none active:bg-emerald-700 active:scale-95 transition-all">💵 Cash</button>
+                <button disabled={busy} onClick={() => onPay('account')} className="flex-1 bg-slate-800 text-white rounded-2xl py-4 font-bold text-base shadow-lg shadow-slate-300 disabled:opacity-50 disabled:shadow-none active:bg-slate-900 active:scale-95 transition-all">🏦 Account</button>
+              </>
+            )}
+            <button onClick={() => setAdv(adv ? null : { amount: '', date: advToday, mode: 'cash', st: '' })} className={`flex-1 rounded-2xl py-4 font-bold text-base active:scale-95 transition-all ${adv ? 'bg-amber-100 text-amber-800 border-2 border-amber-300' : 'bg-amber-500 text-white shadow-lg shadow-amber-200'}`}>💸 Advance</button>
+          </div>
+          {/* inline advance entry: amount + date + Cash/Account → saves for THIS worker */}
+          {adv && adv.st !== 'done' && (
+            <div className="rounded-2xl border-2 border-amber-200 bg-amber-50 p-3 space-y-2">
+              <div className="grid grid-cols-2 gap-2">
+                <input type="number" inputMode="numeric" autoFocus placeholder="Amount ₹" value={adv.amount} onFocus={(e) => e.target.select()} onChange={(e) => setAdv({ ...adv, amount: e.target.value })} className="border-2 border-amber-200 rounded-xl px-3 py-2.5 text-base bg-white focus:outline-none focus:border-amber-400" />
+                <input type="date" value={adv.date} onChange={(e) => setAdv({ ...adv, date: e.target.value })} className="border-2 border-amber-200 rounded-xl px-3 py-2.5 text-base bg-white focus:outline-none focus:border-amber-400" />
+              </div>
+              <div className="flex gap-2">
+                <button onClick={() => setAdv({ ...adv, mode: 'cash' })} className={`flex-1 rounded-xl py-3 font-bold text-sm transition ${adv.mode === 'cash' ? 'bg-emerald-600 text-white' : 'bg-white border-2 border-slate-200 text-slate-600'}`}>💵 Cash</button>
+                <button onClick={() => setAdv({ ...adv, mode: 'account' })} className={`flex-1 rounded-xl py-3 font-bold text-sm transition ${adv.mode === 'account' ? 'bg-slate-800 text-white' : 'bg-white border-2 border-slate-200 text-slate-600'}`}>🏦 Account</button>
+              </div>
+              {adv.st && adv.st !== 'saving' && <p className="text-xs text-rose-600 font-medium px-1">{adv.st}</p>}
+              <button disabled={adv.st === 'saving'} onClick={saveAdv} className="w-full bg-amber-600 text-white rounded-2xl py-3.5 font-bold text-base disabled:opacity-50 active:bg-amber-700 active:scale-95 transition-all">{adv.st === 'saving' ? 'Saving…' : `Save advance${Number(adv.amount) > 0 ? ' ' + rupee(Number(adv.amount)) : ''}`}</button>
+            </div>
+          )}
+          {adv && adv.st === 'done' && (
+            <div className="rounded-2xl border-2 border-emerald-200 bg-emerald-50 p-3 flex items-center justify-between">
+              <span className="text-sm text-emerald-700 font-semibold">✓ Advance saved — shows up in a few minutes</span>
+              <button onClick={() => setAdv(null)} className="text-slate-500 underline underline-offset-2 text-sm px-2 py-1">Close</button>
+            </div>
           )}
         </div>
       )}
