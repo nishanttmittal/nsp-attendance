@@ -321,6 +321,10 @@ function OwnerRow({ r, mk, busy, justPaidMode, user, onName, onPay, onUndo }) {
       setAdv({ amount: '', date: advToday, mode: adv.mode, st: 'done' });
     } catch { setAdv({ ...adv, st: 'Could not save — try again.' }); }
   }
+  // this worker's advances already given ON OR BEFORE the box's date (newest first) + total
+  const advDate = adv?.date || advToday;
+  const priorAdvs = adv ? (emp.advances || []).filter((a) => a.date && a.date <= advDate).sort((a, b) => (b.date || '').localeCompare(a.date || '')) : [];
+  const priorTotal = priorAdvs.reduce((t, a) => t + Number(a.amount || 0), 0);
   const isLocked = !!md.locked || !!md.payment;                  // settled & frozen via Lock
   const payable = pay.payable || 0;
   const owes = payable < 0;
@@ -378,6 +382,23 @@ function OwnerRow({ r, mk, busy, justPaidMode, user, onName, onPay, onUndo }) {
               <div className="grid grid-cols-2 gap-2">
                 <input type="number" inputMode="numeric" autoFocus placeholder="Amount ₹" value={adv.amount} onFocus={(e) => e.target.select()} onChange={(e) => setAdv({ ...adv, amount: e.target.value })} className="border-2 border-amber-200 rounded-xl px-3 py-2.5 text-base bg-white focus:outline-none focus:border-amber-400" />
                 <input type="date" value={adv.date} onChange={(e) => setAdv({ ...adv, date: e.target.value })} className="border-2 border-amber-200 rounded-xl px-3 py-2.5 text-base bg-white focus:outline-none focus:border-amber-400" />
+              </div>
+              {/* advances already given to this worker up to the chosen date */}
+              <div className="rounded-xl bg-white border-2 border-amber-200 p-2 text-xs">
+                <div className="flex justify-between font-bold text-slate-700 mb-0.5">
+                  <span>Advances till {advDate.slice(8)}/{advDate.slice(5, 7)}</span>
+                  <span className="text-amber-700">{rupee(priorTotal)}{priorAdvs.length ? ` · ${priorAdvs.length}` : ''}</span>
+                </div>
+                {priorAdvs.length === 0
+                  ? <div className="text-slate-400">None yet</div>
+                  : <div className="max-h-32 overflow-auto divide-y divide-slate-100">
+                      {priorAdvs.map((a, i) => (
+                        <div key={a.id || i} className="flex justify-between py-1">
+                          <span className="text-slate-500">{(a.date || '').slice(8)}/{(a.date || '').slice(5, 7)} · {a.mode === 'account' ? '🏦' : '💵'}{a.remark ? ' · ' + a.remark : ''}</span>
+                          <span className="text-slate-700 font-medium">{rupee(Number(a.amount || 0))}</span>
+                        </div>
+                      ))}
+                    </div>}
               </div>
               <div className="flex gap-2">
                 <button onClick={() => setAdv({ ...adv, mode: 'cash' })} className={`flex-1 rounded-xl py-3 font-bold text-sm transition ${adv.mode === 'cash' ? 'bg-emerald-600 text-white' : 'bg-white border-2 border-slate-200 text-slate-600'}`}>💵 Cash</button>
