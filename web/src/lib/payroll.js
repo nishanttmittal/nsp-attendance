@@ -50,8 +50,10 @@ export function computePay({ emp, att, daysInMonth, elapsedDays, fullMonth, adva
     : att.noRecord ? 0                                    // no attendance this month (joined later) -> pay 0, never a full month
     : perDay * Math.max(0, effElapsed - absentForBase - unpaidSat);
 
-  // Net OT = raw OT − late − early, floored at 0 (lateness is also handled by the penalty tab)
-  const netOtHrs = emp.appOnly ? 0 : Math.max(0, (att.otHrs || 0) - (att.lateHrs || 0) - (att.earlyHrs || 0));
+  // Net OT = raw OT − late − early, floored at 0 (lateness is also handled by the penalty tab).
+  // Daily-wagers (owner rule 2026-07-22): FLAT daily wage only — the long day is priced into the
+  // ₹/day, so the machine's OT hours never add pay. appOnly manual workers also carry no OT.
+  const netOtHrs = (emp.appOnly || emp.type === 'daily') ? 0 : Math.max(0, (att.otHrs || 0) - (att.lateHrs || 0) - (att.earlyHrs || 0));
   const hourlyRate = perDay / (SHIFT_HOURS[emp.shift] || 8);
   const otPay = netOtHrs * hourlyRate;
 
