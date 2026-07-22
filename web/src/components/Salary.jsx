@@ -492,11 +492,16 @@ function AdvancesExportCard({ emps }) {
   const [st, setSt] = useState('');
   async function go() {
     setSt('building');
+    const mk = asOf.slice(0, 7);   // ledger is for the month of the chosen date
     const groups = (emps || [])
-      .map((e) => ({ name: e.name || e.code, code: e.code, dept: e.dept || '', entries: (e.advances || []).filter((a) => a.date && a.date <= asOf) }))
-      .filter((g) => g.entries.length)
+      .map((e) => ({
+        name: e.name || e.code, code: e.code, dept: e.dept || '',
+        bf: Number(((e.months || {})[mk] || {}).openingBalance || 0),   // leftover carried from last month
+        entries: (e.advances || []).filter((a) => a.date && a.date.startsWith(mk) && a.date <= asOf),
+      }))
+      .filter((g) => g.entries.length || Math.round(g.bf) !== 0)
       .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-    if (!groups.length) { setSt('No advances up to that date.'); return; }
+    if (!groups.length) { setSt('No advances or balances for that month.'); return; }
     const label = `${asOf.slice(8)}/${asOf.slice(5, 7)}/${asOf.slice(0, 4)}`;
     try { await sharePdf(advancesPdf(groups, label), `advances-till-${asOf}.pdf`); setSt('done'); }
     catch { setSt('Could not create the PDF — try again.'); }

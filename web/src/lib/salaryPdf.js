@@ -113,45 +113,58 @@ export function lockedRegisterPdf(rows, monthLabel) {
   return doc;
 }
 
-// ADVANCES REGISTER — every worker's advances given UP TO a chosen date, listed date-wise with
-// Cash and Account in separate columns, a subtotal per worker, and grand totals at the end.
-// groups: [{ name, code, dept, entries: [{ date, mode, amount, remark, cash?, bank? }] }]
+// ADVANCES REGISTER — a running ledger per worker: the balance BROUGHT FORWARD from previous months
+// (the carried openingBalance — negative = owes us) + advances given this month, ending in a
+// "Total owed". Fixes the old register, which only listed itemised entries and so silently omitted a
+// worker's carried leftover (e.g. someone owing ₹31,997 b/f showed only this month's new advance).
+// groups: [{ name, code, dept, bf, entries: [{ date, mode, amount, remark, cash?, bank? }] }]
+//   bf = signed running balance carried into the month (negative = owes us; positive = credit).
 export function advancesPdf(groups, asOfLabel) {
   const doc = new jsPDF();
   doc.setFontSize(16); doc.text('NSP ENTERPRISES', 14, 16);
   doc.setFontSize(12); doc.text('Advances Register  -  till ' + asOfLabel, 14, 24);
   doc.setFontSize(9); doc.setTextColor(120);
-  doc.text('Generated ' + new Date().toLocaleString('en-IN'), 14, 30);
+  doc.text('Brought-forward balance + advances given this month.  Generated ' + new Date().toLocaleString('en-IN'), 14, 30);
   doc.setTextColor(0);
 
   const B = (s) => ({ content: s, styles: { fontStyle: 'bold', fillColor: [245, 245, 245] } });
+  const owedStr = (net) => (net >= 0 ? rs(Math.round(net)) + ' owed' : rs(Math.round(-net)) + ' CREDIT');
   const body = [];
-  let gCash = 0, gAcct = 0, gCount = 0;
+  let gCash = 0, gAcct = 0, gCount = 0, gOwed = 0;
   for (const g of groups) {
+    const bf = Number(g.bf || 0);                    // running balance carried in (neg = owes us)
     let eCash = 0, eAcct = 0;
     const entries = [...(g.entries || [])].sort((a, b) => (a.date || '').localeCompare(b.date || ''));
-    entries.forEach((a, i) => {
+    let nameShown = false;
+    const nameCell = () => { if (nameShown) return ''; nameShown = true; return `${g.name}${g.dept ? ` (${g.dept})` : ''}`; };
+    if (Math.round(bf) !== 0) {
+      body.push([nameCell(), 'B/F', '', '', bf < 0 ? `Brought forward: ${rs(Math.round(-bf))} owed` : `Brought forward: ${rs(Math.round(bf))} credit`]);
+    }
+    entries.forEach((a) => {
       const cash = a.mode === 'cash' ? Number(a.amount || 0) : (a.mode === 'both' ? Number(a.cash || 0) : 0);
       const acct = a.mode === 'account' ? Number(a.amount || 0) : (a.mode === 'both' ? Number(a.bank || 0) : 0);
       eCash += cash; eAcct += acct; gCount++;
       const d = a.date ? `${a.date.slice(8)}/${a.date.slice(5, 7)}/${a.date.slice(0, 4)}` : '-';
-      body.push([i === 0 ? `${g.name}${g.dept ? ` (${g.dept})` : ''}` : '', d, cash ? rs(cash) : '', acct ? rs(acct) : '', a.remark || '']);
+      body.push([nameCell(), d, cash ? rs(cash) : '', acct ? rs(acct) : '', a.remark || '']);
     });
-    body.push([B('Subtotal'), '', B(rs(eCash)), B(rs(eAcct)), B('Total ' + rs(eCash + eAcct))]);
-    gCash += eCash; gAcct += eAcct;
+    const totalOwed = -bf + eCash + eAcct;   // -bf = owed(+) when bf<0, credit(-) when bf>0; + advances given
+    body.push([B('Subtotal'), '', B(rs(eCash)), B(rs(eAcct)), B('Total ' + owedStr(totalOwed))]);
+    gCash += eCash; gAcct += eAcct; gOwed += totalOwed;
   }
   autoTable(doc, {
     startY: 36,
-    head: [['Name', 'Date', 'Cash', 'Account', 'Remark']],
+    head: [['Name', 'Date', 'Cash', 'Account', 'Remark / Balance']],
     body,
     theme: 'grid', styles: { fontSize: 9 }, headStyles: { fillColor: [192, 57, 43] },
     columnStyles: { 2: { halign: 'right' }, 3: { halign: 'right' } },
   });
   const y = (doc.lastAutoTable?.finalY || 40) + 10;
+  doc.setFontSize(11);
+  doc.text(`Advances given this month  -  Cash: ${rs(gCash)}     Account: ${rs(gAcct)}`, 14, y);
   doc.setFontSize(12);
-  doc.text(`GRAND TOTAL   -   Cash: ${rs(gCash)}     Account: ${rs(gAcct)}     Total: ${rs(gCash + gAcct)}`, 14, y);
+  doc.text(`TOTAL OUTSTANDING (incl. brought forward): ${owedStr(gOwed)}`, 14, y + 7);
   doc.setFontSize(9); doc.setTextColor(120);
-  doc.text(`${groups.length} worker(s) · ${gCount} advance entr${gCount === 1 ? 'y' : 'ies'} up to ${asOfLabel}`, 14, y + 6);
+  doc.text(`${groups.length} worker(s) · ${gCount} advance entr${gCount === 1 ? 'y' : 'ies'} this month · up to ${asOfLabel}`, 14, y + 14);
   return doc;
 }
 
