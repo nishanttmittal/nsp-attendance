@@ -85,13 +85,16 @@ async function handle(type, p) {
     await sendTelegram(`🧑‍🏭 New employee added: ${p.name} (${p.cardno}) · ${p.dept} · ${p.shift}.`);
     return 'employee created on machine';
   }
-  if (type === 'push_employee_edit') {   // owner edited name/dept in app → push to the machine
-    const env = { CARD: p.code, DRY: 'false' };
-    if (p.name) env.NAME = p.name;
-    if (p.dept) env.DEPT = p.dept;
+  if (type === 'push_employee_edit') {   // owner edited profile in app → push to the machine
+    const env = { PE_CARD: p.code, DRY: 'false' };
+    if (p.name) env.PE_NAME = p.name;
+    if (p.dept) env.PE_DEPT = p.dept;
+    if (p.shift) env.PE_SHIFT = p.shift;
+    if (p.gender) env.PE_GENDER = p.gender;
     run('pushEmployeeEdit.js', env);
-    await sendTelegram(`✏️ Updated on machine: ${p.code}${p.name ? ' · name “' + p.name + '”' : ''}${p.dept ? ' · dept ' + p.dept : ''}.`);
-    return 'name/dept pushed to machine';
+    const bits = [p.name ? 'name “' + p.name + '”' : '', p.dept ? 'dept ' + p.dept : '', p.shift ? 'shift ' + p.shift : '', p.gender ? p.gender : ''].filter(Boolean).join(' · ');
+    await sendTelegram(`✏️ Updated on machine: ${p.code}${bits ? ' · ' + bits : ''}.`);
+    return 'profile pushed to machine';
   }
   if (type === 'resign_employee') {
     // Owner rule (2026-07-12): KEEP the worker's record INACTIVE with name + paid history so the owner

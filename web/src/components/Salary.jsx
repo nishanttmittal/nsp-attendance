@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { loadEmployees, loadAllAttendance, loadAllPunches, loadEmployee, saveEmployee, loadPayout, queueAdvance, addAdvanceDirect, loadRoster, istMonth, queueJob, lockMonthDirect, unlockMonthDirect, queueLock, queueUnlock, addManualWorker } from '../lib/data';
+import { loadEmployees, loadAllAttendance, loadAllPunches, loadEmployee, saveEmployee, loadPayout, queueAdvance, addAdvanceDirect, loadRoster, istMonth, queueJob, lockMonthDirect, unlockMonthDirect, queueLock, queueUnlock, addManualWorker, pushWorkerProfile, MACHINE_DEPTS, MACHINE_SHIFTS, MACHINE_GENDERS, DEPT_DEFAULT_SHIFT } from '../lib/data';
 import { monthOptions, monthCtx, payFor, rupee, paymentBreakdown } from '../lib/paycalc';
 import Person from './Person.jsx';
 import SelfPunchCard from './SelfPunchCard.jsx';
@@ -227,6 +227,7 @@ function OwnerSalary({ user }) {
 
       <AdvanceCard user={user} extra={manualPeople} onSaved={onAdvanceSaved} />
       <AdvancesExportCard emps={emps} />
+      <DeclareWorkerCard user={user} emps={emps} onSaved={reload} />
       <AddWorkerCard user={user} onAdded={reload} />
       {mk === istMonth() && <SelfPunchCard />}
       {noSalary.length > 0 && <NoSalaryList list={noSalary} onSaved={reload} />}
@@ -570,6 +571,72 @@ export function AdvanceCard({ user, extra = [], onSaved }) {
       {f.name && !f.code && <p className="text-xs text-amber-700">Keep typing — more than one name matches.</p>}
       {st === 'done' && <p className="text-xs text-green-700">✓ Recorded — owner gets a Telegram alert.</p>}
       {st && !['saving', 'done'].includes(st) && <p className="text-xs text-red-600">{st}</p>}
+    </div>
+  );
+}
+
+// Declare / update a NEW biometric worker on the machine. Flow: the fingerprint is enrolled on the
+// device first (worker appears here), then the owner sets Name + Department + Shift + Gender and it
+// pushes to the Realtime portal automatically. Loading auto-selects the LOD (daily-wager) shift.
+function DeclareWorkerCard({ user, emps, onSaved }) {
+  const [open, setOpen] = useState(false);
+  const [f, setF] = useState({ code: '', name: '', dept: '', shift: '', gender: '' });
+  const [st, setSt] = useState('');
+  // biometric (machine) workers only — app-only staff (Radhey/Dinesh) can't be pushed to the machine.
+  const byCode = useMemo(() => Object.fromEntries((emps || []).map((e) => [e.code, e])), [emps]);
+  const machineRoster = useMemo(
+    () => (emps || []).filter((e) => e && e.code && !e.appOnly && e.onMachine !== false && e.active !== false).map((e) => ({ code: e.code, name: e.name })),
+    [emps]);
+
+  function choose(code, name) {
+    const e = byCode[code] || {};
+    setF({ code, name: e.name || name || '', dept: e.dept || '', shift: e.shift || '', gender: e.gender || '' });
+    setSt('');
+  }
+  function pickDept(dept) {
+    setF((prev) => ({ ...prev, dept, shift: DEPT_DEFAULT_SHIFT[dept] || prev.shift }));
+  }
+  async function go() {
+    if (!f.code) { setSt('Pick a worker first.'); return; }
+    if (!f.gender) { setSt('Choose Male / Female — the machine won’t save without it.'); return; }
+    setSt('saving');
+    try {
+      await pushWorkerProfile(f.code, { name: f.name, dept: f.dept, shift: f.shift, gender: f.gender }, user.email);
+      setSt('done'); setF({ code: '', name: '', dept: '', shift: '', gender: '' });
+      onSaved && onSaved();
+    } catch (e) { setSt(String(e?.message || 'Could not save — try again.')); }
+  }
+  const inp = 'border-2 border-slate-200 rounded-xl px-2 py-2.5 text-sm bg-white';
+  return (
+    <div className="bg-white rounded-2xl border-2 border-slate-200 p-3">
+      <button onClick={() => setOpen((o) => !o)} className="w-full text-left font-bold text-slate-700">🆕 Declare a new machine worker <span className="font-normal text-xs text-slate-400">— set name/dept/shift/gender → updates the machine</span> <span className="float-right text-slate-400">{open ? '▲' : '▼'}</span></button>
+      {open && (
+        <div className="grid grid-cols-2 gap-2 mt-2">
+          <div className="col-span-2">
+            <NamePick roster={machineRoster} value={f.name} onChange={choose} />
+          </div>
+          {f.code && <>
+            <input className={inp + ' col-span-2'} placeholder="Name" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} />
+            <select className={inp} value={f.dept} onChange={(e) => pickDept(e.target.value)}>
+              <option value="">Department…</option>
+              {MACHINE_DEPTS.map((d) => <option key={d} value={d}>{d}</option>)}
+            </select>
+            <select className={inp} value={f.shift} onChange={(e) => setF({ ...f, shift: e.target.value })}>
+              <option value="">Shift…</option>
+              {MACHINE_SHIFTS.map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+            <select className={inp + ' col-span-2'} value={f.gender} onChange={(e) => setF({ ...f, gender: e.target.value })}>
+              <option value="">Gender… (required)</option>
+              {MACHINE_GENDERS.map((g) => <option key={g} value={g}>{g}</option>)}
+            </select>
+            <button onClick={go} disabled={st === 'saving'} className="col-span-2 bg-emerald-600 text-white rounded-2xl py-3.5 font-bold shadow-lg shadow-emerald-200 disabled:opacity-50 disabled:shadow-none active:bg-emerald-700 active:scale-95 transition-all">Save &amp; update machine</button>
+            <p className="col-span-2 text-[11px] text-slate-500">Enroll the worker’s finger on the device first. Then pick him here, set the details, and Save — it pushes to the machine and confirms it stuck. Loading auto-picks the LOD daily-wager shift.</p>
+          </>}
+        </div>
+      )}
+      {st === 'saving' && <p className="text-xs text-slate-500 mt-1">Sending to the machine…</p>}
+      {st === 'done' && <p className="text-xs text-green-700 mt-1">✓ Saved — the machine updates in a few minutes (owner gets a Telegram confirmation).</p>}
+      {st && !['saving', 'done'].includes(st) && <p className="text-xs text-red-600 mt-1">{st}</p>}
     </div>
   );
 }

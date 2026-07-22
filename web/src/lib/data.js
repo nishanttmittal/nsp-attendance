@@ -280,6 +280,40 @@ export async function editNameDept(code, { name, dept }, by) {
   return { changed: true, pushed: onMachine };
 }
 
+// Exact Realtime-portal dropdown labels (case-sensitive on the portal; the bot matches
+// case-insensitively but these are the truth as read from the machine on 2026-07-22).
+export const MACHINE_DEPTS = ['LOADING', 'PRESS', 'POWDER', 'FITTING', 'WELDING', 'TOOL ROOM', 'DEMO', 'HELPER', 'Frame'];
+export const MACHINE_SHIFTS = ['GEN', '10H', '12H', 'wir', 'DSG', 'LOD'];
+export const MACHINE_GENDERS = ['Male', 'Female', 'Other'];
+// Picking a department auto-selects its usual shift (Loading = the LOD daily-wager shift).
+export const DEPT_DEFAULT_SHIFT = { LOADING: 'LOD' };
+
+// Declare/update a machine worker's profile (name + dept + shift + gender) in the app AND push it
+// to the Realtime machine. Gender is REQUIRED — the portal silently discards a save without one.
+// App-only staff (Radhey/Dinesh) aren't on the machine, so this is for biometric workers only.
+export async function pushWorkerProfile(code, { name, dept, shift, gender }, by) {
+  const emp = await loadEmployee(code);
+  if (!emp) throw new Error('worker not found');
+  if (!gender) throw new Error('gender is required');
+  const patch = {};
+  if (name != null && name.trim() && name.trim() !== emp.name) { patch.name = name.trim(); patch.nameLocked = true; }
+  if (dept) { patch.dept = dept; patch.deptLocked = true; }
+  if (shift) patch.shift = shift;
+  if (gender) patch.gender = gender;
+  if (Object.keys(patch).length) await saveEmployee(code, patch);
+  const onMachine = !emp.appOnly && emp.onMachine !== false;
+  if (onMachine) {
+    await queueJob('push_employee_edit', {
+      code,
+      ...(name && name.trim() ? { name: name.trim() } : {}),
+      ...(dept ? { dept } : {}),
+      ...(shift ? { shift } : {}),
+      ...(gender ? { gender } : {}),
+    }, by);
+  }
+  return { pushed: onMachine };
+}
+
 // Late-arrival penalty tasks: employees with >=4 late marks in the month (att_late_log) →
 // owner approves 25% (¼ day) / 50% (½ day) or rejects. Decision stored in months[mk].
 const LATE_THRESHOLD = 4;
