@@ -1,7 +1,12 @@
 name: Publish live floor state
 on:
   schedule:
-    - cron: '*/15 3-16 * * *'   # every 15 min, ~09:00–21:30 IST (UTC+5:30)
+    # Owner rule (2026-07-22): everyone is inside by ~09:30–10:00, so 15-min polling all day is
+    # wasteful. Pull the floor 4×/day only (IST). The worker self-heal re-triggers a missed slot.
+    - cron: '30 4 * * *'    # 10:00 IST — morning (settled attendance / late)
+    - cron: '30 9 * * *'    # 15:00 IST — afternoon
+    - cron: '10 12 * * *'   # 17:40 IST — before food ordering
+    - cron: '30 15 * * *'   # 21:00 IST — night (final punches / OT)
   workflow_dispatch:
   repository_dispatch:       # GitHub cron is unreliable: heartbeat = keepalive chain,
     types: [heartbeat, refresh_floor]   # refresh_floor = worker self-heal when the snapshot goes stale

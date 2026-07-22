@@ -122,19 +122,29 @@ export default function Dashboard() {
   );
 }
 
+// The floor is pulled ~4×/day (owner rule 2026-07-22): 10:00, 15:00, 17:40, 21:00 IST. So "old data"
+// is NORMAL between pulls and must NOT warn — we only flag a MISSING scheduled pull.
+const FLOOR_TARGET_MINS = [600, 900, 1060, 1260]; // IST minutes: 10:00, 15:00, 17:40, 21:00
 // Returns null when fresh, else { level:'red'|'amber', text } describing the staleness.
 function checkFreshness(s) {
   if (s._mock) return null;
-  const istToday = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
+  const istNowMs = Date.now() + 5.5 * 3600 * 1000;
+  const istToday = new Date(istNowMs).toISOString().slice(0, 10);
   if (s.dataDate && s.dataDate !== istToday) {
     return { level: 'red', text: `Showing ${fmtDay(s.dataDate)} — the biometric machine hasn’t sent today’s punches yet. Please check the device’s internet/power at the factory; the app will catch up automatically once data flows.` };
   }
   const stamp = s.publishedAt || s.at;
-  if (stamp) {
-    const mins = Math.round((Date.now() - new Date(stamp).getTime()) / 60000);
-    if (mins > 30) return { level: 'amber', text: `Floor data hasn’t refreshed in ${mins} min — the auto-updater may be paused. Latest figures may be behind.` };
-  }
-  return null;
+  if (!stamp) return null;
+  const istNow = new Date(istNowMs);
+  const nowMin = istNow.getUTCHours() * 60 + istNow.getUTCMinutes();
+  // most recent scheduled pull that is due (allow 20 min for cron lag + the worker self-heal to land)
+  const due = [...FLOOR_TARGET_MINS].reverse().find((m) => nowMin >= m + 20);
+  if (due == null) return null;                       // before/between slots — expected, not stale
+  const pubMs = new Date(stamp).getTime() + 5.5 * 3600 * 1000;
+  const pubToday = new Date(pubMs).toISOString().slice(0, 10) === istToday;
+  const pubMin = pubToday ? new Date(pubMs).getUTCHours() * 60 + new Date(pubMs).getUTCMinutes() : -1;
+  if (pubMin >= due) return null;                     // pulled since the due slot — fresh
+  return { level: 'amber', text: `Today’s scheduled update hasn’t come through yet — the figures may be a little behind. The floor refreshes about 4×/day and auto-retries a missed one.` };
 }
 
 function fmtDay(ymd) {
