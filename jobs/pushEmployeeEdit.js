@@ -60,59 +60,77 @@ const killModal = (page) => page.evaluate(() => {
   try {
     const rowid = await findEmployeeRowId(page, CARD);
     if (!rowid) bad(`worker ${CARD} not found on machine`);
-    await page.goto('https://onlinerealsoft.com/Employee.aspx?RowId=' + rowid, { waitUntil: 'domcontentloaded' });
-    await page.waitForTimeout(1500);
-
-    const before = {
+    const editUrl = 'https://onlinerealsoft.com/Employee.aspx?RowId=' + rowid;
+    const readAll = async () => ({
       name: await page.locator('#MainContent_Txtempname').inputValue(),
       dept: await readSel(page, '#MainContent_cbodeptname'),
       shift: await readSel(page, '#MainContent_cboshiftname'),
       gender: await readSel(page, '#MainContent_CboGender'),
       policy: await readSel(page, '#MainContent_cboofficetimepolicy'),
-    };
-
-    const warn = [];
-    if (NAME) await page.fill('#MainContent_Txtempname', NAME);
-    if (DEPT) { const r = await pick(page, '#MainContent_cbodeptname', DEPT); if (!r.ok) warn.push(`DEPT "${DEPT}" not an option (have: ${r.have.join(', ')})`); }
-    if (SHIFT) {
-      const r = await pick(page, '#MainContent_cboshiftname', SHIFT); if (!r.ok) warn.push(`SHIFT "${SHIFT}" not an option (have: ${r.have.join(', ')})`);
-      const p = await pick(page, '#MainContent_cboofficetimepolicy', POLICY); if (!p.ok) warn.push(`POLICY "${POLICY}" not an option (have: ${p.have.join(', ')})`);
+    });
+    // Navigate to the edit form and fill every requested field. Returns the pre-fill snapshot,
+    // any unmatched-label warnings, and the gender now selected.
+    async function loadAndFill() {
+      await page.goto(editUrl, { waitUntil: 'domcontentloaded' });
+      await page.waitForTimeout(1500);
+      const before = await readAll();
+      const warn = [];
+      if (NAME) await page.fill('#MainContent_Txtempname', NAME);
+      if (DEPT) { const r = await pick(page, '#MainContent_cbodeptname', DEPT); if (!r.ok) warn.push(`DEPT "${DEPT}" not an option (have: ${r.have.join(', ')})`); }
+      if (SHIFT) {
+        const r = await pick(page, '#MainContent_cboshiftname', SHIFT); if (!r.ok) warn.push(`SHIFT "${SHIFT}" not an option (have: ${r.have.join(', ')})`);
+        const p = await pick(page, '#MainContent_cboofficetimepolicy', POLICY); if (!p.ok) warn.push(`POLICY "${POLICY}" not an option (have: ${p.have.join(', ')})`);
+      }
+      if (GENDER) { const r = await pick(page, '#MainContent_CboGender', GENDER); if (!r.ok) warn.push(`GENDER "${GENDER}" not an option (have: ${r.have.join(', ')})`); }
+      const genderNow = await readSel(page, '#MainContent_CboGender');
+      return { before, warn, genderNow };
     }
-    // Gender: set if passed; ALWAYS ensure one is set or the save reverts silently.
-    if (GENDER) { const r = await pick(page, '#MainContent_CboGender', GENDER); if (!r.ok) warn.push(`GENDER "${GENDER}" not an option (have: ${r.have.join(', ')})`); }
-    const genderNow = await readSel(page, '#MainContent_CboGender');
-    if (!genderNow || /select gender/i.test(genderNow)) bad(`Gender is blank for ${CARD} — the portal would silently discard this save. Pass GENDER=Male|Female|Other.`);
-
-    if (warn.length) console.log('WARN:', JSON.stringify(warn));
-    console.log('BEFORE:', JSON.stringify(before));
-    console.log('TARGET:', JSON.stringify({ name: NAME || '(unchanged)', dept: DEPT || '(unchanged)', shift: SHIFT || '(unchanged)', gender: GENDER || genderNow, policy: SHIFT ? POLICY : '(unchanged)' }));
-    await page.screenshot({ path: path.join(OUT_DIR, `pushedit_${CARD}.png`), fullPage: true });
-    if (DRY) { console.log('=> DRY: not saved'); return; }
-    if (warn.length) bad('refusing to save with unmatched fields (see WARN) — fix the label and retry');
-
-    await killModal(page);
-    await Promise.all([page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {}), page.click('#MainContent_cmdsave')]);
-    await page.waitForTimeout(2000);
-
-    // Re-open and VERIFY every requested field stuck.
-    const rid2 = await findEmployeeRowId(page, CARD);
-    await page.goto('https://onlinerealsoft.com/Employee.aspx?RowId=' + rid2, { waitUntil: 'domcontentloaded' });
-    await page.waitForTimeout(1200);
-    const after = {
-      name: await page.locator('#MainContent_Txtempname').inputValue(),
-      dept: await readSel(page, '#MainContent_cbodeptname'),
-      shift: await readSel(page, '#MainContent_cboshiftname'),
-      gender: await readSel(page, '#MainContent_CboGender'),
-      policy: await readSel(page, '#MainContent_cboofficetimepolicy'),
+    // Click Save (killing the renewal modal that can intercept it) then re-open + read what persisted.
+    async function saveThenRead() {
+      await killModal(page);
+      await Promise.all([page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {}), page.click('#MainContent_cmdsave')]);
+      await page.waitForTimeout(2000);
+      const rid2 = await findEmployeeRowId(page, CARD);
+      await page.goto('https://onlinerealsoft.com/Employee.aspx?RowId=' + rid2, { waitUntil: 'domcontentloaded' });
+      await page.waitForTimeout(1200);
+      return readAll();
+    }
+    const mismatches = (a) => {
+      const m = [];
+      if (NAME && a.name.trim() !== NAME.trim()) m.push(`name: got "${a.name}" want "${NAME}"`);
+      if (DEPT && !eqCI(a.dept, DEPT)) m.push(`dept: got "${a.dept}" want "${DEPT}"`);
+      if (SHIFT && !eqCI(a.shift, SHIFT)) m.push(`shift: got "${a.shift}" want "${SHIFT}"`);
+      if (GENDER && !eqCI(a.gender, GENDER)) m.push(`gender: got "${a.gender}" want "${GENDER}"`);
+      return m;
     };
-    const mism = [];
-    if (NAME && after.name.trim() !== NAME.trim()) mism.push(`name: got "${after.name}" want "${NAME}"`);
-    if (DEPT && !eqCI(after.dept, DEPT)) mism.push(`dept: got "${after.dept}" want "${DEPT}"`);
-    if (SHIFT && !eqCI(after.shift, SHIFT)) mism.push(`shift: got "${after.shift}" want "${SHIFT}"`);
-    if (GENDER && !eqCI(after.gender, GENDER)) mism.push(`gender: got "${after.gender}" want "${GENDER}"`);
-    console.log('AFTER:', JSON.stringify(after));
-    if (dialogs.length) console.log('dialogs:', JSON.stringify(dialogs));
-    if (mism.length) { console.error('VERIFY FAILED:', JSON.stringify(mism)); process.exit(2); }
-    console.log('=> PUSHED + VERIFIED');
+
+    // The "Renew Your Cloud Services" modal can swallow the first Save on a cold run (it failed all 3
+    // declare pushes on 2026-07-22, yet succeeded on a clean re-run) — so re-fill + re-save once.
+    const MAX = 2;
+    let lastMism = null;
+    for (let attempt = 1; attempt <= MAX; attempt++) {
+      const { before, warn, genderNow } = await loadAndFill();
+      if (!genderNow || /select gender/i.test(genderNow)) bad(`Gender is blank for ${CARD} — the portal would silently discard this save. Pass GENDER=Male|Female|Other.`);
+      if (attempt === 1) {
+        if (warn.length) console.log('WARN:', JSON.stringify(warn));
+        console.log('BEFORE:', JSON.stringify(before));
+        console.log('TARGET:', JSON.stringify({ name: NAME || '(unchanged)', dept: DEPT || '(unchanged)', shift: SHIFT || '(unchanged)', gender: GENDER || genderNow, policy: SHIFT ? POLICY : '(unchanged)' }));
+        await page.screenshot({ path: path.join(OUT_DIR, `pushedit_${CARD}.png`), fullPage: true });
+        if (DRY) { console.log('=> DRY: not saved'); return; }
+        if (warn.length) bad('refusing to save with unmatched fields (see WARN) — fix the label and retry');
+      }
+      const after = await saveThenRead();
+      const mism = mismatches(after);
+      if (!mism.length) {
+        console.log('AFTER:', JSON.stringify(after));
+        if (dialogs.length) console.log('dialogs:', JSON.stringify(dialogs));
+        console.log(`=> PUSHED + VERIFIED${attempt > 1 ? ` (took ${attempt} tries)` : ''}`);
+        return;
+      }
+      lastMism = mism;
+      console.log(`attempt ${attempt}/${MAX} did not persist: ${JSON.stringify(mism)}`);
+    }
+    console.error('VERIFY FAILED:', JSON.stringify(lastMism));
+    process.exit(2);
   } finally { await browser.close(); }
 })();

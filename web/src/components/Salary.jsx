@@ -586,6 +586,7 @@ export function AdvanceCard({ user, extra = [], onSaved }) {
 function DeclareWorkerCard({ user, emps, onSaved }) {
   const [open, setOpen] = useState(false);
   const [f, setF] = useState({ code: '', name: '', dept: '', shift: '', gender: '' });
+  const [pick, setPick] = useState('');   // picker search text — SEPARATE from the editable name box
   const [st, setSt] = useState('');
   // biometric (machine) workers only — app-only staff (Radhey/Dinesh) can't be pushed to the machine.
   const byCode = useMemo(() => Object.fromEntries((emps || []).map((e) => [e.code, e])), [emps]);
@@ -593,21 +594,27 @@ function DeclareWorkerCard({ user, emps, onSaved }) {
     () => (emps || []).filter((e) => e && e.code && !e.appOnly && e.onMachine !== false && e.active !== false).map((e) => ({ code: e.code, name: e.name })),
     [emps]);
 
-  function choose(code, name) {
+  // Pick a worker → load their current record. If the name is still just the code (freshly enrolled,
+  // un-named) start the Name box EMPTY so the owner simply types the real name. The picker no longer
+  // shares state with the Name box, so editing the name can't wipe the selected code.
+  function onPick(code, text) {
+    setPick(text);
+    if (!code) return;
     const e = byCode[code] || {};
-    setF({ code, name: e.name || name || '', dept: e.dept || '', shift: e.shift || '', gender: e.gender || '' });
-    setSt('');
+    const orig = e.name || '';
+    setF({ code, name: orig === code ? '' : orig, dept: e.dept || '', shift: e.shift || '', gender: e.gender || '' });
+    setPick(''); setSt('');
   }
-  function pickDept(dept) {
-    setF((prev) => ({ ...prev, dept, shift: DEPT_DEFAULT_SHIFT[dept] || prev.shift }));
-  }
+  function reset() { setF({ code: '', name: '', dept: '', shift: '', gender: '' }); setPick(''); setSt(''); }
+  function pickDept(dept) { setF((prev) => ({ ...prev, dept, shift: DEPT_DEFAULT_SHIFT[dept] || prev.shift })); }
   async function go() {
     if (!f.code) { setSt('Pick a worker first.'); return; }
+    if (!f.name.trim()) { setSt('Type the worker’s name.'); return; }
     if (!f.gender) { setSt('Choose Male / Female — the machine won’t save without it.'); return; }
     setSt('saving');
     try {
       await pushWorkerProfile(f.code, { name: f.name, dept: f.dept, shift: f.shift, gender: f.gender }, user.email);
-      setSt('done'); setF({ code: '', name: '', dept: '', shift: '', gender: '' });
+      setSt('done'); reset();
       onSaved && onSaved();
     } catch (e) { setSt(String(e?.message || 'Could not save — try again.')); }
   }
@@ -617,11 +624,17 @@ function DeclareWorkerCard({ user, emps, onSaved }) {
       <button onClick={() => setOpen((o) => !o)} className="w-full text-left font-bold text-slate-700">🆕 Declare a new machine worker <span className="font-normal text-xs text-slate-400">— set name/dept/shift/gender → updates the machine</span> <span className="float-right text-slate-400">{open ? '▲' : '▼'}</span></button>
       {open && (
         <div className="grid grid-cols-2 gap-2 mt-2">
-          <div className="col-span-2">
-            <NamePick roster={machineRoster} value={f.name} onChange={choose} />
-          </div>
-          {f.code && <>
-            <input className={inp + ' col-span-2'} placeholder="Name" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} />
+          {!f.code ? (
+            <div className="col-span-2">
+              <NamePick roster={machineRoster} value={pick} onChange={onPick} placeholder="Pick worker by number or name…" />
+              <p className="text-[11px] text-slate-500 mt-1">A freshly-enrolled worker shows as his code number — search that number, tap it, then type his name below.</p>
+            </div>
+          ) : (<>
+            <div className="col-span-2 flex items-center justify-between bg-slate-50 border border-slate-200 rounded-xl px-3 py-2">
+              <span className="text-sm text-slate-700">Worker <b>{byCode[f.code]?.name || f.code}</b> <span className="text-slate-400">({f.code})</span></span>
+              <button onClick={reset} className="text-xs text-blue-600 font-semibold">change</button>
+            </div>
+            <input className={inp + ' col-span-2'} placeholder="Name (type the real name)" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} />
             <select className={inp} value={f.dept} onChange={(e) => pickDept(e.target.value)}>
               <option value="">Department…</option>
               {MACHINE_DEPTS.map((d) => <option key={d} value={d}>{d}</option>)}
@@ -635,8 +648,8 @@ function DeclareWorkerCard({ user, emps, onSaved }) {
               {MACHINE_GENDERS.map((g) => <option key={g} value={g}>{g}</option>)}
             </select>
             <button onClick={go} disabled={st === 'saving'} className="col-span-2 bg-emerald-600 text-white rounded-2xl py-3.5 font-bold shadow-lg shadow-emerald-200 disabled:opacity-50 disabled:shadow-none active:bg-emerald-700 active:scale-95 transition-all">Save &amp; update machine</button>
-            <p className="col-span-2 text-[11px] text-slate-500">Enroll the worker’s finger on the device first. Then pick him here, set the details, and Save — it pushes to the machine and confirms it stuck. Loading auto-picks the LOD daily-wager shift.</p>
-          </>}
+            <p className="col-span-2 text-[11px] text-slate-500">Enroll the finger on the device first. Loading auto-picks the LOD daily-wager shift. On Save it pushes to the machine and confirms it stuck (Telegram).</p>
+          </>)}
         </div>
       )}
       {st === 'saving' && <p className="text-xs text-slate-500 mt-1">Sending to the machine…</p>}

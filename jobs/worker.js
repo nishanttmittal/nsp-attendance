@@ -37,9 +37,20 @@ async function authorizeJob(requestedBy, type) {
 }
 
 function run(file, env) {
-  return execFileSync('node', [path.resolve(__dirname, file)], {
-    env: { ...process.env, ...env }, encoding: 'utf8', timeout: 260000, stdio: ['ignore', 'pipe', 'pipe'],
-  });
+  try {
+    return execFileSync('node', [path.resolve(__dirname, file)], {
+      env: { ...process.env, ...env }, encoding: 'utf8', timeout: 260000, stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  } catch (e) {
+    // execFileSync's default message is just "Command failed", which hides WHY — that cost us a
+    // diagnosis on the 2026-07-22 declare pushes. Surface the child's own error line (ERROR:/VERIFY
+    // FAILED:/not found/…) so the job's stored error + the retry classifier can see the real cause.
+    const out = `${e.stderr || ''}\n${e.stdout || ''}`;
+    const detail = out.split('\n').map((s) => s.trim()).filter(Boolean).reverse()
+      .find((l) => /ERROR:|VERIFY FAILED:|WARN:|not found|Gender|timeout|net::/i.test(l))
+      || out.trim().split('\n').filter(Boolean).pop() || e.message;
+    throw new Error(`${file}: ${detail}`);
+  }
 }
 
 async function handle(type, p) {
