@@ -3,8 +3,15 @@ on:
   schedule:
     - cron: '*/15 3-16 * * *'   # every 15 min, ~09:00–21:30 IST (UTC+5:30)
   workflow_dispatch:
-  repository_dispatch:       # external pinger heartbeat (GitHub cron is unreliable)
-    types: [heartbeat]
+  repository_dispatch:       # GitHub cron is unreliable: heartbeat = keepalive chain,
+    types: [heartbeat, refresh_floor]   # refresh_floor = worker self-heal when the snapshot goes stale
+
+# Serialize scrapes: publishState.js logs into the SINGLE Realtime session. Two concurrent logins
+# collide (the documented mass manual-punch failure 2026-06-14). A scheduled run + a self-heal
+# refresh_floor could otherwise race; queue the second instead of running both.
+concurrency:
+  group: nsp-publish-state
+  cancel-in-progress: false
 
 jobs:
   publish:

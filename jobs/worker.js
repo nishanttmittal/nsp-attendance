@@ -368,7 +368,55 @@ async function handle(type, p) {
   return 'unknown job type';
 }
 
+// Self-heal the floor snapshot. GitHub's PER-WORKFLOW cron is unreliable and has frozen the floor
+// app on yesterday's data (publish-state silently stopped overnight 2026-07-21 → owner saw "21 Jul"
+// at 10 AM). The worker's own */5 cron is a SEPARATE schedule, so on each cycle we check whether the
+// last publish is stale and, if so, re-trigger publish-state via a repository_dispatch — and ping the
+// owner so a dead pipeline is never silent. Gated to publish-state's own scrape window (03:00–16:59
+// UTC ≈ 08:30–22:30 IST) so it never false-fires at the pre-shift / midnight-IST rollover. Trigger is
+// PUBLISH AGE (pipeline dead), not date mismatch (that = device offline, which a re-run can't fix and
+// the app already flags with a red banner). Relies on DISPATCH_PAT (same token the old heartbeat used).
+async function selfHealFloor() {
+  const h = new Date().getUTCHours();
+  if (h < 3 || h > 16) return;                        // outside the floor-scrape window
+  const snap = await db().collection('att_daily_stats').doc('today').get();
+  const v = snap.exists ? snap.data() : {};
+  const pubAt = Date.parse(v.publishedAt || 0) || 0;
+  const ageMin = pubAt ? (Date.now() - pubAt) / 60000 : Infinity;
+  if (ageMin <= 20) return;                           // fresh enough — nothing to do
+  const ref = db().collection('att_alert_state').doc('floor_selfheal');
+  const s = (await ref.get()).data() || {};
+  const now = Date.now();
+  const patch = {};
+  // Re-trigger publish-state (throttled to once / 12 min so a device-off stall doesn't spam runs).
+  if (now - (Date.parse(s.lastDispatch || 0) || 0) > 12 * 60 * 1000) {
+    const repo = process.env.GITHUB_REPOSITORY || 'nishanttmittal/nsp-attendance';
+    const pat = process.env.DISPATCH_PAT;
+    if (pat) {
+      try {
+        const r = await fetch(`https://api.github.com/repos/${repo}/dispatches`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${pat}`, Accept: 'application/vnd.github+json' },
+          body: JSON.stringify({ event_type: 'refresh_floor' }),
+        });
+        patch.lastDispatch = new Date(now).toISOString();
+        console.log(`self-heal: floor stale ${Math.round(ageMin)}min → refresh_floor dispatch HTTP ${r.status}`);
+      } catch (e) { console.error('self-heal dispatch failed:', e.message); }
+    } else { console.error('self-heal: DISPATCH_PAT missing — cannot re-trigger publish-state'); }
+  }
+  // Ping the owner (throttled to once / hour) so a persistently dead pipeline is never silent.
+  if (now - (Date.parse(s.lastAlert || 0) || 0) > 60 * 60 * 1000) {
+    const last = pubAt ? new Date(pubAt + 5.5 * 3600 * 1000).toISOString().slice(11, 16) + ' IST' : 'never';
+    await sendTelegram(`⚠️ Floor data looks stale — last machine update ${last} (${Math.round(ageMin)} min ago). Auto-refresh triggered; if the app still shows old data in ~5 min, the biometric device may be offline.`).catch(() => {});
+    patch.lastAlert = new Date(now).toISOString();
+  }
+  if (Object.keys(patch).length) await ref.set(patch, { merge: true });
+}
+
 async function main() {
+  // Keep the live floor fresh even when GitHub's publish-state cron silently dies (self-heal).
+  try { await selfHealFloor(); } catch (e) { console.error('self-heal failed:', e.message); }
+
   // record any self-punch taps (Radhey/Dinesh link) before processing the job queue
   try { const n = await drainSelfPunch(); if (n) console.log(`self-punch: recorded ${n} tap(s)`); }
   catch (e) { console.error('self-punch drain failed:', e.message); }

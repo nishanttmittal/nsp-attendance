@@ -33,3 +33,4 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          DISPATCH_PAT: ${{ secrets.DISPATCH_PAT }}   # lets the worker re-trigger publish-state when the floor snapshot goes stale (self-heal)
