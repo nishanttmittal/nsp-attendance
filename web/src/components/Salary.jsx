@@ -343,8 +343,15 @@ function OwnerRow({ r, mk, busy, justPaidMode, user, onName, onPay, onUndo, onAd
   const owes = payable < 0;
   const sub2 = [
     pay.otHrsNet > 0 ? `OT ${pay.otHrsNet}h` : null,
-    (pay.openingBalance || 0) !== 0 ? `bal ${pay.openingBalance > 0 ? '+' : ''}${rupee(pay.openingBalance)}` : null,
   ].filter(Boolean).join(' · ');
+  // Advance picture for this row: total the worker owes = balance BROUGHT FORWARD from earlier months
+  // (openingBalance; − = owes us, + = credit in his favour) + advances GIVEN this running month.
+  const carried = Number(pay.openingBalance || 0);
+  const monthAdv = (emp.advances || []).filter((a) => (a.date || '').startsWith(mk)).reduce((t, a) => t + Number(a.amount || 0), 0);
+  const advOwed = -carried + monthAdv;               // + = worker owes; − = net credit to worker
+  const bfOwed = carried < 0 ? -carried : 0;
+  const bfCredit = carried > 0 ? carried : 0;
+  const showAdv = Math.round(bfOwed) > 0 || Math.round(bfCredit) > 0 || Math.round(monthAdv) > 0;
   return (
     <div className={`rounded-2xl p-3 ${justPaidMode ? 'bg-emerald-50 border-2 border-emerald-200' : isLocked ? 'bg-white border-2 border-slate-100 opacity-70' : 'bg-white border-2 border-slate-200 shadow-sm'}`}>
       <div className="flex items-start gap-2">
@@ -359,6 +366,17 @@ function OwnerRow({ r, mk, busy, justPaidMode, user, onName, onPay, onUndo, onAd
             <button onClick={() => setShowDays((s) => !s)} className="text-blue-700 underline decoration-dotted underline-offset-2">{pay.paidDays}d · details {showDays ? '▾' : '▸'}</button>
             {sub2 ? ` · ${sub2}` : ''}
           </div>
+          {!isLocked && showAdv && (
+            <div className="text-xs mt-0.5">
+              {advOwed >= 0 ? (
+                <span className="text-rose-700">💰 Advance <b>{rupee(Math.round(advOwed))}</b>
+                  <span className="text-slate-400"> · {Math.round(bfOwed) > 0 ? `${rupee(Math.round(bfOwed))} b/f` : (Math.round(bfCredit) > 0 ? `${rupee(Math.round(bfCredit))} credit b/f` : `${rupee(0)} b/f`)} + {rupee(Math.round(monthAdv))} this month</span>
+                </span>
+              ) : (
+                <span className="text-emerald-700">💰 <b>{rupee(Math.round(-advOwed))} credit</b> <span className="text-slate-400">(we owe him)</span></span>
+              )}
+            </div>
+          )}
           {showDays && <WorkerSummary r={r} mk={mk} />}
         </div>
         <div className="text-right shrink-0">
