@@ -440,6 +440,13 @@ export async function loadPayout(month) {
   const s = await getDoc(doc(db, 'att_meta', 'payout_' + month));
   return s.exists() ? s.data() : { items: {} };
 }
+// Salary-FREE per-worker advance balances (att_meta/advance_balances, written by the worker). Manager-
+// readable — carries NO pay figure, only advance owed (b/f + this month). Powers the manager Advances page.
+export async function loadAdvanceBalances() {
+  if (!isConfigured || !db) return { month: istMonth(), items: {} };
+  const s = await getDoc(doc(db, 'att_meta', 'advance_balances'));
+  return s.exists() ? s.data() : { month: istMonth(), items: {} };
+}
 // Owner finalizes a whole month's hisab: locks every ticked person's month and carries their
 // leftover advance forward to next month (advance carries ONLY at finalize). Worker applies it.
 export async function queueFinalizeHisab(month, by) {

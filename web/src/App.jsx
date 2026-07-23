@@ -3,14 +3,17 @@ import { useAuth, canSee, signOut } from './lib/auth';
 import { loadEmployees } from './lib/data';
 import Login from './components/Login.jsx';
 import Dashboard from './components/Dashboard.jsx';
-import Salary from './components/Salary.jsx';
+import Salary, { ManagerAdvances } from './components/Salary.jsx';
+import IncomingAdvances from './components/IncomingAdvances.jsx';
 import Problems from './components/Problems.jsx';
 import Settings from './components/Settings.jsx';
 import Shadow from './components/Shadow.jsx';
 
 const TABS = [
   { key: 'floor', label: 'Floor', feature: 'dashboard' },
+  { key: 'advances', label: 'Advances', feature: 'advances' },
   { key: 'salary', label: 'Salary', feature: 'salary' },
+  { key: 'incoming', label: 'Advances In', feature: 'salary' },
   { key: 'problems', label: 'Problems', feature: 'problems' },
   { key: 'shadow', label: 'Shadow', feature: 'shadow' },
 ];
@@ -83,7 +86,9 @@ export default function App() {
         ) : (
           <>
             {active === 'floor' && <Dashboard />}
+            {active === 'advances' && canSee(user.role, 'advances') && <ManagerAdvances user={user} />}
             {active === 'salary' && canSee(user.role, 'salary') && <Salary user={user} />}
+            {active === 'incoming' && canSee(user.role, 'salary') && <IncomingAdvances user={user} />}
             {active === 'problems' && canSee(user.role, 'problems') && <Problems user={user} />}
             {active === 'shadow' && canSee(user.role, 'shadow') && <Shadow />}
           </>

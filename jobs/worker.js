@@ -474,7 +474,24 @@ async function main() {
       });
       await db().collection('att_meta').doc('payout_' + mk).set({ month: mk, items, updatedAt: new Date().toISOString() });
     }
-  } catch (e) { console.error('payout sync failed:', e.message); }
+    // Salary-FREE advance balances for the manager Advances page. att_meta is staff-readable, so this
+    // MUST NOT contain any pay figure — only the advance owed = balance brought forward + this month's
+    // advances. The manager can see who owes what without ever reading att_salary (which stays owner-only).
+    const advItems = {};
+    sal.forEach(d => {
+      const e = d.data();
+      if (e.active === false) return;
+      const md = (e.months || {})[cur] || {};
+      const bf = Number(md.openingBalance || 0);                                   // running balance b/f (− = owes us)
+      const monthAdv = (e.advances || []).filter(a => String(a.date || '').startsWith(cur)).reduce((t, a) => t + Number(a.amount || 0), 0);
+      advItems[d.id] = {
+        name: e.name || d.id, nickname: e.nickname || '', dept: e.dept || '',
+        bfOwed: Math.round(bf < 0 ? -bf : 0), bfCredit: Math.round(bf > 0 ? bf : 0),
+        thisMonth: Math.round(monthAdv), totalOwed: Math.round(-bf + monthAdv),    // + = worker owes; − = credit
+      };
+    });
+    await db().collection('att_meta').doc('advance_balances').set({ month: cur, items: advItems, updatedAt: new Date().toISOString() });
+  } catch (e) { console.error('payout/advance sync failed:', e.message); }
 
   // once-a-day: scan the in-out report for missed punches (for the app's Punch tab list)
   try {

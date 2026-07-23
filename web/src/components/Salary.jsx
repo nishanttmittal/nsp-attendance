@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { loadEmployees, loadAllAttendance, loadAllPunches, loadEmployee, saveEmployee, loadPayout, queueAdvance, addAdvanceDirect, loadRoster, istMonth, queueJob, lockMonthDirect, unlockMonthDirect, queueLock, queueUnlock, addManualWorker, pushWorkerProfile, MACHINE_DEPTS, MACHINE_SHIFTS, MACHINE_GENDERS, DEPT_DEFAULT_SHIFT } from '../lib/data';
+import { loadEmployees, loadAllAttendance, loadAllPunches, loadEmployee, saveEmployee, loadPayout, loadAdvanceBalances, queueAdvance, addAdvanceDirect, loadRoster, istMonth, queueJob, lockMonthDirect, unlockMonthDirect, queueLock, queueUnlock, addManualWorker, pushWorkerProfile, MACHINE_DEPTS, MACHINE_SHIFTS, MACHINE_GENDERS, DEPT_DEFAULT_SHIFT } from '../lib/data';
 import { monthOptions, monthCtx, payFor, rupee, paymentBreakdown } from '../lib/paycalc';
 import Person from './Person.jsx';
 import SelfPunchCard from './SelfPunchCard.jsx';
@@ -547,9 +547,51 @@ function AdvancesExportCard({ emps }) {
   );
 }
 
+// MANAGER Advances page (feature 'advances'): give an advance to any worker and see each worker's
+// outstanding balance "till today" — with NO salary/pay figures. Balances come from the salary-free
+// att_meta/advance_balances mirror (the worker writes it); the manager can't read att_salary at all.
+export function ManagerAdvances({ user }) {
+  const [bal, setBal] = useState(null);
+  const [extra, setExtra] = useState({});   // code -> amount added this session (instant reflection)
+  const [q, setQ] = useState('');
+  useEffect(() => { loadAdvanceBalances().then(setBal); }, []);
+  const items = bal?.items || {};
+  const owedOf = (code) => Math.round((items[code]?.totalOwed || 0) + (extra[code] || 0));
+  const onSaved = (code, adv) => setExtra((p) => ({ ...p, [code]: (p[code] || 0) + Number(adv.amount || 0) }));
+  const list = useMemo(() => Object.entries(items).map(([code, v]) => ({ code, ...v }))
+    .filter((v) => !q || (v.name || '').toLowerCase().includes(q.toLowerCase()))
+    .sort((a, b) => owedOf(b.code) - owedOf(a.code)), [items, q, extra]);   // eslint-disable-line react-hooks/exhaustive-deps
+  return (
+    <div className="space-y-3">
+      <AdvanceCard user={user} balances={items} extraOwed={extra} onSaved={onSaved} />
+      <div className="bg-white rounded-2xl border-2 border-slate-200 p-3 space-y-2">
+        <div className="flex items-center justify-between">
+          <div className="font-bold text-slate-700">Outstanding advances (till today)</div>
+          {bal?.updatedAt && <span className="text-[11px] text-slate-400">as of {new Date(bal.updatedAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</span>}
+        </div>
+        <input className="w-full border-2 border-slate-200 rounded-xl px-3 py-2.5 text-base" placeholder="🔍 Search worker…" value={q} onChange={(e) => setQ(e.target.value)} />
+        {!bal && <p className="text-sm text-slate-400">Loading…</p>}
+        <div className="divide-y divide-slate-100 max-h-[58vh] overflow-auto">
+          {list.map((v) => {
+            const owed = owedOf(v.code);
+            return (
+              <div key={v.code} className="py-2.5 flex items-center justify-between gap-2">
+                <span className="min-w-0 truncate text-sm text-slate-700">{v.name}{v.dept ? <span className="text-slate-400"> · {v.dept}</span> : null}</span>
+                <b className={`shrink-0 ${owed > 0 ? 'text-rose-700' : owed < 0 ? 'text-emerald-700' : 'text-slate-400'}`}>{owed > 0 ? `₹${owed.toLocaleString('en-IN')}` : owed < 0 ? `₹${(-owed).toLocaleString('en-IN')} cr` : '₹0'}</b>
+              </div>
+            );
+          })}
+          {bal && !list.length && <p className="text-sm text-slate-400 py-2">No workers match.</p>}
+        </div>
+      </div>
+      <p className="text-[11px] text-slate-500 px-1">Advances you record here are applied within a few minutes and the owner gets a Telegram alert. Balances refresh automatically. This page never shows salaries.</p>
+    </div>
+  );
+}
+
 // quick advance entry (manager + owner): date, amount, mode, remark; blocked once that
 // month's salary is already paid for the person.
-export function AdvanceCard({ user, extra = [], onSaved }) {
+export function AdvanceCard({ user, extra = [], onSaved, balances = null, extraOwed = null }) {
   const today = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
   const [roster, setRoster] = useState([]);
   const [f, setF] = useState({ code: null, name: '', amount: '', mode: 'cash', date: today, remark: '' });
@@ -575,6 +617,7 @@ export function AdvanceCard({ user, extra = [], onSaved }) {
         const po = await loadPayout(f.date.slice(0, 7));
         if (po.items?.[f.code]?.paid) { setSt(`Salary for ${f.date.slice(0, 7)} is already PAID — advance not allowed for that month.`); return; }
         await queueAdvance(f.code, advance, user.email);
+        onSaved?.(f.code, advance);   // let the Advances page reflect the new balance instantly
       }
       setSt('done'); setF({ code: null, name: '', amount: '', mode: 'cash', date: today, remark: '' });
     } catch (e) {
@@ -592,6 +635,10 @@ export function AdvanceCard({ user, extra = [], onSaved }) {
       <div className="font-bold text-slate-700">💸 Give advance</div>
       <div className="grid grid-cols-2 gap-2">
         <NamePick roster={pickList} value={f.name} onChange={(code, name) => setF({ ...f, code, name })} className="col-span-2" />
+        {balances && f.code && (() => {
+          const owed = Math.round((balances[f.code]?.totalOwed || 0) + ((extraOwed && extraOwed[f.code]) || 0));
+          return <p className={`col-span-2 -mt-1 text-sm font-bold ${owed >= 0 ? 'text-rose-700' : 'text-emerald-700'}`}>{owed >= 0 ? `💰 Owes ₹${owed.toLocaleString('en-IN')} till today` : `💰 ₹${(-owed).toLocaleString('en-IN')} credit (we owe him)`}</p>;
+        })()}
         <input className="border-2 border-slate-200 rounded-xl px-2 py-2.5 text-sm" type="date" value={f.date} onChange={(e) => setF({ ...f, date: e.target.value })} />
         <input className="border-2 border-slate-200 rounded-xl px-2 py-2.5 text-sm" type="number" placeholder="Amount ₹" value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} />
         <select className="border-2 border-slate-200 rounded-xl px-2 py-2.5 text-sm bg-white" value={f.mode} onChange={(e) => setF({ ...f, mode: e.target.value })}>
