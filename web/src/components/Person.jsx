@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { loadEmployee, loadAllAttendance, loadPunchDoc, saveEmployee, saveMonth, addAdvance, addIncrement, settleAndResign, checkActionPassword, queueJob, queueLock, queueUnlock, lockMonthDirect, unlockMonthDirect, editNameDept, istMonth, removeWorker, restoreWorker, deleteWorkerHard, workerEverPaid } from '../lib/data';
+import { loadEmployee, loadAllAttendance, loadPunchDoc, saveEmployee, saveMonth, addAdvance, deleteAdvanceAt, addIncrement, settleAndResign, checkActionPassword, queueJob, queueLock, queueUnlock, lockMonthDirect, unlockMonthDirect, editNameDept, istMonth, removeWorker, restoreWorker, deleteWorkerHard, workerEverPaid } from '../lib/data';
 import { monthCtx, payFor, rupee, paymentBreakdown } from '../lib/paycalc';
 import { payslipOnePdf, sharePdf } from '../lib/salaryPdf';
 import { graceDeltaDays } from '../lib/attendanceEngine';
@@ -19,6 +19,39 @@ export default function Person({ code, mk, user, onBack }) {
   }
   useEffect(() => { reload(); }, [code]);
   const act = async (fn) => { setBusy(true); try { await fn(); await reload(); } finally { setBusy(false); } };
+
+  // An advance's month is "sealed" if that month — or any LATER month — is already paid/locked (its
+  // amount is baked into their carried balance). Sealed months block adding/deleting an advance there.
+  const monthSealed = (dateStr) => {
+    const m2 = String(dateStr || '').slice(0, 7);
+    const months = emp?.months || {};
+    if (months[m2]?.locked || months[m2]?.payment) return true;
+    return Object.keys(months).some((m) => m > m2 && (months[m]?.locked || months[m]?.payment));
+  };
+  // Advance add/delete are OPTIMISTIC and do NOT reload all attendance — the old act() re-read every
+  // worker's attendance (~66 docs) after each advance, which is exactly what made entry slow.
+  async function addAdvanceFast(f) {
+    if (monthSealed(f.date)) { alert('That month is already paid & locked — advance not allowed. Date it in an open month.'); return; }
+    const a = { id: 'adv-' + f.date + '-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7), date: f.date, mode: f.mode, amount: Number(f.amount), remark: f.remark || '', paidBy: user.email };
+    setEmp((prev) => ({ ...prev, advances: [...(prev.advances || []), a] }));   // instant
+    try { await addAdvance(code, a); }
+    catch { setEmp((prev) => ({ ...prev, advances: (prev.advances || []).filter((x) => x.id !== a.id) })); alert('Could not save the advance — try again.'); }
+  }
+  async function delAdvance(index, sig) {
+    if (!window.confirm(`Delete this advance of ${rupee(sig.amount)} dated ${sig.date}? This cannot be undone.`)) return;
+    const prevArr = emp.advances || [];
+    setEmp((prev) => ({ ...prev, advances: (prev.advances || []).filter((_, i) => i !== index) }));   // instant
+    try { await deleteAdvanceAt(code, index, sig); }
+    catch (e) {
+      setEmp((prev) => ({ ...prev, advances: prevArr }));   // revert
+      const m = String(e?.message || '');
+      if (m.startsWith('LOCKED:')) alert(`That month (${m.slice(7)}) is already paid & locked — this advance can't be deleted.`);
+      else if (m.startsWith('LOCKEDLATER:')) alert(`A later month (${m.slice(11)}) is already paid & locked — this advance is already counted and can't be deleted.`);
+      else if (m === 'CHANGED') alert('The advances list changed since you opened it — close and reopen this worker, then try again.');
+      else if (m === 'VERIFY') alert('Delete did not confirm — reopen this worker to check.');
+      else alert('Could not delete — try again.');
+    }
+  }
 
   if (!emp) return <p className="text-gray-500">Loading…</p>;
   const { att, md, pay, advs = [], portalOt = 0, appOt = 0, otSource = 'portal', otCredit = 0, detail: otDetail = [], presentAdjust = 0, satAdjust = 0, lateFixed = 0, rawLate = 0 } = payFor(emp, attMap, mk, ctx, graceDelta, punchDoc);
@@ -234,9 +267,15 @@ export default function Person({ code, mk, user, onBack }) {
         </div>
       )}
 
-      <Ledger title="💸 Advances" withMode items={(emp.advances || []).map((a) => ({ d: a.date, t: `${a.mode}${a.remark ? ' · ' + a.remark : ''}${a.paidBy ? ' · by ' + String(a.paidBy).split('@')[0] : ''}`, v: rupee(a.amount) }))}
+      <Ledger title="💸 Advances" withMode
+        items={(emp.advances || []).map((a, idx) => ({
+          d: a.date, t: `${a.mode}${a.remark ? ' · ' + a.remark : ''}${a.paidBy ? ' · by ' + String(a.paidBy).split('@')[0] : ''}`,
+          v: rupee(a.amount), idx, canDel: !monthSealed(a.date),
+          sig: { date: a.date, amount: a.amount, mode: a.mode, id: a.id },
+        }))}
         submit="Add advance" busy={busy || locked} defDate={today}
-        onAdd={(f) => act(() => addAdvance(code, { date: f.date, mode: f.mode, amount: Number(f.amount), remark: f.remark || '', paidBy: user.email }))} />
+        onAdd={(f) => addAdvanceFast(f)}
+        onDelete={(x) => delAdvance(x.idx, x.sig)} />
 
       <Ledger title="📈 Increments" items={(emp.increments || []).map((i) => ({ d: i.effective, t: i.remark || '', v: '+' + rupee(i.amount), green: true }))}
         submit="Add increment (from that date onward)" busy={busy || locked} defDate={mk + '-01'}
@@ -545,14 +584,24 @@ function DaysOtCard({ detail, overrides = {}, otCredits = {}, presentAdjust = 0,
 }
 
 // log + entry form: every advance/increment goes in with date, amount, (mode) and remark
-function Ledger({ title, items, withMode, submit, onAdd, busy, defDate }) {
+function Ledger({ title, items, withMode, submit, onAdd, busy, defDate, onDelete }) {
   const [f, setF] = useState({ amount: '', mode: 'cash', remark: '', date: defDate });
   return (
     <div className="bg-white rounded-xl shadow p-3">
       <div className="text-sm font-semibold text-gray-700 mb-1">{title} ({items.length})</div>
       <ul className="text-xs divide-y divide-gray-100 max-h-40 overflow-auto">
         {items.length === 0 && <li className="text-gray-400 py-1">None yet</li>}
-        {[...items].reverse().map((x, i) => <li key={i} className="py-1 flex justify-between"><span>{x.d}{x.t ? ' · ' + x.t : ''}</span><b className={x.green ? 'text-green-700' : ''}>{x.v}</b></li>)}
+        {[...items].reverse().map((x, i) => (
+          <li key={i} className="py-1 flex justify-between items-center gap-2">
+            <span className="min-w-0 truncate">{x.d}{x.t ? ' · ' + x.t : ''}</span>
+            <span className="flex items-center gap-2 shrink-0">
+              <b className={x.green ? 'text-green-700' : ''}>{x.v}</b>
+              {onDelete && (x.canDel
+                ? <button onClick={() => onDelete(x)} className="text-red-500 text-base leading-none px-1.5 py-0.5 rounded active:bg-red-50" title="Delete this entry">✕</button>
+                : <span className="text-gray-300 text-xs px-1" title="This month is paid & locked — can't delete">🔒</span>)}
+            </span>
+          </li>
+        ))}
       </ul>
       <div className="grid grid-cols-2 gap-1.5 mt-2">
         <input className="border rounded px-2 py-1.5 text-sm" type="date" value={f.date} onChange={(e) => setF({ ...f, date: e.target.value })} />

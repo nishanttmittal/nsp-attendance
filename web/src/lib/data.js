@@ -558,7 +558,39 @@ export async function saveLatePenalty(code, month, key, fraction, by) {
   await saveMonth(code, month, { latePenalties: pen, latePenaltyDays: total });
 }
 export async function addAdvance(code, adv) {
-  const e = await loadEmployee(code); await saveEmployee(code, { advances: [...(e.advances || []), adv] });
+  // Mint a unique id on EVERY add (load-bearing): with arrayUnion, two deep-equal advances (₹500 cash,
+  // same day, no remark) would collapse into one = a silently lost payment. A unique id keeps them distinct.
+  const a = { ...adv, id: adv.id || ('adv-' + (adv.date || '') + '-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7)) };
+  if (isConfigured && db) {
+    const { updateDoc, arrayUnion } = await import('firebase/firestore');
+    await updateDoc(doc(db, 'att_salary', code), { advances: arrayUnion(a) });   // atomic append — no read-modify-write
+  } else {
+    const e = await loadEmployee(code); await saveEmployee(code, { advances: [...(e.advances || []), a] });
+  }
+  return a;
+}
+// Delete ONE advance by its array POSITION. advances[] mixes id'd and legacy id-less entries and can
+// hold deep-equal duplicates, so neither id-matching nor arrayRemove(value) is safe. `sig` = the row the
+// owner saw {date, amount, mode, id}; we re-read, confirm advances[index] still matches it, remove that
+// one element, write the filtered array back, and verify the count dropped by exactly one. Blocked if the
+// advance's own month — or any LATER month — is already locked/paid (its amount is baked into their carry).
+export async function deleteAdvanceAt(code, index, sig) {
+  const e = await loadEmployee(code);
+  const arr = e.advances || [];
+  const a = arr[index];
+  if (!a) throw new Error('CHANGED');
+  if (String(a.date || '') !== String(sig.date || '') || Number(a.amount || 0) !== Number(sig.amount || 0)
+    || String(a.mode || '') !== String(sig.mode || '') || String(a.id || '') !== String(sig.id || '')) throw new Error('CHANGED');
+  const mk = String(a.date || '').slice(0, 7);
+  const md = (e.months || {})[mk] || {};
+  if (md.locked || md.payment) throw new Error(`LOCKED:${mk}`);
+  const later = Object.entries(e.months || {}).find(([m, d]) => m > mk && d && (d.locked || d.payment));
+  if (later) throw new Error(`LOCKEDLATER:${later[0]}`);
+  const next = arr.filter((_, i) => i !== index);
+  await saveEmployee(code, { advances: next });
+  const chk = await loadEmployee(code);
+  if ((chk.advances || []).length !== arr.length - 1) throw new Error('VERIFY');
+  return { deleted: a };
 }
 export async function addIncrement(code, inc) {
   const e = await loadEmployee(code); await saveEmployee(code, { increments: [...(e.increments || []), inc] });
