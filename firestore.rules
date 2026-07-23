@@ -272,6 +272,20 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
     match /costing_quotes/{id}        { allow read: if costStaff(); allow write: if costOwner(); }
     match /costing_quote_costs/{id}   { allow read, write: if costOwner(); }
 
+    // ---- UNICO Hisab (single-owner money register: daily expenses + supplier payables) ----
+    // Financial data (worker advances, supplier balances) — restricted to a NON-anon owner
+    // login (bootstrap owner, or an active apps/hisab/users allowlist email). No anon reads.
+    function hiPath()  { return /databases/$(database)/documents/apps/hisab/users/$(tEmail()); }
+    function hiUser()  { return nonAnon() && (bootstrapOwner() || (tEmail() != '' && exists(hiPath()) && get(hiPath()).data.active == true)); }
+    match /apps/hisab/users/{id}           { allow read: if nonAnon(); allow write: if bootstrapOwner(); }
+    match /apps/hisab/{collection}/{docId} { allow read, write: if hiUser() && collection != 'users'; }
+    match /apps/hisab                      { allow read, write: if hiUser(); }
+
+    // Hisab pushes a worker advance into this outbox; the owner ACCEPTS it in the
+    // destination app (Welder ledger / Salary advances). Owner-only both ways —
+    // single owner records in Hisab and accepts in welder/salary.
+    match /hisab_advance_outbox/{id}       { allow read, write: if nonAnon() && bootstrapOwner(); }
+
     // Lock everything else.
     match /{document=**} { allow read, write: if false; }
   }
