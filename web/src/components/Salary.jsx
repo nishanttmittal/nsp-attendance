@@ -39,8 +39,10 @@ function OwnerSalary({ user }) {
     setEmps(list); setAttMap(am); setPunches(pu);
   }
   useEffect(() => { reload(); }, [showRemoved]);
-  // instant reflection after an owner records an advance (addAdvanceDirect already wrote it)
+  // instant reflection when an owner records an advance (optimistic — the write persists in background)
   const onAdvanceSaved = (code, adv) => setEmps((prev) => (prev || []).map((e) => e.code === code ? { ...e, advances: [...(e.advances || []), adv] } : e));
+  // undo the optimistic add if the background write is rejected (e.g. the month turned out to be locked)
+  const onAdvanceRevert = (code, advId) => setEmps((prev) => (prev || []).map((e) => e.code === code ? { ...e, advances: (e.advances || []).filter((a) => a.id !== advId) } : e));
 
   if (openCode) return <Person code={openCode} mk={mk} user={user} onBack={() => { setOpenCode(''); reload(); }} />;
   if (emps === null) return <p className="text-gray-500">Loading…</p>;
@@ -218,6 +220,7 @@ function OwnerSalary({ user }) {
             onName={() => setOpenCode(r.emp.code)}
             onPay={(mode) => payNow(r, mode)}
             onAdvanceSaved={onAdvanceSaved}
+            onAdvanceRevert={onAdvanceRevert}
             onUndo={() => undoPay(r)} />
         ))}
       </div>
@@ -309,7 +312,7 @@ function FastPaySheet({ payC, busy, onChange, onCancel, onConfirm }) {
   );
 }
 
-function OwnerRow({ r, mk, busy, justPaidMode, user, onName, onPay, onUndo, onAdvanceSaved }) {
+function OwnerRow({ r, mk, busy, justPaidMode, user, onName, onPay, onUndo, onAdvanceSaved, onAdvanceRevert }) {
   const { emp, md, pay } = r;
   const [showDays, setShowDays] = useState(false);
   // 💸 inline advance box (null = closed). Owner writes the advance DIRECTLY (addAdvanceDirect) so
@@ -318,21 +321,27 @@ function OwnerRow({ r, mk, busy, justPaidMode, user, onName, onPay, onUndo, onAd
   const [adv, setAdv] = useState(null);   // { amount, date, mode, st }
   async function saveAdv() {
     if (!Number(adv.amount) || Number(adv.amount) <= 0 || !adv.date) { setAdv({ ...adv, st: 'Fill amount and date.' }); return; }
-    setAdv({ ...adv, st: 'saving' });
+    // Client-side guard first (using the worker in memory) so the common case never needs a revert:
+    // block a back-dated advance into a month that (or a later month) is already paid & locked.
+    const advMk = String(adv.date).slice(0, 7);
+    const months = emp.months || {};
+    const sealed = months[advMk]?.locked || months[advMk]?.payment || Object.keys(months).some((m) => m > advMk && (months[m]?.locked || months[m]?.payment));
+    if (sealed) { setAdv({ ...adv, st: 'That month is already paid & locked — advance not allowed.' }); return; }
     // Mint the id HERE so the direct write and the network-blip fallback share ONE id — a write that
     // lands but times out is then deduped by the worker on retry (never records the advance twice).
     const advance = { id: 'adv-' + adv.date + '-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7), date: adv.date, mode: adv.mode, amount: Number(adv.amount), remark: '', paidBy: user.email };
-    try {
-      const saved = await addAdvanceDirect(emp.code, advance, user.email);
-      onAdvanceSaved?.(emp.code, saved);   // update parent state → instant reflection
-      setAdv({ amount: '', date: advToday, mode: adv.mode, st: 'done' });
-    } catch (e) {
-      const m = String(e?.message || '');
-      if (m.startsWith('LOCKED:')) { setAdv({ ...adv, st: `Salary for ${m.slice(7)} is already paid & locked — advance not allowed.` }); return; }
-      // network blip → never lose it: fall back to the offline-safe queue (reflects in a few min)
-      try { await queueAdvance(emp.code, advance, user.email); setAdv({ amount: '', date: advToday, mode: adv.mode, st: 'done' }); }
-      catch { setAdv({ ...adv, st: 'Could not save — try again.' }); }
-    }
+    // OPTIMISTIC: reflect INSTANTLY, then persist in the background — the owner never waits on the network.
+    onAdvanceSaved?.(emp.code, advance);
+    setAdv({ amount: '', date: advToday, mode: adv.mode, st: 'done' });
+    addAdvanceDirect(emp.code, advance, user.email).catch((e) => {
+      if (String(e?.message || '').startsWith('LOCKED:')) {
+        onAdvanceRevert?.(emp.code, advance.id);   // undo the optimistic add — it was NOT saved
+        setAdv((a) => ({ ...(a || { amount: '', date: advToday, mode: 'cash' }), st: 'That month is already paid & locked — advance was NOT saved.' }));
+      } else {
+        // network blip → never lose it: fall back to the offline-safe queue (still lands; keep it shown)
+        queueAdvance(emp.code, advance, user.email).catch(() => {});
+      }
+    });
   }
   // this worker's advances already given ON OR BEFORE the box's date (newest first) + total
   const advDate = adv?.date || advToday;
