@@ -74,7 +74,7 @@
   "txtEalry4": "00:30",
   "cboEarlyded4": "None",
   "chkroundclock": "false",
-  "chkLateactive": "true",
+  "chkLateactive": "false",
   "Cbonooflate": "4",
   "DropDownList1": "0"
  },
@@ -105,7 +105,7 @@
   "txtEalry4": "00:30",
   "cboEarlyded4": "None",
   "chkroundclock": "true",
-  "chkLateactive": "true",
+  "chkLateactive": "false",
   "Cbonooflate": "4",
   "DropDownList1": "0%"
  },
@@ -136,7 +136,7 @@
   "txtEalry4": "00:30",
   "cboEarlyded4": "None",
   "chkroundclock": "true",
-  "chkLateactive": "true",
+  "chkLateactive": "false",
   "Cbonooflate": "4",
   "DropDownList1": "0"
  },
@@ -167,7 +167,7 @@
   "txtEalry4": "00:30",
   "cboEarlyded4": "None",
   "chkroundclock": "true",
-  "chkLateactive": "true",
+  "chkLateactive": "false",
   "Cbonooflate": "4",
   "DropDownList1": "0"
  }
