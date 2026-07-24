@@ -31,7 +31,27 @@ async function launch() {
   return chromium.launch({ headless: true });
 }
 
+// The portal's account-renewal nag (<div id="accexp" class="modal fade show">, appeared
+// ~2026-07-22) covers EVERY page and intercepts all clicks — it silently broke every portal
+// job for 3 days (att_attendance froze at 21 Jul, salaries stopped accruing on screen).
+// Remove exactly THIS modal (never other dialogs) as soon as it appears, and keep removing
+// it after ASP.NET postbacks re-insert it. Registered as an init script so every navigation
+// of the page is covered, whichever job is running.
+function zapRenewalModal() {
+  const zap = () => {
+    const m = document.getElementById('accexp');
+    if (!m) return;
+    m.remove();
+    document.querySelectorAll('.modal-backdrop').forEach(e => e.remove());
+    if (document.body) { document.body.classList.remove('modal-open'); document.body.style.overflow = ''; }
+  };
+  zap();
+  setInterval(zap, 400);
+  document.addEventListener('DOMContentLoaded', zap);
+}
+
 async function login(page, s = loadSecrets()) {
+  await page.addInitScript(zapRenewalModal);   // renewal-nag killer rides along on every page load
   // The vendor flip-flops between the OLD portal (Default.aspx + a[href="#corporate"] →
   // Welcome.aspx) and the V26 portal (ErpLogin.aspx + a "Corporate ID" nav-tab → Home.aspx).
   // Both use the same TextBox1/2/3 + Button1. Detect whichever is live so we survive the flips.
