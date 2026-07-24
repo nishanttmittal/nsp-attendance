@@ -55,10 +55,15 @@ function computePay({ emp, att, daysInMonth, elapsedDays, fullMonth, advances, a
   // (from the daily weekly-off audit) reduces paid days but NOT OT.
   const unpaidSat = emp.type === 'daily' ? 0 : Number(att.unpaidWorkedSat || 0);
   // Daily-wager pay = wage × equivalent-days (owner rule 2026-07-22): machine daily = actual working
-  // hours ÷ standard-day hours (11) → pay scales by the hour at 1×; workHrs already excludes lunch and
-  // includes OT hours (so netOtHrs=0 below). appOnly = Σ min(hrs,11)/11; override presets equivalentDays.
+  // hours ÷ standard-day hours (11) → pay scales by the hour at 1×; workHrs includes OT hours
+  // (so netOtHrs=0 below). appOnly = Σ min(hrs,11)/11; override presets equivalentDays.
+  // Portal "Total Work" is RAW first-in→last-out — it never deducts the LOD 13:00–13:30 lunch
+  // (verified 2026-07-24). Owner rule: ₹700 = 11 WORKING hours, lunch unpaid → deduct 30 min per
+  // present day here. KEEP IN SYNC with web/src/lib/payroll.js.
   const dailyStdHrs = Number(emp.stdHours) || 11;
-  const dailyEquivDays = att.equivalentDays != null ? att.equivalentDays : (att.workHrs || 0) / dailyStdHrs;
+  const lunchDeductHrs = 0.5 * (att.presentDays || 0);
+  const dailyEquivDays = att.equivalentDays != null ? att.equivalentDays
+    : Math.max(0, (att.workHrs || 0) - lunchDeductHrs) / dailyStdHrs;
   const base = emp.type === 'daily'
     ? rate * dailyEquivDays
     : perDay * Math.max(0, effElapsed - att.absentDays - unpaidSat);

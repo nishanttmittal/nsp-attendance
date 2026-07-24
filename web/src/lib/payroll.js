@@ -51,7 +51,13 @@ export function computePay({ emp, att, daysInMonth, elapsedDays, fullMonth, adva
   //  • app-only daily: Σ min(hours,11)/11 (each manual day capped at 1) from dailyAtt.
   //  • owner override (md.override.days) presets equivalentDays → pay exactly N full days.
   const dailyStdHrs = Number(emp.stdHours) || DAILY_WAGER_HOURS;
-  const dailyEquivDays = att.equivalentDays != null ? att.equivalentDays : (att.workHrs || 0) / dailyStdHrs;
+  // Portal "Total Work" is RAW first-in→last-out — it never deducts the LOD 13:00–13:30 lunch
+  // (verified 2026-07-24: break config + "With Lunch" calc + lunch checkboxes all had no effect).
+  // Owner rule: ₹700 = 11 WORKING hours, lunch unpaid → deduct 30 min per present day here.
+  // Override/appOnly paths supply equivalentDays and are untouched.
+  const lunchDeductHrs = 0.5 * (att.presentDays || 0);
+  const dailyEquivDays = att.equivalentDays != null ? att.equivalentDays
+    : Math.max(0, (att.workHrs || 0) - lunchDeductHrs) / dailyStdHrs;
   const base = emp.type === 'daily'
     ? rate * dailyEquivDays
     : att.noRecord ? 0                                    // no attendance this month (joined later) -> pay 0, never a full month
