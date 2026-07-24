@@ -81,7 +81,7 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
     match /apps/platingjobwork/logs/{id}     { allow read, write: if pUser(); }
     match /apps/platingjobwork/meta/{id}     { allow read, write: if pUser(); }
     match /apps/platingjobwork/incoming/{id} { allow read, write: if pUser(); }
-    match /apps/platingjobwork/users/{id}    { allow read: if nonAnon(); allow write: if pOwner(); }
+    match /apps/platingjobwork/users/{id}    { allow read: if pUser(); allow write: if pOwner(); }
 
     // ---- fitting role helpers ----
     function fPath() { return /databases/$(database)/documents/apps/fitting/users/$(tEmail()); }
@@ -178,6 +178,10 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
     match /laser_job_catalog/{id} { allow read: if laserUser(); allow write: if laserUser(); }
     // Allowlist: any signed-in user may READ (to resolve their own access at login); owner writes.
     match /apps/laser/users/{id} { allow read: if nonAnon(); allow write: if bootstrapOwner(); }
+    // Quote workspace (products/customers/quotes) — owner-only: quotes carry cost basis + margins.
+    match /apps/laser/products/{id}  { allow read, write: if laserOwner(); }
+    match /apps/laser/customers/{id} { allow read, write: if laserOwner(); }
+    match /apps/laser/quotes/{id}    { allow read, write: if laserOwner(); }
 
     // ---- Inbound leads (IndiaMART + WhatsApp) — read-only command-center feed.
     // Written ONLY by the lead pollers (Admin SDK). Buyer phone numbers = PII, so
@@ -271,6 +275,12 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
     match /costing_cut_rates/{id}     { allow read: if costStaff(); allow write: if false; }
     match /costing_quotes/{id}        { allow read: if costStaff(); allow write: if costOwner(); }
     match /costing_quote_costs/{id}   { allow read, write: if costOwner(); }
+    // Table costing app (Phase 1, 2026-07-24): immutable rate sets seeded by admin SDK only;
+    // table quotes staff-readable price-only doc + owner-only full cost snapshot (two-vault).
+    match /costing_table_ratesets/{id}    { allow read: if costOwner(); allow create: if costOwner(); allow update, delete: if false; }
+    match /costing_table_boms/{id}        { allow read: if costOwner(); allow write: if false; }
+    match /costing_table_quotes/{id}      { allow read: if costStaff(); allow create: if costOwner(); allow update, delete: if false; }
+    match /costing_table_quote_costs/{id} { allow read: if costOwner(); allow create: if costOwner(); allow update, delete: if false; }
 
     // ---- UNICO Hisab (single-owner money register: daily expenses + supplier payables) ----
     // Financial data (worker advances, supplier balances) — restricted to a NON-anon owner
@@ -285,6 +295,15 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
     // destination app (Welder ledger / Salary advances). Owner-only both ways —
     // single owner records in Hisab and accepts in welder/salary.
     match /hisab_advance_outbox/{id}       { allow read, write: if nonAnon() && bootstrapOwner(); }
+
+    // Read-meter telemetry (usage_reads/{YYYY-MM-DD}): every app instance batches
+    // increments into totals.<app>. Write-only for any signed-in user (incl. anon
+    // workers) so ALL apps can report; shape-locked to counters, no client reads.
+    match /usage_reads/{day} {
+      allow read, delete: if false;
+      allow create, update: if signedIn()
+        && request.resource.data.keys().hasOnly(['totals', 'updatedAt']);
+    }
 
     // Lock everything else.
     match /{document=**} { allow read, write: if false; }
