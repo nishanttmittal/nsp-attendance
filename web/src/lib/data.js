@@ -254,9 +254,30 @@ export async function loadSelfPunchStaff() {
   return out;
 }
 
+// Rates must reach the payroll engines as NUMBERS. A rate stored as text concatenates with an
+// increment ("15000" + 1000 → "150001000") and pays an eight-figure salary. Owner 2026-07-28:
+// block bad data on save AND coerce in both engines. Number inputs legitimately hand back strings,
+// so a numeric string is NORMALISED (never rejected); only genuinely non-numeric input throws.
+function numericRate(v, field) {
+  if (v === null || v === undefined || v === '') return v;   // "not setting it" — leave alone
+  const n = Number(v);
+  if (!Number.isFinite(n)) throw new Error(`${field} must be a number — got "${v}"`);
+  return n;
+}
+function sanitizeEmployeePatch(patch) {
+  const p = { ...patch };
+  if ('amount' in p) p.amount = numericRate(p.amount, 'Salary amount');
+  if ('wage' in p) p.wage = numericRate(p.wage, 'Daily wage');
+  if (Array.isArray(p.increments)) {
+    p.increments = p.increments.map(inc => ({ ...inc, amount: numericRate(inc?.amount, 'Increment amount') }));
+  }
+  return p;
+}
+
 export async function saveEmployee(code, patch) {
-  if (isConfigured && db) { await setDoc(doc(db, 'att_salary', code), patch, { merge: true }); return; }
-  const store = loadSal(); store[code] = { ...(store[code] || {}), ...patch }; saveSal(store);
+  const clean = sanitizeEmployeePatch(patch);
+  if (isConfigured && db) { await setDoc(doc(db, 'att_salary', code), clean, { merge: true }); return; }
+  const store = loadSal(); store[code] = { ...(store[code] || {}), ...clean }; saveSal(store);
 }
 // Owner picks which OT to pay (portal vs app-computed) for a worker's month. Deep-merges into months[mk].
 export async function setOtSource(code, mk, source) {
