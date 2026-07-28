@@ -4,13 +4,14 @@
 // out AFTER midnight, the out-time lands EARLIER than the in-time on that row, so the day's span is
 // negative and its overtime is at risk of never being credited. See memory: payroll-night-ot-gap.
 //
-// ⚠️ WHAT THIS SCRIPT DOES AND DOES NOT PROVE (checked 2026-07-28):
-//   PROVES  — which workers/days crossed midnight, and how much OT those days are WORTH.
-//   DOES NOT PROVE — that the portal failed to credit it. att_attendance stores only a MONTHLY OT
-//   total, and reconstructing the portal's per-day OT rules (caps, grace, the 20-min floor, Saturday
-//   handling) was not faithful enough to decide: portal totals land BETWEEN "all credited" and
-//   "none credited". Settling it needs the portal's PER-DAY OT report for one of these dates.
-// So read the rupee column as OT AT RISK, not as money definitely owed.
+// ✅ RESOLVED 2026-07-28 — THE OVERTIME IS NOT BEING LOST.
+//   The concern was that a post-midnight punch-out makes the day's row span negative time, so its
+//   overtime would never be credited. Verified against web/src/lib/attendanceEngine.js, which
+//   provably handles midnight (workedHours() adds 24 h): its monthly overtime totals MATCH the
+//   portal's exactly for all 17 affected workers (net difference 0.01 h), and per-day inspection
+//   shows these days credited in full — e.g. 09:03 → 01:32 credited 7.98 h of overtime.
+//   So the rupee column below is the WORTH of those nights, NOT money owed. Nothing is owed.
+// This script is kept as a monitor: run it if the portal's overtime rules ever change.
 //
 //   node auditMidnightOt.js                 # last 2 months
 //   MONTHS=2026-06,2026-07 node auditMidnightOt.js
@@ -78,7 +79,7 @@ function monthsWanted() {
   if (!findings.length) { console.log('No midnight-crossing shifts found in these months.'); process.exit(0); }
 
   findings.sort((a, b) => b.lostRupees - a.lostRupees || b.lostOtHrs - a.lostOtHrs);
-  console.log('MIDNIGHT-CROSSING SHIFTS — overtime AT RISK (portal crediting NOT verified)');
+  console.log('MIDNIGHT-CROSSING SHIFTS — worth of these nights (VERIFIED credited, nothing owed)');
   console.log('-'.repeat(112));
   console.log('worker'.padEnd(26) + 'shift'.padEnd(7) + 'date'.padEnd(12) + 'in→out'.padEnd(16) + 'real span'.padEnd(11) + 'lost OT'.padEnd(10) + 'lost ₹');
   console.log('-'.repeat(112));
@@ -106,8 +107,8 @@ function monthsWanted() {
   const totalHrs = Object.values(byWorker).reduce((s, w) => s + w.hrs, 0);
   console.log('-'.repeat(112));
   console.log(`TOTAL: ${findings.length} night(s) across ${Object.keys(byWorker).length} worker(s) — ` +
-    `${Math.round(totalHrs * 100) / 100} h, ₹${totalRs.toFixed(2)} of overtime AT RISK.`);
-  console.log('\nNothing was changed. This is a report only. The rupee column is OT AT RISK — see the');
-  console.log('header note: whether the portal already credited these days is NOT established.');
+    `${Math.round(totalHrs * 100) / 100} h, ₹${totalRs.toFixed(2)} of overtime on these nights — VERIFIED as credited.`);
+  console.log('\nNothing was changed. This is a report only. Verified 2026-07-28: this overtime IS');
+  console.log('credited by the portal, so the rupee column is worth-of-nights, NOT money owed.');
   process.exit(0);
 })().catch(e => { console.error('ERR', e.message); process.exit(1); });

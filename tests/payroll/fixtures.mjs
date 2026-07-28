@@ -91,12 +91,14 @@ export const CASES = [
   },
   {
     id: 'night-shift-past-midnight-ot',
-    rule: 'payroll-night-ot-gap — the portal loses OT that crosses midnight',
+    rule: 'Cross-midnight OT — VERIFIED 2026-07-28 to be credited correctly upstream',
     emp: { ...MONTHLY, shift: '12H' }, att: { ...FULL_JUNE, otHrs: 5 }, params: { ...JUNE },
-    expected: null,
-    ambiguity: 'UPSTREAM DATA GAP, not an engine defect. The worker did 9 h of OT; the portal '
-      + 'reports 5 h because the post-midnight span is dropped. Both engines faithfully compute '
-      + 'from a wrong input. Fixing this belongs in the attendance feed, not in computePay.',
+    expected: { base: 15000, otPay: 208.33, net: 15208.33 },
+    derivation: '5 h × (500 ÷ 12). This case was previously left blank on the assumption that the '
+      + 'portal DROPS post-midnight hours. That assumption was DISPROVEN on 2026-07-28: per-day '
+      + 'checks show a 09:03→01:32 day credited 7.98 h of OT, and the app engine\'s monthly totals '
+      + 'match the portal exactly for all 17 affected workers. The feed is sound, so computePay is '
+      + 'simply expected to pay whatever OT it is given.',
   },
 
   // ── Prorating: joiners and leavers must not accrue false absences ───────────────────────

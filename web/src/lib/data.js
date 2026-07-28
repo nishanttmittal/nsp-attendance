@@ -258,10 +258,22 @@ export async function loadSelfPunchStaff() {
 // increment ("15000" + 1000 → "150001000") and pays an eight-figure salary. Owner 2026-07-28:
 // block bad data on save AND coerce in both engines. Number inputs legitimately hand back strings,
 // so a numeric string is NORMALISED (never rejected); only genuinely non-numeric input throws.
+// Accept what an Indian user actually types — "15,000", "1,50,000", " 15000.50 " — but store only a
+// validated number. Commas are stripped, then the remainder must be a plain positive decimal.
+// A hard ceiling catches fat-finger entry (an extra zero on a ₹25,000 salary).
+const MAX_RATE = 1e7;   // ₹1 crore/month or ₹1 crore/day — far above any real rate here
 function numericRate(v, field) {
   if (v === null || v === undefined || v === '') return v;   // "not setting it" — leave alone
-  const n = Number(v);
-  if (!Number.isFinite(n)) throw new Error(`${field} must be a number — got "${v}"`);
+  if (typeof v === 'number') {
+    if (!Number.isFinite(v) || v < 0 || v > MAX_RATE) throw new Error(`${field} is out of range — got ${v}`);
+    return v;
+  }
+  const cleaned = String(v).trim().replace(/,/g, '');
+  if (!/^\d+(\.\d+)?$/.test(cleaned)) {
+    throw new Error(`${field} must be a positive number — got "${v}"`);
+  }
+  const n = Number(cleaned);
+  if (!Number.isFinite(n) || n > MAX_RATE) throw new Error(`${field} is out of range — got "${v}"`);
   return n;
 }
 function sanitizeEmployeePatch(patch) {
