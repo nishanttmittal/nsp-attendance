@@ -16,6 +16,10 @@ const PAGES = [
   { key: 'shift_10H',  url: 'https://onlinerealsoft.com/SiftDetails.aspx?RowId=3' },
   { key: 'shift_12H',  url: 'https://onlinerealsoft.com/SiftDetails.aspx?RowId=4' },
   { key: 'shift_wir',  url: 'https://onlinerealsoft.com/SiftDetails.aspx?RowId=5' },
+  // DSG (designer, 09:00–19:00) and LOD (loading, 09:00–20:30) were NEVER watched — a silent change
+  // to either raised no alert. RowIds confirmed from SiftDetailsList 2026-07-29. See portal-shift-table.
+  { key: 'shift_DSG',  url: 'https://onlinerealsoft.com/SiftDetails.aspx?RowId=6' },
+  { key: 'shift_LOD',  url: 'https://onlinerealsoft.com/SiftDetails.aspx?RowId=7' },
   { key: 'policy_GEN', url: 'https://onlinerealsoft.com/EmployeePolicy.aspx?RowId=2' },
   { key: 'policy_10H', url: 'https://onlinerealsoft.com/EmployeePolicy.aspx?RowId=3' },
   { key: 'policy_12H', url: 'https://onlinerealsoft.com/EmployeePolicy.aspx?RowId=4' },

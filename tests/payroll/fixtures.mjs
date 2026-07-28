@@ -74,6 +74,25 @@ export const CASES = [
       + 'which makes each overtime hour worth MORE than a 10 h divisor would.',
   },
 
+  {
+    id: 'ot-lod-shift',
+    rule: '#6 — LOD (loading) = 09:00–20:30 span 11.5 h MINUS the unpaid 30-min lunch → 11 h',
+    emp: { ...MONTHLY, shift: 'LOD' }, att: { ...FULL_JUNE, otHrs: 11 }, params: { ...JUNE },
+    expected: { base: 15000, otPay: 500, net: 15500 },
+    derivation: '11 h × (500 ÷ 11). LOD was MISSING from the shift table until 2026-07-28 and fell '
+      + 'back to the ÷8 default, which would have priced its overtime 37.5% too high. Harmless so '
+      + 'far only because every LOD worker is a daily wager (no separate OT) — this locks it shut.',
+  },
+  {
+    id: 'ot-unknown-shift-falls-back-to-8',
+    rule: 'Any shift NOT in the table falls back to 8 h — deliberate, but must stay visible',
+    emp: { ...MONTHLY, shift: 'NO-SUCH-SHIFT' }, att: { ...FULL_JUNE, otHrs: 8 }, params: { ...JUNE },
+    expected: { base: 15000, otPay: 500, net: 15500 },
+    derivation: '8 h × (500 ÷ 8). This documents the fallback rather than endorsing it: a real shift '
+      + 'missing from the table is silently paid at GEN rates. If this case ever surprises you, the '
+      + 'fix is to ADD the shift, not to change the fallback.',
+  },
+
   // ── Rule #7: late/early subtracted from OT, never from base, floored at 0 ───────────────
   {
     id: 'ot-minus-late-early',

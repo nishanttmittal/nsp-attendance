@@ -28,9 +28,9 @@ async function scanMissed(offset = 0) {
     const nameOf = c => (sal[c] && sal[c].name) || c;
 
     // short-hours: worked span (minus 30-min lunch) clearly below the shift's net hours
-    const SHIFT_HOURS = { GEN: 8, '10H': 10, '12H': 12, wir: 10 };
+    const SHIFT_HOURS = { GEN: 8, '10H': 10, '12H': 12, wir: 10, DSG: 9.5, LOD: 11 };
     // shift start (minutes from midnight) + 15-min grace — a morning IN after this = a late mark
-    const SHIFT_START = { GEN: 540, '10H': 540, '12H': 540, wir: 570 }; // 09:00 / 09:00 / 09:00 / 09:30
+    const SHIFT_START = { GEN: 540, '10H': 540, '12H': 540, wir: 570, DSG: 540, LOD: 540 }; // 09:00 / 09:00 / 09:00 / 09:30 / 09:00 / 09:00
     const GRACE = 15;
     const toMin = s => { const m = /^(\d{1,2}):(\d{2})/.exec(String(s).trim()); return m ? +m[1] * 60 + +m[2] : null; };
     // report date "15-05-2026" -> "2026-05-15" (same key format the daily late-capture uses, so they merge cleanly)

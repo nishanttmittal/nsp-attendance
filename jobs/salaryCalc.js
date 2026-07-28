@@ -21,7 +21,7 @@ const round = n => Math.round(n * 100) / 100;
 // Net work hours per shift (rulebook §3) — used to derive the normal hourly rate for OT (paid 1×).
 // DSG (designer) = 09:00–19:00 MINUS the 13:00–13:30 lunch, which is NOT paid → 9.5 working hours
 // (owner 2026-07-28, corrected same day). KEEP IN SYNC with web/src/lib/payroll.js.
-const SHIFT_HOURS = { GEN: 8, '10H': 10, '12H': 12, wir: 10, DSG: 9.5 };
+const SHIFT_HOURS = { GEN: 8, '10H': 10, '12H': 12, wir: 10, DSG: 9.5, LOD: 11 };
 
 // Effective pay on `toDate` = base + sum of increment deltas effective on/before that date.
 // Each increment is an ADDED amount (e.g. +1000), recorded with effective date + remark.

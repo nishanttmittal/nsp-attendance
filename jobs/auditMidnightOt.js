@@ -19,7 +19,7 @@
 // Reads att_punches (one doc per employee) + att_salary for names and rates. WRITES NOTHING.
 const { db } = require('./lib/firestore');
 
-const SHIFT_HOURS = { GEN: 8, '10H': 10, '12H': 12, wir: 10, DSG: 9.5 };  // DSG excludes the unpaid lunch
+const SHIFT_HOURS = { GEN: 8, '10H': 10, '12H': 12, wir: 10, DSG: 9.5, LOD: 11 };  // DSG excludes the unpaid lunch
 const mins = t => { const m = /^(\d{1,2}):(\d{2})/.exec(String(t || '')); return m ? (+m[1]) * 60 + (+m[2]) : null; };
 const hhmm = m => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
 

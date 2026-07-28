@@ -47,6 +47,30 @@
   "cboFWOff": "Saturday",
   "DropDownList1": "1 One In & Last Out"
  },
+ "shift_DSG": {
+  "txtsftstarttime": "09:00",
+  "txtsiftendtime": "19:00",
+  "txtsiftduration": "10:00",
+  "cboisnightshift": "Yes",
+  "txtchekmin": "00:02",
+  "txtmaxearly": "00:30",
+  "txtmaxrate": "08:00",
+  "chk2": "None",
+  "cboFWOff": "Saturday",
+  "DropDownList1": "1 One In & Last Out"
+ },
+ "shift_LOD": {
+  "txtsftstarttime": "09:00",
+  "txtsiftendtime": "20:30",
+  "txtsiftduration": "11:30",
+  "cboisnightshift": "Yes",
+  "txtchekmin": "00:02",
+  "txtmaxearly": "00:30",
+  "txtmaxrate": "11:00",
+  "chk2": "None",
+  "cboFWOff": "None",
+  "DropDownList1": "1 One In & Last Out"
+ },
  "policy_GEN": {
   "cboRequiredpunchinday": "Multipunch",
   "cbosinglepunchonly": "Fix Time Out",
