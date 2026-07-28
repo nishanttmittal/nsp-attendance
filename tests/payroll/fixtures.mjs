@@ -67,10 +67,11 @@ export const CASES = [
   },
   {
     id: 'ot-dsg-shift',
-    rule: '#6 — DSG (designer) = 09:00–19:00, lunch 13:00–13:30 INSIDE the shift → 10 h (owner 2026-07-28)',
+    rule: '#6 — DSG (designer) = 09:00–19:00 MINUS the unpaid 13:00–13:30 lunch → 9.5 h (owner 2026-07-28)',
     emp: { ...MONTHLY, shift: 'DSG' }, att: { ...FULL_JUNE, otHrs: 10 }, params: { ...JUNE },
-    expected: { base: 15000, otPay: 500, net: 15500 },
-    derivation: '10 h × (500 ÷ 10). Lunch is paid — it is not deducted from the shift length.',
+    expected: { base: 15000, otPay: 526.32, net: 15526.32 },
+    derivation: '10 h × (500 ÷ 9.5). Lunch is EXCLUDED from the shift, so the divisor is 9.5 — '
+      + 'which makes each overtime hour worth MORE than a 10 h divisor would.',
   },
 
   // ── Rule #7: late/early subtracted from OT, never from base, floored at 0 ───────────────
