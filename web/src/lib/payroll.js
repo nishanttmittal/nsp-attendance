@@ -52,7 +52,7 @@ export function computePay({ emp, att, daysInMonth, elapsedDays, fullMonth, adva
   //    overtime hours, so there is NO separate OT line (netOtHrs forced to 0 below — see the note).
   //  • app-only daily: Σ min(hours,11)/11 (each manual day capped at 1) from dailyAtt.
   //  • owner override (md.override.days) presets equivalentDays → pay exactly N full days.
-  const dailyStdHrs = Number(emp.stdHours) || DAILY_WAGER_HOURS;
+  const dailyStdHrs = Number(emp.stdHours) || Number(emp.standardHours) || DAILY_WAGER_HOURS;
   // Portal "Total Work" is RAW first-in→last-out — it never deducts the LOD 13:00–13:30 lunch
   // (verified 2026-07-24: break config + "With Lunch" calc + lunch checkboxes all had no effect).
   // Owner rule: ₹700 = 11 WORKING hours, lunch unpaid → deduct 30 min per present day here.
@@ -68,8 +68,17 @@ export function computePay({ emp, att, daysInMonth, elapsedDays, fullMonth, adva
   // Net OT = raw OT − late − early, floored at 0 (lateness is also handled by the penalty tab).
   // Daily-wagers get NO separate OT: their overtime hours are ALREADY inside workHrs and paid at 1×
   // by the hours-based base above, so an OT line would double-pay. (appOnly manual workers: no OT.)
-  const netOtHrs = (emp.appOnly || emp.type === 'daily') ? 0 : Math.max(0, (att.otHrs || 0) - (att.lateHrs || 0) - (att.earlyHrs || 0));
-  const hourlyRate = perDay / (SHIFT_HOURS[emp.shift] || 8);
+  // App-only workers have no biometric feed, so portal OT must never leak to them — EXCEPT when the
+  // owner has typed an OT figure himself (att.otOverride, set by paycalc from md.override.ot). That
+  // field exists precisely for manual staff like the guard and the driver; before 2026-07-29 the
+  // engine silently discarded it and paid ₹0. Daily-wagers stay at 0 regardless: their overtime is
+  // already inside workHrs and paid at 1× by the hours-based base, so an OT line would double-pay.
+  const netOtHrs = emp.type === 'daily' ? 0
+    : (emp.appOnly && !att.otOverride) ? 0
+    : Math.max(0, (att.otHrs || 0) - (att.lateHrs || 0) - (att.earlyHrs || 0));
+  // Divisor: the named shift, else this worker's own recorded standard hours (manual staff who are not
+  // on any portal shift — e.g. guard 09:00–21:00 = 12 h, driver 09:30–20:30 = 11 h), else GEN's 8.
+  const hourlyRate = perDay / (SHIFT_HOURS[emp.shift] || Number(emp.standardHours) || Number(emp.stdHours) || 8);
   const otPay = netOtHrs * hourlyRate;
 
   // full-month, zero-absence bonus (1 day's pay) — NOT for mid-month joiners/leavers (prorated window).

@@ -73,7 +73,7 @@ function computePay({ emp, att, daysInMonth, elapsedDays, fullMonth, advances = 
   // Portal "Total Work" is RAW first-in→last-out — it never deducts the LOD 13:00–13:30 lunch
   // (verified 2026-07-24). Owner rule: ₹700 = 11 WORKING hours, lunch unpaid → deduct 30 min per
   // present day here. KEEP IN SYNC with web/src/lib/payroll.js.
-  const dailyStdHrs = Number(emp.stdHours) || 11;
+  const dailyStdHrs = Number(emp.stdHours) || Number(emp.standardHours) || 11;
   const lunchDeductHrs = 0.5 * (att.presentDays || 0);
   const dailyEquivDays = att.equivalentDays != null ? att.equivalentDays
     : Math.max(0, (att.workHrs || 0) - lunchDeductHrs) / dailyStdHrs;
@@ -85,11 +85,15 @@ function computePay({ emp, att, daysInMonth, elapsedDays, fullMonth, advances = 
     : perDay * Math.max(0, effElapsed - absentForBase - unpaidSat);
   // net OT = Realtime OT (capped Working−Shift) minus late/early shortfall; can go negative.
   // Daily-wagers (owner rule 2026-07-22): FLAT daily wage only — OT hours never add pay.
-  // appOnly (manually-entered) workers have no biometric feed, so there is no portal OT to pay
-  // (ported from web 2026-07-28).
-  const netOtHrs = (emp.appOnly || emp.type === 'daily') ? 0 : Math.max(0, (att.otHrs || 0) - (att.lateHrs || 0) - (att.earlyHrs || 0)); // floored at 0
+  // App-only workers have no biometric feed, so portal OT must never leak to them — EXCEPT when the
+  // owner typed an OT figure himself (att.otOverride from md.override.ot), the field that exists for
+  // manual staff like the guard and driver. Daily-wagers stay 0: their OT is already inside workHrs.
+  const netOtHrs = emp.type === 'daily' ? 0
+    : (emp.appOnly && !att.otOverride) ? 0
+    : Math.max(0, (att.otHrs || 0) - (att.lateHrs || 0) - (att.earlyHrs || 0)); // floored at 0
   // OT paid at NORMAL 1× rate = perDay / shift-hours. (Saturday-worked hours flow in via Realtime's OT.)
-  const shiftHrs = SHIFT_HOURS[emp.shift] || 8;
+  // Falls back to the worker's own recorded standard hours when they are on no portal shift.
+  const shiftHrs = SHIFT_HOURS[emp.shift] || Number(emp.standardHours) || Number(emp.stdHours) || 8;
   const hourlyRate = perDay / shiftHrs;
   const otPay = netOtHrs * hourlyRate;
   // perfect attendance bonus (complete month, zero absence; lateness does not disqualify)

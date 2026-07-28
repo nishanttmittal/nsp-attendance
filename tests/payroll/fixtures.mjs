@@ -193,6 +193,17 @@ export const CASES = [
     derivation: 'identical to the previous case — 20 OT hours must change nothing',
   },
   {
+    id: 'app-only-worker-owner-typed-ot-IS-paid',
+    rule: 'Owner 2026-07-29 — manual staff (guard/driver) CAN earn OT when the owner types it himself',
+    emp: { type: 'monthly', amount: 17000, appOnly: true, standardHours: 12 },   // guard, 09:00–21:00
+    att: { presentDays: 30, absentDays: 0, otHrs: 10, lateHrs: 0, earlyHrs: 0, workHrs: 0, otOverride: true },
+    params: { ...JUNE },
+    expected: { base: 17000, otPay: 472.22, net: 17472.22 },
+    derivation: '10 h × (17000 ÷ 30 ÷ 12). He is on NO portal shift, so the divisor falls back to his '
+      + 'own recorded standard hours (12), not GEN\'s 8. Before 2026-07-29 the engine discarded the '
+      + 'owner\'s typed OT entirely and paid ₹0 — the field existed but the value was thrown away.',
+  },
+  {
     id: 'app-only-worker-gets-no-portal-ot',
     rule: 'App-only (manually entered) workers have no biometric OT feed',
     emp: { ...MONTHLY, appOnly: true },

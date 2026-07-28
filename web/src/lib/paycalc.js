@@ -153,7 +153,9 @@ export function payFor(emp, attMap, mk, ctx, graceDelta = 0, punchDoc = null) {
       absentDays: elapsed - ovDays, noRecord: false };
   }
   if (hasOtOv) {
-    effAtt = { ...effAtt, otHrs: Number(ov.ot) || 0, lateHrs: 0, earlyHrs: 0 };   // owner's net OT is final
+    // otOverride tells computePay this OT is OWNER-TYPED, not portal data — so it is honoured even for
+    // app-only staff (guard/driver), who are otherwise blocked from OT because they have no punch feed.
+    effAtt = { ...effAtt, otHrs: Number(ov.ot) || 0, lateHrs: 0, earlyHrs: 0, otOverride: true };   // owner's net OT is final
   }
   const pay = computePay({
     emp, att: effAtt, ...ctx,
