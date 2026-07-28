@@ -31,6 +31,7 @@ function callNode(c) {
     advances: p.advancesThisMonth ? [{ amount: p.advancesThisMonth }] : [],
     advanceBalanceIn: p.advanceBalanceIn || 0,
     fines: p.fines || 0, loanInstallment: p.loanInstallment || 0, bonus: p.bonus || 0,
+    restoreSaturdayDays: p.restoreSaturdayDays || 0, graceDays: p.graceDays || 0,
     payPerfectBonus: !!p.payPerfectBonus,
     latePenaltyDays: p.latePenaltyDays || 0, weeklyOffDockDays: p.weeklyOffDockDays || 0,
     monthStart: p.monthStart, toDate: p.toDate,

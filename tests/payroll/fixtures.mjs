@@ -66,12 +66,11 @@ export const CASES = [
     derivation: '6 h × (500 ÷ 12)',
   },
   {
-    id: 'ot-unknown-shift-DSG',
-    rule: '#6 lists GEN/10H/12H/wir only — DSG is not in the rulebook',
+    id: 'ot-dsg-shift',
+    rule: '#6 — DSG (designer) = 09:00–19:00, lunch 13:00–13:30 INSIDE the shift → 10 h (owner 2026-07-28)',
     emp: { ...MONTHLY, shift: 'DSG' }, att: { ...FULL_JUNE, otHrs: 10 }, params: { ...JUNE },
-    expected: null,
-    ambiguity: 'DSG shift has no approved OT divisor. One implementation assumes 10 h, the other '
-      + 'falls back to 8 h. Owner must state the DSG shift length before either is called correct.',
+    expected: { base: 15000, otPay: 500, net: 15500 },
+    derivation: '10 h × (500 ÷ 10). Lunch is paid — it is not deducted from the shift length.',
   },
 
   // ── Rule #7: late/early subtracted from OT, never from base, floored at 0 ───────────────
@@ -200,13 +199,13 @@ export const CASES = [
   },
   {
     id: 'rate-stored-as-string',
-    rule: 'INPUT CONTRACT, not a payroll rule — can a rate ever reach the engine as a string?',
+    rule: 'Owner 2026-07-28 — a text rate must be coerced to a number, never concatenated',
     emp: { type: 'monthly', amount: '15000', shift: 'GEN', increments: [{ amount: 1000, effective: '2026-06-10' }] },
     att: { ...FULL_JUNE }, params: { ...JUNE },
-    expected: null,
-    ambiguity: 'If Firestore or a form can ever store the rate as text, one implementation '
-      + 'concatenates instead of adding and produces a catastrophic figure. Owner/engineering must '
-      + 'decide whether the contract is "always numeric" (then validate on write) or "coerce here".',
+    expected: { base: 16000, otPay: 0, net: 16000 },
+    derivation: 'Number("15000") + 1000 = 16000. Without coercion this concatenates to "150001000" '
+      + 'and pays ₹15,00,01,000. Owner chose belt-and-braces: reject non-numeric rates on save AND '
+      + 'coerce in both engines.',
   },
 
   // ── Advances: ONE account, full cut at settle, signed carry (owner 2026-07-13) ──────────
