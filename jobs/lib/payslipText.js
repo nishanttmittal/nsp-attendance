@@ -3,6 +3,7 @@
 // bot replies privately to the owner. Read-only on att_salary / att_attendance.
 const { db } = require('./firestore');
 const { computePay } = require('../salaryCalc');
+const { applyOverride } = require('./applyOverride');
 
 async function buildPayslipText(code) {
   const fdb = db();
@@ -28,6 +29,8 @@ async function buildPayslipText(code) {
   }
   const md = (emp.months && emp.months[mk]) || {};
   const adv = (emp.advances || []).filter(a => (a.date || '').startsWith(mk)).reduce((s, a) => s + Number(a.amount || 0), 0);
+  // Same owner override the app applies — see lib/applyOverride.js.
+  att = applyOverride(att, md, yest.getDate());
   const pay = computePay({
     emp, att, daysInMonth: last.getDate(), elapsedDays: yest.getDate(), fullMonth: false, monthStart: first, toDate: yest,
     advancesThisMonth: adv, advanceBalanceIn: Number(md.advanceBalanceIn || 0), advanceRecover: Number(md.advanceRecover || 0),

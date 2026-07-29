@@ -358,6 +358,10 @@ async function handle(type, p) {
     }
     const md = (emp.months && emp.months[mk]) || {};
     const adv = (emp.advances || []).filter(a => (a.date || '').startsWith(mk)).reduce((s, a) => s + Number(a.amount || 0), 0);
+    // Apply the owner's manual override (days / OT) exactly as the app does — without this the
+    // Telegram payslip reports different figures from the screen (Codex review 2026-07-30).
+    const { applyOverride } = require('./lib/applyOverride');
+    att = applyOverride(att, md, yest.getDate());
     const pay = computePay({
       emp, att, daysInMonth: last.getDate(), elapsedDays: yest.getDate(), fullMonth: false, monthStart: first, toDate: yest,
       advancesThisMonth: adv, advanceBalanceIn: Number(md.advanceBalanceIn || 0),
