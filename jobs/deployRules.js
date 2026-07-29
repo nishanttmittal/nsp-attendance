@@ -173,6 +173,14 @@ async function main() {
   } catch (e) {
     console.log('⚠️  could not read the live ruleset for comparison:', e.message);
   }
+  // REFUSE to publish blind (fix 2026-07-30, Codex review). Without the live ruleset there is no
+  // diff to review AND no rollback copy to fall back on — and with projects:test currently 403ing,
+  // both pre-publish protections would be absent at once. A dry run is still allowed.
+  if (!live && !DRY) {
+    throw new Error(
+      'REFUSING TO DEPLOY — could not read the LIVE ruleset, so there is no diff to review and no ' +
+      'rollback copy. Fix the read (or run with --dry) before publishing. Never publish blind.');
+  }
   const changed = live ? showDiff(live.content, content) : true;
 
   // 1. validate — creates NOTHING in the project
@@ -220,6 +228,21 @@ async function main() {
     data: { release: { name: `projects/${PROJECT}/releases/cloud.firestore`, rulesetName } },
   });
   console.log('PUBLISHED LIVE. cloud.firestore ->', rulesetName);
+  // Read back and PROVE the release actually points at what we just created (Codex review 2026-07-30):
+  // the PATCH returning 200 is not by itself evidence that the live rules changed.
+  try {
+    const after = await liveFirestoreRules(c);
+    if (after.rulesetName === rulesetName && after.content === content) {
+      console.log('✅ VERIFIED: live release now serves this exact ruleset.');
+    } else {
+      console.error('🚨 POST-DEPLOY MISMATCH — live release is', after.rulesetName, 'not', rulesetName);
+      console.error('   Roll back with the pre-deploy copy in jobs/rules_backup/.');
+      process.exitCode = 3;
+    }
+  } catch (e) {
+    console.error('⚠️  could not verify the deploy (read-back failed):', e.message);
+    process.exitCode = 3;
+  }
 }
 
 if (require.main === module) main().catch(e => { console.error('ERR', e.message); process.exit(1); });

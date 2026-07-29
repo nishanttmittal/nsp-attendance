@@ -268,7 +268,19 @@ function numericRate(v, field) {
     if (!Number.isFinite(v) || v < 0 || v > MAX_RATE) throw new Error(`${field} is out of range — got ${v}`);
     return v;
   }
-  const cleaned = String(v).trim().replace(/,/g, '');
+  // Validate the comma GROUPING before stripping (fix 2026-07-30, Codex review): plain
+  // replace(/,/g,'') accepted malformed input like "15,,000" as 15000. Accept Indian lakh grouping
+  // (1,50,000), Western grouping (150,000), or no grouping at all.
+  const raw = String(v).trim();
+  // Indian lakh grouping: final group MUST be 3 digits, earlier groups 2 (1,50,000 / 15,000).
+  // Western grouping: all groups 3 digits (150,000). Anything else is a typo, not a format —
+  // notably "15,00", which would otherwise silently become ₹1,500 instead of ₹15,000.
+  const INDIAN = /^\d{1,2}(,\d{2})*,\d{3}(\.\d+)?$/;
+  const WESTERN = /^\d{1,3}(,\d{3})+(\.\d+)?$/;
+  if (raw.includes(',') && !INDIAN.test(raw) && !WESTERN.test(raw)) {
+    throw new Error(`${field} has malformed digit grouping — got "${v}"`);
+  }
+  const cleaned = raw.replace(/,/g, '');
   if (!/^\d+(\.\d+)?$/.test(cleaned)) {
     throw new Error(`${field} must be a positive number — got "${v}"`);
   }
@@ -280,6 +292,13 @@ function sanitizeEmployeePatch(patch) {
   const p = { ...patch };
   if ('amount' in p) p.amount = numericRate(p.amount, 'Salary amount');
   if ('wage' in p) p.wage = numericRate(p.wage, 'Daily wage');
+  // standardHours now PRICES overtime for staff on no portal shift, so it needs the same guard.
+  // A stray 0 or 200 here would divide a day's pay by nonsense. (Codex review 2026-07-30.)
+  if ('standardHours' in p && p.standardHours !== null && p.standardHours !== undefined && p.standardHours !== '') {
+    const h = numericRate(p.standardHours, 'Standard hours');
+    if (!(h > 0 && h <= 24)) throw new Error(`Standard hours must be between 0 and 24 — got "${p.standardHours}"`);
+    p.standardHours = h;
+  }
   if (Array.isArray(p.increments)) {
     p.increments = p.increments.map(inc => ({ ...inc, amount: numericRate(inc?.amount, 'Increment amount') }));
   }
