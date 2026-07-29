@@ -19,7 +19,13 @@
 // Reads att_punches (one doc per employee) + att_salary for names and rates. WRITES NOTHING.
 const { db } = require('./lib/firestore');
 
-const SHIFT_HOURS = { GEN: 8, '10H': 10, '12H': 12, wir: 10, DSG: 9.5, LOD: 11 };  // DSG excludes the unpaid lunch
+// PORTAL SPANS, not payroll divisors (fix 2026-07-30, Codex review). The portal computes
+// OT = (last out − first in) − shift SPAN, and that span INCLUDES the unpaid 30-min lunch. Using the
+// payroll divisor here (GEN 8 instead of 8:30) overstated every non-12H night by 0.5 h.
+// Spans read live from SiftDetailsList 2026-07-29. See memory: portal-shift-table.
+const SHIFT_SPAN = { GEN: 8.5, '10H': 10.5, '12H': 12, wir: 10.5, DSG: 10, LOD: 11.5 };
+// Payroll divisors — used ONLY to price the hours, never to decide when OT starts.
+const SHIFT_HOURS = { GEN: 8, '10H': 10, '12H': 12, wir: 10, DSG: 9.5, LOD: 11 };
 const mins = t => { const m = /^(\d{1,2}):(\d{2})/.exec(String(t || '')); return m ? (+m[1]) * 60 + (+m[2]) : null; };
 const hhmm = m => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
 
@@ -57,9 +63,10 @@ function monthsWanted() {
         if (o >= i) continue;                       // normal same-day shift
         // Crossed midnight: real span = (24:00 − in) + out
         const realMins = (1440 - i) + o;
-        const shiftHrs = SHIFT_HOURS[emp.shift] || 8;
-        const realOtHrs = Math.max(0, realMins / 60 - shiftHrs);
-        // Worth of the day's OT if it were credited in full. Whether the portal already did is UNVERIFIED.
+        const spanHrs = SHIFT_SPAN[emp.shift] || 8.5;     // when OT starts (portal span, lunch included)
+        const shiftHrs = SHIFT_HOURS[emp.shift] || 8;     // what an OT hour is worth (paid hours)
+        const realOtHrs = Math.max(0, realMins / 60 - spanHrs);
+        // Worth of the day's OT. VERIFIED 2026-07-28 that the portal DOES credit it — nothing is owed.
         const lostOtHrs = realOtHrs;
         const rate = Number(emp.type === 'daily' ? emp.wage : emp.amount) || 0;
         const daysInMonth = new Date(+mk.slice(0, 4), +mk.slice(5, 7), 0).getDate();
