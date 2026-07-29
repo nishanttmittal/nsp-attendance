@@ -11,7 +11,17 @@ const { session, setField, downloadMonthly } = require('./lib/realtime');
 const { range } = require('./salaryData');
 const { db } = require('./lib/firestore');
 
-const QUALIFY = 3;                 // present working-days needed in a week to earn that Saturday (owner changed 4→3 on 2026-06-15)
+// ⚠️ UNRESOLVED POLICY CONFLICT — DO NOT "tidy" this number without an owner decision.
+//   this file          QUALIFY = 3   (comment: "owner changed 4→3 on 2026-06-15")
+//   PAYROLL-RULEBOOK §4 = 4          (marked "✅ CONFIRMED (owner, 2026-07-06)" — LATER date)
+//   the portal's own "No. of Present for Weekly Off" is the field that actually decides it.
+// Raising this to 4 makes the audit STRICTER, and this script WRITES unpaidWorkedSat, which both
+// engines subtract from paid days — so the change would CUT PAY. Every value is currently 0, so
+// nothing is being deducted today.
+// Bigger question first: rulebook Checklist-B decided the PORTAL owns the weekly-off curve, so
+// applying unpaidWorkedSat app-side as well would DOUBLE-COUNT. This script may need retiring
+// rather than re-tuning. Flagged by the Codex review 2026-07-30; owner to decide.
+const QUALIFY = 3;                 // present working-days needed in a week to earn that Saturday
 const pad = n => String(n).padStart(2, '0');
 const fmt = d => `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()}`;
 const isNA = s => !/\d/.test(String(s));

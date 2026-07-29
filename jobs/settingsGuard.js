@@ -27,8 +27,10 @@ const PAGES = [
 ];
 // fields that change how punches are turned into attendance (the dangerous ones)
 const WATCH = {
+  // txtnoofweek added 2026-07-30: it is the portal field that decides whether a worker EARNS that
+  // week's paid Saturday. It was unwatched, so a change to it would have silently altered pay.
   shift: ['txtsftstarttime', 'txtsiftendtime', 'txtsiftduration', 'cboisnightshift',
-    'txtchekmin', 'txtmaxearly', 'txtmaxrate', 'chk2', 'cboFWOff', 'DropDownList1'],
+    'txtchekmin', 'txtmaxearly', 'txtmaxrate', 'txtnoofweek', 'chk2', 'cboFWOff', 'DropDownList1'],
   policy: ['cboRequiredpunchinday', 'cbosinglepunchonly', 'txtdurationformakingpresent',
     'txtmaxabsentsortday', 'txtmaxworkinghour', 'txtmaxworkinghourhalf', 'IgnoreOTSetting',
     'txtlatearrival', 'txtearlydeparture',
