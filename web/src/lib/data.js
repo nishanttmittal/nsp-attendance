@@ -647,10 +647,14 @@ export async function resignEmployee(code, by) {
 // ---- Manual (app-only) workers + worker removal ----------------------------------------------
 // Add a worker who is NOT on the biometric machine (e.g. Radhey, Dinesh). Owner fills their days/OT
 // each month via the month override. type: 'monthly' (amount ₹/mo) or 'daily' (wage ₹/day).
-export async function addManualWorker({ name, dept = '', type = 'monthly', amount = 0, shift = 'GEN', standardHours = 8.5 }, by) {
+// shift defaults to NULL, not 'GEN' (fix 2026-07-30, Codex review): writing 'GEN' made the OT divisor
+// resolve to GEN's 8 h and silently beat the standardHours the owner typed on the form — so a manual
+// worker entered as a 12-hour man was paid OT as if he worked 8. With no shift, the divisor falls back
+// to standardHours, which is the whole point of asking for it.
+export async function addManualWorker({ name, dept = '', type = 'monthly', amount = 0, shift = null, standardHours = 8.5 }, by) {
   const code = 'MAN-' + Date.now().toString(36).toUpperCase() + Math.floor(Math.random() * 1000);
   const patch = {
-    name: (name || '').trim(), dept, shift, standardHours: Number(standardHours) || 8.5,
+    name: (name || '').trim(), dept, ...(shift ? { shift } : {}), standardHours: Number(standardHours) || 8.5,
     type: type === 'daily' ? 'daily' : 'monthly',
     ...(type === 'daily' ? { wage: Number(amount) || 0 } : { amount: Number(amount) || 0 }),
     appOnly: true, onMachine: false, manual: true, active: true,

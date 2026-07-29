@@ -193,6 +193,18 @@ export const CASES = [
     derivation: 'identical to the previous case — 20 OT hours must change nothing',
   },
   {
+    id: 'named-shift-WINS-over-standardHours',
+    rule: 'Divisor precedence: a named portal shift always beats the worker\'s own standardHours',
+    emp: { type: 'monthly', amount: 17000, appOnly: true, standardHours: 12, shift: 'GEN' },
+    att: { presentDays: 30, absentDays: 0, otHrs: 10, lateHrs: 0, earlyHrs: 0, workHrs: 0, otOverride: true },
+    params: { ...JUNE },
+    expected: { base: 17000, otPay: 708.33, net: 17708.33 },
+    derivation: '10 h × (17000 ÷ 30 ÷ 8) — GEN wins, standardHours ignored. This precedence is CORRECT; '
+      + 'the 2026-07-30 bug was that addManualWorker WROTE shift:"GEN" by default, so every manual '
+      + 'worker silently landed here and the hours typed on the form were discarded. Fixed by defaulting '
+      + 'the shift to null. Both this case and the no-shift case below must keep passing.',
+  },
+  {
     id: 'app-only-worker-owner-typed-ot-IS-paid',
     rule: 'Owner 2026-07-29 — manual staff (guard/driver) CAN earn OT when the owner types it himself',
     emp: { type: 'monthly', amount: 17000, appOnly: true, standardHours: 12 },   // guard, 09:00–21:00
