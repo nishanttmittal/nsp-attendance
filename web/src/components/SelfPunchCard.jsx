@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { loadSelfPunchStaff, saveEmployee } from '../lib/data';
+import { loadSelfPunchStaff, saveMonth } from '../lib/data';
 
 // Owner view of app-only self-punch staff (Radhey/Dinesh/Munnilal): captured in/out +
 // month totals, with a manual override (days/hours) that wins over the punch data.
@@ -32,12 +32,16 @@ function Row({ e, open, toggle, onSaved }) {
 
   async function save() {
     setBusy(true);
-    await saveEmployee(e.code, { override: { [e.month]: { days: Number(f.days) || 0, hours: Number(f.hours) || 0, ot: Number(f.ot) || 0 } } });
+    // Write where PAYROLL READS: months[month].override (paycalc.js). This card used to write a
+    // TOP-LEVEL emp.override[month], which payroll never looked at — so its own promise that the
+    // override "wins for salary" was false (Codex review 2026-07-30). No data was orphaned: no
+    // worker had a top-level override when this was fixed.
+    await saveMonth(e.code, e.month, { override: { days: Number(f.days) || 0, hours: Number(f.hours) || 0, ot: Number(f.ot) || 0 } });
     setBusy(false); setEdit(false); onSaved();
   }
   async function clearOverride() {
     setBusy(true);
-    await saveEmployee(e.code, { override: { [e.month]: null } });
+    await saveMonth(e.code, e.month, { override: null });
     setBusy(false); setEdit(false); onSaved();
   }
 
