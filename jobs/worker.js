@@ -372,7 +372,10 @@ async function handle(type, p) {
       `Rate ${r(pay.effectiveRate)} ${emp.type === 'daily' ? '/day' : '/mo'}  ·  Present ${pay.presentDays} / Absent ${pay.absentDays}`,
       `Base ${r(pay.base)} + OT ${r(pay.otPay)}${pay.perfectBonus ? ' + bonus ' + r(pay.perfectBonus) : ''}`,
       `${pay.fines ? '− Fine ' + r(pay.fines) + '  ' : ''}${pay.loanInstallment ? '− Loan ' + r(pay.loanInstallment) + '  ' : ''}${pay.advanceRecovered ? '− Advance ' + r(pay.advanceRecovered) : ''}`,
-      `<b>NET ${r(pay.net)}</b>${pay.advanceBalanceCarried ? '  (advance bal ' + r(pay.advanceBalanceCarried) + ')' : ''}`];
+      `<b>NET ${r(pay.net)}</b>${pay.advanceBalanceCarried ? '  (advance bal ' + r(pay.advanceBalanceCarried) + ')' : ''}`,
+      // `payable` = this month's net PLUS the balance carried from last month. Printing `net` alone
+      // hid the carried balance for 40 workers (Codex review 2026-07-30).
+      pay.openingBalance ? `Previous balance ${r(pay.openingBalance)}  →  <b>PAYABLE ${r(pay.payable)}</b>` : ''];
     await sendTelegram(lines.filter(Boolean).join('\n'));
     return 'payslip sent';
   }

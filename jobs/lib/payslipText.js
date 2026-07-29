@@ -32,13 +32,15 @@ async function buildPayslipText(code) {
     emp, att, daysInMonth: last.getDate(), elapsedDays: yest.getDate(), fullMonth: false, monthStart: first, toDate: yest,
     advancesThisMonth: adv, advanceBalanceIn: Number(md.advanceBalanceIn || 0), advanceRecover: Number(md.advanceRecover || 0),
     fines: Number(md.fine || 0), loanInstallment: Number(md.loanInstallment || 0),
+    openingBalance: Number(md.openingBalance || 0),   // carried balance — else the payslip misstates settlement
   });
   const r = n => '₹' + Number(n || 0).toLocaleString('en-IN');
   return [`🧾 <b>Payslip — ${emp.name || code} (${mk}, to date)</b>`,
     `Rate ${r(pay.effectiveRate)} ${emp.type === 'daily' ? '/day' : '/mo'}  ·  Present ${pay.presentDays} / Absent ${pay.absentDays}`,
     `Base ${r(pay.base)} + OT ${r(pay.otPay)}${pay.perfectBonus ? ' + bonus ' + r(pay.perfectBonus) : ''}`,
     `${pay.fines ? '− Fine ' + r(pay.fines) + '  ' : ''}${pay.loanInstallment ? '− Loan ' + r(pay.loanInstallment) + '  ' : ''}${pay.advanceRecovered ? '− Advance ' + r(pay.advanceRecovered) : ''}`,
-    `<b>NET ${r(pay.net)}</b>${pay.advanceBalanceCarried ? '  (advance bal ' + r(pay.advanceBalanceCarried) + ')' : ''}`].filter(Boolean).join('\n');
+    `<b>NET ${r(pay.net)}</b>${pay.advanceBalanceCarried ? '  (advance bal ' + r(pay.advanceBalanceCarried) + ')' : ''}`,
+    pay.openingBalance ? `Previous balance ${r(pay.openingBalance)}  →  <b>PAYABLE ${r(pay.payable)}</b>` : ''].filter(Boolean).join('\n');
 }
 
 module.exports = { buildPayslipText };

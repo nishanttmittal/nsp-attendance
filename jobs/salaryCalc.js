@@ -46,7 +46,7 @@ const DAY = 86400000;
 // `advances` (ledger array) and `advancesThisMonth` (pre-summed number) are BOTH accepted: the web
 // engine's signature uses the latter, and two live callers (jobs/worker.js, jobs/lib/payslipText.js)
 // were written against it — with `advances` undefined this function threw on every Telegram payslip.
-function computePay({ emp, att, daysInMonth, elapsedDays, fullMonth, advances = [], advancesThisMonth = null, advanceBalanceIn = 0, advanceRecover = 0, fines = 0, loanInstallment = 0, bonus = 0, restoreSaturdayDays = 0, graceDays = 0, payPerfectBonus = false, latePenaltyDays = 0, weeklyOffDockDays = 0, monthStart, toDate }) {
+function computePay({ emp, att, daysInMonth, elapsedDays, fullMonth, advances = [], advancesThisMonth = null, advanceBalanceIn = 0, advanceRecover = 0, fines = 0, loanInstallment = 0, bonus = 0, restoreSaturdayDays = 0, graceDays = 0, payPerfectBonus = false, latePenaltyDays = 0, weeklyOffDockDays = 0, openingBalance = 0, monthStart, toDate }) {
   const eff = effectiveAmount(emp, toDate);
   const rate = eff.amount;
   const perDay = emp.type === 'daily' ? rate : rate / daysInMonth;
@@ -140,6 +140,13 @@ function computePay({ emp, att, daysInMonth, elapsedDays, fullMonth, advances = 
     advanceBalanceCarried: 0,   // advance always fully cut into the running balance now
     suggestedWeeklyOffDock: { days: penaltyDays, amount: suggestedPenalty },
     net: round(earnings - fixedDeductions - advanceRecovered),   // SIGNED (can be negative → carries)
+    // One running balance (owner 2026-07-13): last month's carried balance + this month's net = what
+    // to settle. Both may be negative and carry forward. Callers that show a worker what he is owed
+    // MUST use `payable`, not `net` — a payslip printing `net` alone hides the carried balance.
+    // Added 2026-07-30 (Codex review): the Node engine accepted neither, so worker.js passed
+    // openingBalance into a void and Telegram payslips understated/overstated 40 workers' settlement.
+    openingBalance: round(Number(openingBalance || 0)),
+    payable: round((earnings - fixedDeductions - advanceRecovered) + Number(openingBalance || 0)),
   };
 }
 
