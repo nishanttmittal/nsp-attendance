@@ -10,8 +10,12 @@
 // worker.js, so it would have started double-deducting the first time anyone worked a Saturday in
 // an unearned week. Decision rule set by the owner + Codex review 2026-07-30.
 //
-// The unresolved QUALIFY threshold (3 here vs 4 in the rulebook) is now moot for pay: nothing is
-// written. Left in place so the report still runs.
+// THRESHOLD, now fully resolved (2026-07-30): the PORTAL holds "4.00" on ALL SIX shifts — captured
+// into shiftBaseline.json and now drift-watched. The rulebook also says 4. This file's QUALIFY = 3
+// is the stale outlier. It is moot for pay because nothing is written, and note that BOTH values
+// would have double-counted anyway: the portal cuts a Saturday below 4 presents, so anything this
+// script flagged (below 3) had ALREADY been cut by the portal. Retiring the writer was correct
+// regardless of which threshold it used.
 //
 // Original description: a Saturday WORKED in a week that didn't earn the weekly-off is paid as OT
 // only — the day stays absent. Reads the daily in-out report (pulled from the Sunday BEFORE the
