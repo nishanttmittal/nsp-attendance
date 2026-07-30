@@ -13,6 +13,30 @@ const WATCH = [
   { app: 'Plastic/Molding', path: ['apps', 'plasticjobwork', 'production'], days: 7 },
 ];
 
+// PAYROLL CONFIG SANITY (owner approved 2026-07-30). Same principle as the freshness watch: a
+// mis-configuration must not sit silent until it reaches a payslip.
+//
+// LOD (loading, 09:00-20:30) gets NO paid Saturday — owner 2026-07-30, and the portal agrees (it is
+// the only shift with Weekly Off = None). That rule holds today ONLY because every LOD worker is a
+// daily wager paid `wage × hours ÷ 11`, a formula that never reads weekly-offs. The portal
+// nevertheless RECORDS 3-4 weekly-offs for them (mechanism unknown, deliberately not guessed at).
+// Put a MONTHLY worker on LOD and those Saturdays WOULD be paid — `perDay × (days − absent)`, and a
+// weekly-off is not an absence: ~Rs 2,580/month on a Rs 20,000 salary, against the owner's rule.
+// Nobody is monthly on LOD today. This shouts if that ever changes.
+async function payrollConfigWarnings() {
+  const out = [];
+  const snap = await db().collection('att_salary').get().catch(() => null);
+  if (!snap) return out;
+  snap.forEach(d => {
+    const e = d.data() || {};
+    if (e.active === false) return;
+    if ((e.shift || '') === 'LOD' && (e.type || 'monthly') !== 'daily') {
+      out.push(`• <b>${e.name || d.id}</b> is MONTHLY on the LOD shift — LOD Saturdays are not supposed to be paid, but a monthly worker WILL be paid them (~Rs 2,580/mo on Rs 20,000). Move them to daily wage, or tell Claude to fix the engine.`);
+    }
+  });
+  return out;
+}
+
 (async () => {
   const now = Date.now();
   const stale = [];
@@ -26,8 +50,15 @@ const WATCH = [
     console.log(line, ageDays > w.days ? '⚠ STALE' : 'ok');
     if (ageDays > w.days) stale.push(`• <b>${w.app}</b> — nothing recorded for ${ageDays === Infinity ? '?' : Math.floor(ageDays)} days (limit ${w.days})`);
   }
-  if (!stale.length) { console.log('all apps fresh — no alert'); return; }
-  const msg = `🕳️ <b>App gone quiet?</b>\n${stale.join('\n')}\nWorkers may be unable to log in or save (like the July transport outage). Open the app and try one entry; tell Claude if it fails.`;
+  const cfg = await payrollConfigWarnings();
+  cfg.forEach(c => console.log('PAYROLL CONFIG ⚠', c.replace(/<[^>]+>/g, '')));
+  if (!cfg.length) console.log('payroll config ok — no monthly worker on LOD');
+
+  if (!stale.length && !cfg.length) { console.log('all apps fresh, config ok — no alert'); return; }
+  const parts = [];
+  if (stale.length) parts.push(`🕳️ <b>App gone quiet?</b>\n${stale.join('\n')}\nWorkers may be unable to log in or save (like the July transport outage). Open the app and try one entry; tell Claude if it fails.`);
+  if (cfg.length) parts.push(`⚙️ <b>Payroll setup needs a look</b>\n${cfg.join('\n')}`);
+  const msg = parts.join('\n\n');
   if (process.env.DRY === '1') { console.log('[DRY] would send:\n' + msg); return; }
   await sendTelegram(msg);
   console.log('alert sent');
