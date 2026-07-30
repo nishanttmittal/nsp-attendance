@@ -276,6 +276,17 @@ export const CASES = [
     derivation: '15000 − (2000 + 10000)',
   },
 
+  {
+    id: 'payable-includes-the-carried-balance',
+    rule: 'Owner 2026-07-13 — payable = this month\'s net + the balance carried from last month',
+    emp: MONTHLY, att: { ...FULL_JUNE },
+    params: { ...JUNE, advancesThisMonth: 5000, openingBalance: -44425.25 },
+    expected: { base: 15000, otPay: 0, net: 10000, payable: -34425.25 },
+    derivation: '15000 − 5000 = 10000 net; plus a carried −44,425.25 → he still OWES 34,425.25. '
+      + 'A payslip printing `net` alone would show +₹10,000 to a worker who owes money — the exact '
+      + 'sign-flip found live on 2026-07-30 across 40 workers.',
+  },
+
   // ── Fines and penalties ─────────────────────────────────────────────────────────────────
   {
     id: 'fines-late-penalty-and-weekly-off-dock',
@@ -341,4 +352,7 @@ export const CALL_SITE_CASES = [
   },
 ];
 
-export const FIELDS = ['base', 'otPay', 'net'];
+// `payable` added 2026-07-30: comparing only base/otPay/net is what let the Node engine ship with
+// no openingBalance/payable at all (Codex review finding 1) — 40 workers' settlement was wrong on
+// Telegram payslips while all three compared fields matched perfectly.
+export const FIELDS = ['base', 'otPay', 'net', 'payable'];

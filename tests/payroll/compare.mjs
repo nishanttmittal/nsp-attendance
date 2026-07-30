@@ -34,6 +34,7 @@ function callNode(c) {
     restoreSaturdayDays: p.restoreSaturdayDays || 0, graceDays: p.graceDays || 0,
     payPerfectBonus: !!p.payPerfectBonus,
     latePenaltyDays: p.latePenaltyDays || 0, weeklyOffDockDays: p.weeklyOffDockDays || 0,
+    openingBalance: p.openingBalance || 0,
     monthStart: p.monthStart, toDate: p.toDate,
   });
 }
@@ -63,7 +64,12 @@ const same = (a, b) => {
   return Math.abs(x - y) < 0.005;
 };
 
-function classify({ expected, nodeVal, webVal }) {
+function classify({ expected, nodeVal, webVal, declared }) {
+  // Field the fixture does not pin a value for (e.g. `payable` on cases with no opening balance):
+  // we cannot judge it against the rules, but the TWO ENGINES MUST STILL AGREE. That parity check is
+  // exactly what was missing when the Node engine shipped with no `payable` at all — every declared
+  // field matched while 40 workers' settlement was wrong (Codex review 2026-07-30).
+  if (!declared) return same(nodeVal, webVal) ? 'agree' : 'ENGINE PARITY BREAK (no expected value declared)';
   if (expected === null || expected === undefined) return 'specification ambiguity';
   const nodeOK = same(nodeVal, expected);
   const webOK = same(webVal, expected);
@@ -80,10 +86,11 @@ for (const c of CASES) {
   try { webRes = callWeb(c); } catch (e) { webErr = e.message; }
 
   for (const f of FIELDS) {
+    const declared = !!c.expected && Object.prototype.hasOwnProperty.call(c.expected, f);
     const expected = c.expected ? c.expected[f] : null;
     const nodeVal = nodeErr ? `THREW: ${nodeErr}` : nodeRes?.[f];
     const webVal = webErr ? `THREW: ${webErr}` : webRes?.[f];
-    const verdict = classify({ expected, nodeVal, webVal });
+    const verdict = classify({ expected, nodeVal, webVal, declared });
     const agrees = verdict === 'agree';
     rows.push({
       case: c.id, rule: c.rule, field: f,

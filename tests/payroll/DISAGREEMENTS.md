@@ -2,15 +2,24 @@
 
 Deployment rule: no *unexplained* disagreement may ship. Intentional disagreement is fine.
 
-Run `node tests/payroll/compare.mjs` to regenerate. Last run: 2026-07-28.
+Run `node tests/payroll/compare.mjs` to regenerate. Last run: **2026-07-30**.
 
 ```
-cases: 28   comparisons: 84   agree: 84   disagree: 0
+cases: 33   comparisons: 132   agree: 132   disagree: 0
 ```
+
+⚠️ **This file went stale within two days of being written** — it still claimed 28 cases / 84
+comparisons after fixtures were added, and the Codex review caught it. Exactly the documentation rot
+this whole session was spent removing. **Re-run the harness and update these numbers in the same
+commit that changes fixtures.**
+
+`payable` is now a compared field. Where a fixture declares no expected value for a field, the
+harness still requires the TWO ENGINES TO AGREE — that parity check is what was missing when the Node
+engine shipped with no `payable` at all while every declared field matched.
 
 ## Current status: ZERO disagreements
 
-Both engines agree with the approved rules, and with each other, on all 84 comparisons.
+Both engines agree with the approved rules, and with each other, on all 132 comparisons.
 Both live call-sites of the server engine pass their contract check.
 
 ## History — the 3 that were open, and how they closed
