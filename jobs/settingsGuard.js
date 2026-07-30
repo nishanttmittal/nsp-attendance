@@ -24,6 +24,10 @@ const PAGES = [
   { key: 'policy_10H', url: 'https://onlinerealsoft.com/EmployeePolicy.aspx?RowId=3' },
   { key: 'policy_12H', url: 'https://onlinerealsoft.com/EmployeePolicy.aspx?RowId=4' },
   { key: 'policy_wir', url: 'https://onlinerealsoft.com/EmployeePolicy.aspx?RowId=5' },
+  // DSG policy CREATED 2026-07-30 (RowId 6) — full-day line 08:15, derived from the formula every
+  // other policy obeys: shift span − 1:30 − 0:15 grace (DSG span 10:00). It decides whether the
+  // designer's day counts full or half, so it is watched from the moment it existed.
+  { key: 'policy_DSG', url: 'https://onlinerealsoft.com/EmployeePolicy.aspx?RowId=6' },
 ];
 // fields that change how punches are turned into attendance (the dangerous ones)
 const WATCH = {

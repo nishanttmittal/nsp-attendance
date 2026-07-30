@@ -28,9 +28,12 @@ const DRY = process.env.DRY !== 'false';
 
 function bad(m) { console.error('ERROR: ' + m); process.exit(1); }
 
-// Shifts that have a matching office-time policy on the portal. Others (wir/DSG/LOD) use GEN —
-// that's how the live LOADING/LOD daily-wagers are already configured.
-const POLICY_FOR_SHIFT = { GEN: 'GEN', '10H': '10H', '12H': '12H' };
+// Shifts that have a matching office-time policy on the portal.
+// DSG added 2026-07-30 — the DSG policy now EXISTS (RowId 6, full-day line 08:15). Without this the
+// map would silently push a DSG worker back onto the GEN policy on any future run.
+// LOD and wir still fall through to GEN: LOD has no policy of its own (its staff are daily wagers
+// paid by hours, so day classification never reaches their pay) and wir uses the 'amarjeet' policy.
+const POLICY_FOR_SHIFT = { GEN: 'GEN', '10H': '10H', '12H': '12H', DSG: 'DSG' };
 
 // Find the option whose text matches `wanted` case-insensitively and select it by its EXACT
 // portal label (so ASP.NET postbacks still fire via Playwright's selectOption).
