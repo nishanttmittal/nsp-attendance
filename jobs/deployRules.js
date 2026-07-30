@@ -101,12 +101,13 @@ function showDiff(liveContent, newContent) {
 // Validate WITHOUT creating anything. projects:test compiles the source and returns any
 // syntax/semantic issues; it never persists a ruleset. Returns true if it actually ran.
 //
-// NOTE 2026-07-28: the firebase-admin service account can create rulesets and update the
-// release, but does NOT hold `firebaserules.rulesets.test`, so this returns 403. That is a
-// one-line IAM grant on the service account (role roles/firebaserules.admin, or just the
-// firebaserules.rulesets.test permission). Until it is granted, pre-confirmation validation
-// is skipped — rules are still compile-checked by rulesets.create AFTER confirmation and
-// BEFORE the release is switched, so invalid rules can never go live.
+// ✅ RESOLVED 2026-07-31. The service account previously lacked `firebaserules.rulesets.test`
+// and this returned 403. Owner granted it via a LEAST-PRIVILEGE custom role — "Firestore Rules
+// Tester" (projects/unico-operations/roles/CustomRole), containing that ONE permission, not
+// roles/firebaserules.admin (which would also allow create/delete/update).
+// Confirmed working: "Validated OK (projects:test) — 0 warning(s), no ruleset created."
+// The 403 fallback below is KEPT deliberately: it is what makes this survive a future IAM change.
+// Note: the grant took ~1 minute to propagate — a 403 immediately after granting is not a failure.
 async function validateOnly(c, content) {
   let res;
   try {
