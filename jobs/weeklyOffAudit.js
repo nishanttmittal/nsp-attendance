@@ -97,7 +97,14 @@ async function audit(offset = 0, { write = false } = {}) {   // write defaults O
       if (++n >= 400) { await batch.commit(); batch = db().batch(); n = 0; }   // await every chunk
     }
     if (n) await batch.commit();
-    console.log(`weekly-off audit ${label}: ${flagged} employee(s) with an unearned worked Saturday`, JSON.stringify(unpaid));
+    // State the threshold in the log: this report uses QUALIFY, which still differs from the
+    // rulebook's 4. Diagnostic-only since 2026-07-30, but a reader must never have to guess which
+    // number produced these counts.
+    console.log(
+      `weekly-off audit ${label}: ${flagged} employee(s) with an unearned worked Saturday ` +
+      `— threshold QUALIFY=${QUALIFY} present day(s)/week (RULEBOOK §4 says 4; diagnostic only, ` +
+      `NOT written to pay${write ? ' — ⚠️ WRITE MODE IS ON' : ''})`,
+      JSON.stringify(unpaid));
     return { label, unpaid, flagged };
   } finally { await browser.close(); }
 }
