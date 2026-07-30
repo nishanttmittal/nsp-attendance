@@ -1,8 +1,21 @@
-// Weekly-off audit (owner rule 2026-06-14): a Saturday WORKED in a week that didn't earn the
-// weekly-off (< 4 present days that week) is paid as OT only — the day stays absent. This job
-// reads the daily in-out report (pulled from the Sunday BEFORE the 1st, so boundary weeks are
-// whole) and writes att_attendance/{code}.months[mk].unpaidWorkedSat. The salary engine then
-// deducts those days from base pay (OT is untouched).
+// ⛔ RETIRED AS A WRITER 2026-07-30 — REPORT-ONLY BY DEFAULT. It no longer writes unless a caller
+// passes { write: true }, and nothing does.
+//
+// WHY: the PORTAL already deducts an unearned Saturday by moving it into Absent Days. Proven from
+// live June data — low-attendance workers show 0 Saturdays credited while
+// Present + Absent + WeeklyOff + WeeklyOffPresent + Holiday still sums to daysInMonth for 54 of 55
+// workers. So the Saturday is already gone from paid days. Writing unpaidWorkedSat as well, which
+// both engines SUBTRACT from base, would deduct the SAME Saturday TWICE.
+// Every stored value is currently 0, so no pay was ever affected — but this ran DAILY from
+// worker.js, so it would have started double-deducting the first time anyone worked a Saturday in
+// an unearned week. Decision rule set by the owner + Codex review 2026-07-30.
+//
+// The unresolved QUALIFY threshold (3 here vs 4 in the rulebook) is now moot for pay: nothing is
+// written. Left in place so the report still runs.
+//
+// Original description: a Saturday WORKED in a week that didn't earn the weekly-off is paid as OT
+// only — the day stays absent. Reads the daily in-out report (pulled from the Sunday BEFORE the
+// 1st, so boundary weeks are whole).
 //   MONTH=0 (current, default) | 1 | 2   — same offset convention as salaryData/missedPunchScan
 const path = require('path');
 const fs = require('fs');
@@ -57,7 +70,7 @@ function computeUnpaid(rows, label) {
   return out;
 }
 
-async function audit(offset = 0) {
+async function audit(offset = 0, { write = false } = {}) {   // write defaults OFF — see the header
   const { first, to, label } = range(offset);
   // extend the start back to the Sunday on/before the 1st so the first Saturday's week is whole
   const from = new Date(first); from.setDate(from.getDate() - from.getDay()); // getDay 0=Sun
@@ -79,6 +92,7 @@ async function audit(offset = 0) {
     let batch = db().batch(), n = 0, flagged = 0;
     for (const d of all.docs) {
       const v = unpaid[d.id] || 0; if (v) flagged++;
+      if (!write) continue;   // ⛔ report-only: the portal already deducts this Saturday
       batch.set(d.ref, { months: { [label]: { unpaidWorkedSat: v } } }, { merge: true });
       if (++n >= 400) { await batch.commit(); batch = db().batch(); n = 0; }   // await every chunk
     }
