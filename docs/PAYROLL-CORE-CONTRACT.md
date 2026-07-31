@@ -40,9 +40,17 @@ restoreSaturdayDays · restoreSaturdayPay · graceDays · gracePay
 perfectEligible · perfectBonusDay · suggestedDockDays
 ```
 
-None is a *money* field — they are display and audit values the PWA renders. **That is exactly why
-the gap survived so long:** the harness compared `base`, `otPay` and `net`, all of which matched,
-while `payable` was absent from node altogether and 40 workers' settlement was misreported.
+⚠️ **CORRECTED 2026-07-31 (Codex round 3).** This section previously said "none is a money field."
+That is **false**: `restoreSaturdayPay` and `gracePay` are monetary earnings.
+
+What is true — and was verified before this correction was written — is that node's `net` **does
+include both amounts** (`jobs/salaryCalc.js:120` adds them into `earnings`). **No worker was ever
+underpaid by this.** What node omits is the *itemisation*: a payslip cannot show the worker that
+₹250 of his pay was a grace top-up. That is an explanation gap, not a second `openingBalance` defect.
+
+The remaining 17 keys are display and audit values the PWA renders. **This is why the gap survived:**
+the harness compared `base`, `otPay` and `net`, all of which matched, while `payable` was absent from
+node altogether and 40 workers' settlement was misreported.
 
 **Inputs also differ:** node accepts `advances` (a ledger array) *and* `advancesThisMonth` (a number);
 web accepts only the latter. Node's dual acceptance exists solely because two live callers were
@@ -58,8 +66,9 @@ written against web's signature and crashed.
 computePay({ emp, att, period, adjustments, ledger }) -> Payslip
 ```
 
-Grouped deliberately. Today's flat 18-argument signature is how `openingBalance` got passed into a
-void by one caller and never passed at all by another.
+Grouped deliberately. Today's flat **19**-argument signature (`web/src/lib/payroll.js:23` — counted,
+not estimated; this document said 18 until 2026-07-31) is how `openingBalance` got passed into a void
+by one caller and never passed at all by another.
 
 ### 2.1 `emp` — who is being paid
 
@@ -139,10 +148,15 @@ when loans were folded into one advance account. The core must not accept them; 
 `dailyStdHrs` · `equivalentDays` · `saturdaysInPeriod` · `saturdaysCut` · `noAttendance` ·
 `perfectEligible` · `perfectBonusDay` · `suggestedDockDays` · `suggestedWeeklyOffDock`
 
-These are not decorative — they are what the owner reads to a worker at pay time. **The core returns
-all of them; the node adapter currently drops 19 and must stop doing so.**
+These are not decorative — they are what the owner reads to a worker at pay time.
 
-### 3.3 Invariants the core must uphold
+**SETTLED (was contradictory until 2026-07-31): the core returns the full shape; an adapter MAY
+project a smaller view, but only by explicitly naming the fields it keeps — never by silently
+happening to return fewer.** §1 said adapters may drop fields, this section said node must stop
+dropping all 19, and §7 reopened the question. One rule now: the core is complete, projection is
+deliberate and declared. `payable` is never projectable (§3.1).
+
+### 3.3 Invariants the core must uphold — **8 of them**
 
 ```
 payable          == net + openingBalance
@@ -199,11 +213,77 @@ Setting only one must not disturb the other. Correcting OT previously dropped pa
 
 ## 7. Open questions to settle BEFORE step 3
 
-1. **The 19 display fields** — does the node adapter start returning them, or do payslips explicitly
-   declare a smaller view? (Recommend: core returns everything, adapters project.)
-2. **`unpaidWorkedSat`** is now inert — the writer was retired 2026-07-30 because the portal already
-   deducts that Saturday. Does the core keep the subtraction for history, or drop it?
-3. **12H rounds 11.5 → 12** (rulebook §6). Worker-adverse and inconsistent with the DSG decision.
-   Owner re-confirm before it is cast into a shared core.
-4. **Guard/driver lunch** — their divisors use the full duty span with no lunch deduction, unlike
-   every shift. Owner to confirm.
+1. ~~The 19 display fields~~ — **SETTLED 2026-07-31** (§3.2): core complete, projection declared.
+2. **`unpaidWorkedSat`** is inert — the writer was retired 2026-07-30 because the portal already
+   deducts that Saturday. Codex's answer (accepted): **do not carry it into the core.** Scan every
+   stored attendance month for a non-zero value first (`jobs/auditUnpaidWorkedSat.js`), then remove
+   the writer capability *and* both engine subtractions as one isolated change. A retired writer
+   plus a live deduction is a latent double-deduction path.
+3. ~~12H rounds 11.5 → 12~~ — **SETTLED**, owner 2026-07-30: KEPT. Not an inconsistency — the 12H
+   shift is worked by a guard and a supervisor who are on duty throughout, the same basis as §7.4.
+4. ~~Guard/driver lunch~~ — **SETTLED**, owner 2026-07-30: no deduction, full span paid.
+
+---
+
+## 8. Lifecycle — added 2026-07-31 (Codex round 3). **Step 3 is blocked until this is agreed.**
+
+The contract above describes one calculation. It said nothing about what happens to that result over
+time, and every high-severity defect of round 3 lived in exactly that gap. A pure core does not fix
+them — but extracting the core without deciding them freezes the ambiguity in place.
+
+### 8.1 A locked month is IMMUTABLE
+
+Once a month is locked, **every figure the owner can be shown for it must come from the stored
+snapshot** — not recomputed. Today `paymentBreakdown()` stores 16 fields and the Person screen
+overlays them onto a *freshly recomputed* pay, so any field outside those 16 silently follows
+today's rules. The locked-register PDF is worse: it reads the **current** salary rate, current paid
+days, current OT and the current advance ledger.
+
+The stored payment amount never moves, so **nobody has been mis-paid**. What breaks is the record:
+give a worker a raise, reprint June, and June shows the new rate. In a dispute the owner cannot
+reproduce what he showed the worker.
+
+**Rule: a locked month renders from its snapshot or it renders "snapshot unavailable" — never from a
+recomputation.** Months locked before snapshots existed (June 2026) must be labelled as legacy, not
+silently recomputed to look complete.
+
+### 8.2 Snapshots carry versions
+
+Every stored snapshot records `snapshotVersion` (the shape) and `rulesVersion` (the rulebook edition
+that produced it). Without these, a later reader cannot tell a missing field from a zero, and cannot
+tell which rules applied. Backfill is not required — an absent version means "pre-versioning, legacy".
+
+### 8.3 The carry chain
+
+```
+months[m].payment.closing == months[m+1].openingBalance        for every locked m
+```
+
+**Locking is chronological.** Writing month *m*'s carry into *m+1* when *m+1* is already locked
+desyncs the chain: *m+1*'s payment stays frozen around the old balance while its opening balance
+moves. To redo an earlier month, unlock the later ones first. Enforced 2026-07-31 in
+`lockMonthDirect` and `worker.js` (`unlockMonthDirect` had always refused it).
+
+### 8.4 Transaction boundaries
+
+A read-modify-write on a whole array or a whole `months` map is **not** safe: `att_salary` has
+several concurrent writers (owner app, manager queue, Hisab outbox, the 5-minute worker).
+
+- **Append** → `arrayUnion` only.
+- **Remove or reorder** → a Firestore transaction. A post-write count check cannot detect a lost
+  concurrent append, because it compares against the stale pre-read length. (This is exactly how a
+  manager's advance could be erased with no error; fixed 2026-07-31.)
+- **A month's lock/unlock** → must not be a blind overwrite of `months`.
+
+### 8.5 Money may not enter a sealed history
+
+An advance must never be recorded **in** a locked month, nor **before** one. In both cases the cash
+is paid out and no salary run will ever deduct it. Every write path enforces this — app, direct
+write and background worker — not just the screen that happens to have a check.
+
+### 8.6 Restores are not point-in-time
+
+Backups walk collections sequentially. **Executable queues must be quarantined before any live
+restore**, or the worker replays jobs whose effects are already in the restored data. Firestore
+`Timestamp` values do not survive JSON: they must be revived on restore, and the drill must assert
+the restored *type*, not just the value (see `jobs/restoreDrill.js`).
