@@ -83,6 +83,34 @@ function loadBackup(file) {
 
 const docsOf = (c) => Array.isArray(c) ? c.map((d, i) => [d.id || String(i), d]) : Object.entries(c || {});
 
+// ── Firestore TYPES do not survive JSON (2026-07-31, Codex round 3) ──────────
+// A Timestamp serialises to {_seconds,_nanoseconds}. Written back verbatim it restores as a plain
+// MAP, not a date: it no longer sorts, compares, renders or queries as a time. Every `createdAt`,
+// `lockedAt` and `at` field in the payroll data is one of these. The old drill could not see it,
+// because it compared the parsed backup JSON against itself — both sides were maps either way.
+const isTsShape = (v) => !!v && typeof v === 'object' && !Array.isArray(v)
+  && typeof v._seconds === 'number' && typeof v._nanoseconds === 'number' && Object.keys(v).length === 2;
+// Rebuild real Timestamps on the way into Firestore.
+function reviveTypes(v, Timestamp) {
+  if (Array.isArray(v)) return v.map((x) => reviveTypes(x, Timestamp));
+  if (isTsShape(v)) return new Timestamp(v._seconds, v._nanoseconds);
+  if (v && typeof v === 'object') {
+    const o = {};
+    for (const [k, x] of Object.entries(v)) o[k] = reviveTypes(x, Timestamp);
+    return o;
+  }
+  return v;
+}
+// Count timestamp-shaped plain maps (what the backup holds) vs real Timestamp instances (what a
+// correct restore must produce). Comparing these two is the check the old drill could not make.
+function countTypes(v, acc = { shapes: 0, real: 0 }) {
+  if (v && typeof v === 'object' && typeof v.toDate === 'function') { acc.real++; return acc; }
+  if (isTsShape(v)) { acc.shapes++; return acc; }
+  if (Array.isArray(v)) v.forEach((x) => countTypes(x, acc));
+  else if (v && typeof v === 'object') Object.values(v).forEach((x) => countTypes(x, acc));
+  return acc;
+}
+
 function summarise(backup) {
   const s = { collections: 0, docs: 0, perCollection: {}, money: {} };
   for (const [name, coll] of Object.entries(backup.collections)) {
@@ -140,6 +168,19 @@ function legA(backup) {
   for (const [name, m] of Object.entries(s.money))
     check(`money totals readable in "${name}"`, true, `${m.docsWithAmount} docs, total ${m.total.toLocaleString('en-IN')}`);
 
+  // NOT A POINT-IN-TIME SNAPSHOT (2026-07-31, Codex round 3). fullBackup walks collections one
+  // after another, so a queue captured early and a salary document captured later do not describe
+  // the same instant. Restore a pending job alongside the salary state it already produced and a
+  // live worker will run it AGAIN — locking a month twice, or re-sending an advance.
+  // These collections are executable: they must be emptied or marked done BEFORE any live worker
+  // is pointed at restored data. The drill records them here so the restore report names them.
+  const QUEUE = /(job_requests|outbox|queue|_jobs$|pending)/i;
+  const queues = Object.keys(backup.collections).filter((n) => QUEUE.test(n));
+  check('executable queues identified for quarantine before any live restore',
+    true,
+    queues.length ? `QUARANTINE FIRST → ${queues.join(', ')}` : 'none in this backup');
+  if (backup.pointInTime === true) check('backup claims to be point-in-time', false, 'fullBackup walks collections sequentially — this claim would be false');
+
   return s;
 }
 
@@ -164,12 +205,24 @@ async function legB(backup, srcSummary) {
   const leftover = (await db.listCollections()).length;
   check('emulator empty before restore', leftover === 0, `${leftover} collections remain`);
 
+  // Restore each collection to the path it was EXPORTED FROM. Version-1 backups recorded only the
+  // last path segment, so app subcollections (apps/welder/dispatches) were restored to the root —
+  // right documents, wrong shape, and nothing in the drill noticed.
+  const { Timestamp } = require('firebase-admin/firestore');
+  const pathOf = (name) => (backup.paths && backup.paths[name]) || name;
+  const noPath = Object.keys(backup.collections).filter((n) => !(backup.paths && backup.paths[n]));
+  check('backup records the original path of every collection', noPath.length === 0,
+    noPath.length
+      ? `${noPath.length} collection(s) have no recorded path — this is a version-${backup.version || 1} backup. Re-run fullBackup.js; subcollections cannot be restored to the right place from this file.`
+      : `${Object.keys(backup.collections).length} path(s) recorded`);
+
   let written = 0;
   for (const [name, coll] of Object.entries(backup.collections)) {
+    const target = pathOf(name);
     const entries = docsOf(coll);
     for (let i = 0; i < entries.length; i += 400) {           // stay under the 500-op batch limit
       const batch = db.batch();
-      for (const [id, d] of entries.slice(i, i + 400)) batch.set(db.collection(name).doc(String(id)), d);
+      for (const [id, d] of entries.slice(i, i + 400)) batch.set(db.collection(target).doc(String(id)), reviveTypes(d, Timestamp));
       await batch.commit();
       written += Math.min(400, entries.length - i);
     }
@@ -179,10 +232,20 @@ async function legB(backup, srcSummary) {
   // Read everything back out and re-derive the same summary.
   const back = { collections: {} };
   for (const name of Object.keys(backup.collections)) {
-    const snap = await db.collection(name).get();
+    const snap = await db.collection(pathOf(name)).get();
     back.collections[name] = Object.fromEntries(snap.docs.map(d => [d.id, d.data()]));
   }
   const dst = summarise(back);
+
+  // TYPE FIDELITY. The field-for-field comparison below cannot catch this: a Timestamp and a plain
+  // {_seconds,_nanoseconds} map serialise to the SAME JSON, so both sides always matched. Compare
+  // the live types instead — every timestamp in the backup must come back as a real Timestamp.
+  const srcT = { shapes: 0, real: 0 }, dstT = { shapes: 0, real: 0 };
+  for (const [, coll] of Object.entries(backup.collections)) for (const [, d] of docsOf(coll)) countTypes(d, srcT);
+  for (const [, coll] of Object.entries(back.collections)) for (const [, d] of docsOf(coll)) countTypes(d, dstT);
+  check('timestamps restored as real dates, not plain maps',
+    dstT.real === srcT.shapes && dstT.shapes === 0,
+    `backup holds ${srcT.shapes} timestamp value(s); restored as ${dstT.real} real Timestamp(s) and ${dstT.shapes} plain map(s)`);
 
   check('collection count matches', srcSummary.collections === dst.collections, `${srcSummary.collections} -> ${dst.collections}`);
   check('total document count matches', srcSummary.docs === dst.docs, `${srcSummary.docs} -> ${dst.docs}`);

@@ -24,11 +24,19 @@ const FULL = process.env.FULL === '1' || new Date().getUTCDay() === 6;
   const dir = path.resolve(__dirname, 'downloads', 'allbackup');
   fs.mkdirSync(dir, { recursive: true });
   const groups = {};
-  const g = (name) => (groups[name] ||= { app: name, version: 1, exportedAt: new Date().toISOString(), full: FULL, collections: {}, skipped: [] });
+  // version 2 (2026-07-31, Codex round 3): each collection now records the FULL Firestore path it
+  // came from. Version 1 stored only the collection's last segment, so `apps/welder/dispatches` and
+  // a root-level `dispatches` were indistinguishable — and the restore drill put app subcollections
+  // back at the root. The data was intact; the shape it restored into was wrong.
+  // `pointInTime: false` is recorded honestly: collections are walked one after another, so a queue
+  // read early and a salary document read later are not the same instant. Executable queues must be
+  // quarantined before a live restore — restoreDrill.js names them in its report.
+  const g = (name) => (groups[name] ||= { app: name, version: 2, exportedAt: new Date().toISOString(), full: FULL, pointInTime: false, collections: {}, paths: {}, skipped: [] });
   const dump = async (col, group, label) => {
     if (!FULL && label === 'laser_jobs') { g(group).skipped.push(`${label} (weekly full only)`); return 0; }
     const s = await col.get();
     g(group).collections[label] = Object.fromEntries(s.docs.map((d) => [d.id, d.data()]));
+    g(group).paths[label] = col.path;          // e.g. 'att_salary' or 'apps/welder/dispatches'
     return s.size;
   };
   let total = 0;
