@@ -235,8 +235,13 @@ export default function Person({ code, mk, user, onBack }) {
         <SettleLockCard pay={pay} md={md} busy={busy} onLock={doLock} onUnlock={doUnlock} />
       )}
 
-      {emp.type !== 'daily' && otDetail.length > 0 && (
-        <DaysOtCard detail={otDetail} overrides={md.dayOverrides || {}} otCredits={md.otCredits || {}} presentAdjust={Math.round((presentAdjust + satAdjust) * 100) / 100} locked={locked} busy={busy} onSetDay={setDay} onCreditOt={creditOt} />
+      {/* Daily wagers used to be excluded here entirely, so their in/out times were invisible even
+          though the punch data existed — the owner could see every other worker's times but not
+          theirs. They are shown now, but READ-ONLY: the Full/½/Abs and Pay/No-pay buttons change
+          presentDays, and for a daily wager presentDays only shifts the 0.5 h/day lunch deduction
+          (~₹32/day on ₹700) — an adjustment that would silently move their pay the wrong way. */}
+      {otDetail.length > 0 && (
+        <DaysOtCard detail={otDetail} overrides={md.dayOverrides || {}} otCredits={md.otCredits || {}} presentAdjust={Math.round((presentAdjust + satAdjust) * 100) / 100} locked={locked} busy={busy} onSetDay={setDay} onCreditOt={creditOt} readOnly={emp.type === 'daily'} />
       )}
 
       {!locked && (
@@ -522,7 +527,9 @@ function SettleLockCard({ pay, md, busy, onLock, onUnlock }) {
 // borderline days at pay time (missing punch still earns 0 OT — never restored). Saturdays & OT unaffected.
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const dayDefault = (d) => (d.kind === 'half' ? 'half' : d.kind === 'absent' ? 'absent' : 'full');  // single = full
-function DaysOtCard({ detail, overrides = {}, otCredits = {}, presentAdjust = 0, locked, busy, onSetDay, onCreditOt }) {
+// readOnly = daily wagers: show the dates and in/out times, but no day-adjust buttons (they would
+// move presentDays, which for a daily wager only changes the lunch deduction).
+function DaysOtCard({ detail, overrides = {}, otCredits = {}, presentAdjust = 0, locked, busy, onSetDay, onCreditOt, readOnly = false }) {
   const [open, setOpen] = useState(false);
   const missing = detail.filter((d) => d.missing);
   const totalOt = detail.reduce((s, d) => s + (d.ot || 0), 0);
@@ -531,12 +538,14 @@ function DaysOtCard({ detail, overrides = {}, otCredits = {}, presentAdjust = 0,
   return (
     <div className="bg-white rounded-xl shadow p-3">
       <button onClick={() => setOpen(!open)} className="w-full flex justify-between items-center text-sm font-semibold text-gray-700">
-        <span>📅 Days &amp; overtime{missing.length ? <span className="text-amber-600 font-normal"> · {missing.length} missing</span> : ''}{presentAdjust !== 0 ? <span className="text-indigo-600 font-normal"> · {presentAdjust > 0 ? '+' : ''}{presentAdjust}d adjusted</span> : ''}</span>
-        <span className="text-gray-500 font-normal">{totalOt.toFixed(1)}h OT {open ? '▲' : '▼'}</span>
+        <span>📅 {readOnly ? 'Days & timings' : 'Days & overtime'}{missing.length ? <span className="text-amber-600 font-normal"> · {missing.length} missing</span> : ''}{!readOnly && presentAdjust !== 0 ? <span className="text-indigo-600 font-normal"> · {presentAdjust > 0 ? '+' : ''}{presentAdjust}d adjusted</span> : ''}</span>
+        <span className="text-gray-500 font-normal">{readOnly ? `${detail.filter((d) => d.in || d.out).length} day(s)` : `${totalOt.toFixed(1)}h OT`} {open ? '▲' : '▼'}</span>
       </button>
       {open && (
         <div className="mt-2 space-y-0.5">
-          <p className="text-[10px] text-gray-400">Tap <b>Full / ½ / Abs</b> to set a working day for pay. Missing-punch days pay 0 OT. Saturdays follow the weekly-off rule.</p>
+          <p className="text-[10px] text-gray-400">{readOnly
+            ? <>In / out times from the machine. This worker is paid on <b>hours ÷ 11</b>, so days are not set here and overtime is already inside the hours.</>
+            : <>Tap <b>Full / ½ / Abs</b> to set a working day for pay. Missing-punch days pay 0 OT. Saturdays follow the weekly-off rule.</>}</p>
           {detail.map((d) => {
             if (isSat(d)) {
               const defPaid = d.kind === 'sat-absent' ? 'nopay' : 'pay';
@@ -550,7 +559,7 @@ function DaysOtCard({ detail, overrides = {}, otCredits = {}, presentAdjust = 0,
                     <span className="flex-1 text-gray-400">{d.in ? `${d.in} → ${d.out || 'no out'} · ` : ''}{desc}</span>
                     <span className="w-12 text-right text-gray-500">{d.ot > 0 ? '+' + d.ot + 'h' : ''}</span>
                   </div>
-                  <div className="flex gap-1 mt-1 ml-16 items-center">
+                  <div className={`flex gap-1 mt-1 ml-16 items-center ${readOnly ? 'hidden' : ''}`}>
                     {[['pay', 'Pay'], ['nopay', 'No pay']].map(([v, t]) => (
                       <button key={v} disabled={busy || locked} onClick={() => onSetDay(d.ymd, cur === v ? null : v)}
                         className={`px-2 py-0.5 rounded text-[11px] ${cur === v ? 'bg-blue-700 text-white font-semibold' : 'border border-gray-200 text-gray-500'} disabled:opacity-50`}>{t}</button>
@@ -570,7 +579,7 @@ function DaysOtCard({ detail, overrides = {}, otCredits = {}, presentAdjust = 0,
                   <span className="flex-1 text-gray-500">{d.missing ? <span className="text-amber-700">⚠ missing {d.missing === 'in' ? 'IN' : 'OUT'} · {d.in}</span> : hasPunch ? `${d.in || '—'} → ${d.out || '—'}` : <span className="text-red-400">absent</span>}</span>
                   <span className={`w-12 text-right ${d.ot > 0 ? 'text-gray-800' : 'text-gray-300'}`}>{d.ot > 0 ? '+' + d.ot + 'h' : '—'}</span>
                 </div>
-                {hasPunch && (
+                {hasPunch && !readOnly && (
                   <div className="flex gap-1 mt-1 ml-16 items-center flex-wrap">
                     {[['full', 'Full'], ['half', '½'], ['absent', 'Abs']].map(([v, t]) => (
                       <button key={v} disabled={busy || locked} onClick={() => onSetDay(d.ymd, cur === v ? null : v)}
