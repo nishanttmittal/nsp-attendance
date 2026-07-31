@@ -153,7 +153,12 @@ export default function Person({ code, mk, user, onBack }) {
               <span>Holiday <b>{holidayN}</b></span>
               <span>Extra day <b className={extraDays ? 'text-green-700' : ''}>{extraDays}</b>{bonusEligibleUnpaid ? <span className="text-[11px] text-green-600"> (+1 eligible)</span> : ''}</span>
               <span>Paid days <b>{paidDaysN}</b></span>
-              <span>Overtime <b>{pay.otHrsNet}h</b></span>
+              {/* Daily wagers are paid on HOURS (wage x (workHrs - 0.5/day lunch) / 11), and OT is
+                  already inside those hours — they never earn separate OT. Showing "Overtime 0h"
+                  read as a mistake; show the number they are actually paid on instead. */}
+              {emp.type === 'daily'
+                ? <span>Hours <b>{r1(pay.workHrs || 0)}h</b> <span className="text-gray-400">(÷{pay.dailyStdHrs || 11})</span></span>
+                : <span>Overtime <b>{pay.otHrsNet}h</b></span>}
             </div>
             <div className="border-t border-slate-200 mt-1.5 pt-1.5 space-y-0.5">
               <div>Absent <b className={absentD.length ? 'text-red-600' : ''}>{absentD.length}</b>{absentD.length ? <span className="text-gray-500"> — {dates(absentD)} {MON}</span> : ''}</div>
@@ -186,7 +191,9 @@ export default function Person({ code, mk, user, onBack }) {
         })()}
         {pay.unpaidWorkedSat > 0 && <Row k="Worked Sat (OT only)" v={`${pay.unpaidWorkedSat} — week not earned (4+ absences): day unpaid, OT kept`} />}
         {emp.type !== 'daily' && !pay.noAttendance && <Row k="Paid days" v={`${Math.max(0, (pay.payableDays || 0) - (pay.absentDays || 0))} of ${ctx.daysInMonth} (weekly-offs included)`} />}
-        <Row k="Overtime" v={`${pay.otHrsNet}h paid`} />
+        {emp.type === 'daily'
+          ? <Row k="Paid on hours" v={`${r1(pay.workHrs || 0)}h worked − ${r1(0.5 * (pay.presentDays || 0))}h lunch ÷ ${pay.dailyStdHrs || 11} = ${r1(pay.equivalentDays || 0)} days · overtime is already inside these hours, so there is no separate OT`} />
+          : <Row k="Overtime" v={`${pay.otHrsNet}h paid`} />}
         {lateFixed > 0.25 && (
           <div className="flex justify-between text-xs py-0.5"><span className="text-gray-500">Late fix</span>
             <span className="text-green-700">broken punch → −{lateFixed}h fake late removed · OT restored <span className="text-gray-400">(portal said {rawLate}h late)</span></span>
