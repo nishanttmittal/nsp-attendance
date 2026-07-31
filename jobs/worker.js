@@ -308,6 +308,13 @@ async function handle(type, p) {
     // is frozen, so the advance would be handed out but never deducted from any salary (money leak).
     // This is the authoritative check; the app's own check is best-effort UX only.
     const advMk = String(p.advance.date || '').slice(0, 7);
+    // An advance with no usable date belongs to no month, so no salary run can ever deduct it —
+    // same leak, different cause. The app rejects this (BADDATE); the manager queue must too, or
+    // the two paths this guard was unified across would disagree again (2026-07-31).
+    if (!/^\d{4}-\d{2}$/.test(advMk)) {
+      await sendTelegram(`🚫 Advance ₹${p.advance.amount} to ${(snap.exists && snap.data().name) || p.code} NOT saved — it has no valid date ("${p.advance.date || ''}"), so it could never be deducted from a salary. Re-enter it with a date. (by ${p.advance.paidBy || '?'})`);
+      return `REJECTED — advance has no valid date; not recorded`;
+    }
     const allMonths = ((snap.exists && snap.data().months) || {});
     const mdAdv = allMonths[advMk] || {};
     if (mdAdv.locked || mdAdv.payment) {
