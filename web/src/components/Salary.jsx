@@ -90,7 +90,10 @@ function OwnerSalary({ user }) {
         ? { ...paymentBreakdown(pay), bonus: Math.round(((pay.bonus || 0) + perDay) * 100) / 100, net: Math.round(((pay.net || 0) + perDay) * 100) / 100 }
         : paymentBreakdown(pay);
       const args = { cash: cashN, account: acctN, payable, advanceCarry: pay.advanceBalanceCarried, reason: `Salary ${mk}${bonusDay ? ' +bonus day' : ''}` };
-      await lockMonthDirect(code, mk, { ...args, breakdown }, user.email);   // instant freeze + carry
+      const res = await lockMonthDirect(code, mk, { ...args, breakdown }, user.email);   // instant freeze + carry
+      // A later month is already paid — its opening balance is baked into its frozen payment, so
+      // locking this one would desync the chain. Skip the queue too (the robot would redo it).
+      if (res?.nextLocked) { alert(`Cannot lock ${mk} — ${res.nextLocked} is already paid & locked.\n\nReopen ${res.nextLocked} first, then lock ${mk}.`); return; }
       queueLock(code, mk, { ...args, breakdown }, user.email).catch(() => {});   // register + Telegram (snapshot rides along)
       // FAST: update ONLY this worker (1 read) instead of reloading the whole roster.
       setPayC(null);
@@ -742,9 +745,16 @@ function AddWorkerCard({ user, onAdded }) {
   async function go() {
     if (!f.name.trim()) { setSt('Enter a name.'); return; }
     if (!Number(f.amount)) { setSt(f.type === 'daily' ? 'Enter the ₹/day.' : 'Enter the ₹/month.'); return; }
+    // REJECT, don't default (2026-07-31, Codex round 3). This used to read `Number(...) || 8.5`, so
+    // 0, blank or a typo silently became 8.5 — and standardHours IS this worker's OT divisor, the
+    // number that decides what an hour of his overtime is worth. A silent default is how the
+    // manual-worker OT bug happened in the first place; the data layer's own 0 < h <= 24 check never
+    // saw the bad value because this line had already replaced it.
+    const hrs = Number(f.standardHours);
+    if (!Number.isFinite(hrs) || hrs <= 0 || hrs > 24) { setSt('Enter working hours per day between 0 and 24 — this sets his overtime rate.'); return; }
     setSt('saving');
     try {
-      await addManualWorker({ name: f.name, dept: f.dept, type: f.type, amount: Number(f.amount), standardHours: Number(f.standardHours) || 8.5 }, user.email);
+      await addManualWorker({ name: f.name, dept: f.dept, type: f.type, amount: Number(f.amount), standardHours: hrs }, user.email);
       setSt('done'); setF({ name: '', dept: '', type: 'monthly', amount: '', standardHours: '8.5' });
       onAdded && onAdded();
     } catch { setSt('Could not save — try again.'); }

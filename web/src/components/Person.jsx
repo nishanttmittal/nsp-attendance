@@ -118,7 +118,10 @@ export default function Person({ code, mk, user, onBack }) {
     // to any later rule change. advanceCarry is always 0 now (advance folds fully into the balance).
     const breakdown = paymentBreakdown(pay);
     // INSTANT: write the lock directly (owner has att_salary write); it freezes + carries right away.
-    await lockMonthDirect(code, mk, { cash, account, payable: pay.payable, advanceCarry: pay.advanceBalanceCarried, breakdown, reason }, user.email);
+    const res = await lockMonthDirect(code, mk, { cash, account, payable: pay.payable, advanceCarry: pay.advanceBalanceCarried, breakdown, reason }, user.email);
+    // Refused because a LATER month is already paid — locking would rewrite its opening balance while
+    // its payment stays frozen. Don't queue the robot either, or it would do exactly that in 5 minutes.
+    if (res?.nextLocked) { alert(`Cannot lock ${mk} — ${res.nextLocked} is already paid & locked.\n\nReopen ${res.nextLocked} first, then lock ${mk}.`); return; }
     // background (best-effort): the robot adds the salary-register snapshot + Telegram alert.
     queueLock(code, mk, { cash, account, payable: pay.payable, advanceCarry: pay.advanceBalanceCarried, breakdown, reason }, user.email).catch(() => {});
   });

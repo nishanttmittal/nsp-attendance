@@ -36,7 +36,15 @@ export default function IncomingAdvances({ user }) {
         amount: Number(r.amount) || 0, remark: `via Hisab${r.note ? ': ' + r.note : ''}`, paidBy: user?.email || '' });
       await updateDoc(doc(db, 'hisab_advance_outbox', r.id), { status: 'accepted', acceptedAt: new Date().toISOString(), acceptedBy: user?.email || '' });
       setMsg(`✓ Added ${money(r.amount)} advance for ${emp.name}`);
-    } catch (e) { setMsg('Failed: ' + e.message); }
+    } catch (e) {
+      // This path had NO locked-month check until 2026-07-31 — accepting a back-dated advance into
+      // a sealed month recorded cash no salary run would ever deduct. Now it refuses; say why.
+      const m = String(e?.message || '');
+      if (m.startsWith('LOCKED:')) setMsg(`Not accepted — ${emp.name}'s salary for ${m.slice(7)} is already paid & locked, so this advance could never be deducted. Re-date it in the current month in Hisab.`);
+      else if (m.startsWith('LOCKEDLATER:')) setMsg(`Not accepted — a later month (${m.slice(12)}) is already paid & locked for ${emp.name}, so this advance could never be deducted. Re-date it in the current month in Hisab.`);
+      else if (m === 'BADDATE') setMsg('Not accepted — this advance has no valid date. Fix the date in Hisab first.');
+      else setMsg('Failed: ' + m);
+    }
     setBusy('');
   };
 

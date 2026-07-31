@@ -122,6 +122,27 @@ export async function queueAdvance(code, advance, by) {
 // lockMonthDirect. Only admins can write att_salary (rules) — managers must use queueAdvance.
 // Returns the saved advance {..,id}. Keeps the same LOCKED-MONTH guard + id dedupe as the worker,
 // then fire-and-forget queues a notify-only job so the Telegram alert still fires in the background.
+// MONEY-LEAK GUARD (2026-07-31, Codex round 3). An advance must never land in a month whose payment
+// is frozen, NOR before a later month that is already frozen — in both cases the cash is handed out
+// but no salary run will ever deduct it. Every advance write path calls this; previously `addAdvance`
+// (used by Incoming Advances) checked nothing at all, and `addAdvanceDirect` checked only its own
+// month. Throws LOCKED:<month> / LOCKEDLATER:<month>, the two messages the screens already translate.
+// Returns the month blocking a change dated in `mk`, or null. Shared by add AND delete so the two
+// can never drift apart again. Note `mk === ''` (a legacy undated advance) matches every locked
+// month as "later" — deliberate, and the behaviour delete already had.
+function lockedBlocking(months, mk) {
+  const md = (months || {})[mk] || {};
+  if (md.locked || md.payment) return { kind: 'LOCKED', month: mk };
+  const later = Object.entries(months || {}).find(([m, d]) => m > mk && d && (d.locked || d.payment));
+  return later ? { kind: 'LOCKEDLATER', month: later[0] } : null;
+}
+function assertAdvanceAllowed(emp, ymd) {
+  const mk = String(ymd || '').slice(0, 7);
+  if (!/^\d{4}-\d{2}$/.test(mk)) throw new Error('BADDATE');   // an advance must carry a real date
+  const b = lockedBlocking(emp.months, mk);
+  if (b) throw new Error(`${b.kind}:${b.month}`);
+}
+
 export async function addAdvanceDirect(code, advance, by) {
   const id = advance.id || ('adv-' + (advance.date || '') + '-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7));
   const adv = { ...advance, id };
@@ -129,10 +150,9 @@ export async function addAdvanceDirect(code, advance, by) {
   const ref = doc(db, 'att_salary', code);
   const snap = await getDoc(ref);
   const data = snap.exists() ? snap.data() : {};
-  // Authoritative money-leak guard: never record an advance dated into a locked/paid month.
-  const mk = String(adv.date || '').slice(0, 7);
-  const md = (data.months || {})[mk] || {};
-  if (md.locked || md.payment) throw new Error(`LOCKED:${mk}`);
+  // Authoritative money-leak guard: never record an advance dated into a locked/paid month, or
+  // before one (2026-07-31: the later-month case was missing here, though delete already checked it).
+  assertAdvanceAllowed(data, adv.date);
   const advances = data.advances || [];
   if (!advances.some((a) => a.id === id)) {   // idempotent: skip if this id is already recorded
     if (snap.exists()) {
@@ -200,7 +220,8 @@ export async function loadEmployee(code) {
 // App-only self-punch staff (Radhey/Dinesh/Munnilal): captured in/out times (att_punch) +
 // this-month totals. Drivers: an OUT after midnight is stitched to the prior day's IN, and
 // an OUT past their cutoff (e.g. 1 AM) counts as a full day. A manual override
-// (att_salary.override[month] = {days, hours, ot}) wins over the punch data for salary.
+// (att_salary.months[month].override = {days, hours, ot}) wins over the punch data for salary —
+// the SAME place payroll reads it (paycalc.js). Read and write must stay on this one path.
 const nextDate = (ymd) => { const d = new Date(ymd + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + 1); return d.toISOString().slice(0, 10); };
 
 export async function loadSelfPunchStaff() {
@@ -240,7 +261,11 @@ export async function loadSelfPunchStaff() {
     const autoPresent = rows.length;
     const autoHours = +rows.reduce((s, r) => s + (r.hours || 0), 0).toFixed(1);
     const autoOt = +rows.reduce((s, r) => s + (r.hours != null ? Math.max(0, r.hours - std) : 0), 0).toFixed(1);
-    const ov = (e.override && e.override[month]) || null;
+    // Read where the card WRITES and payroll READS: months[month].override. Until 2026-07-31 this
+    // read the old top-level emp.override[month], so saving an override made the card immediately
+    // show "From punches" with the manual badge gone — and hid the Clear button that removes it.
+    // The top-level fallback is for legacy data only (none existed when this was fixed).
+    const ov = (e.months && e.months[month] && e.months[month].override) || (e.override && e.override[month]) || null;
     const ot = ov ? Number(ov.ot != null ? ov.ot : Math.max(0, (Number(ov.hours) || 0) - (Number(ov.days) || 0) * std)) : autoOt;
     out.push({
       code: e.code, name: e.name, dept: e.dept, unit: e.unit, amount: e.amount, standardHours: std,
@@ -539,7 +564,9 @@ export async function unlockMonthDirect(code, month, reason, by) {
 }
 // INSTANT lock — the owner may write att_salary directly (rules line 49), so freeze the month + carry
 // the balance right away (no 5-min wait). A background lock_month job then adds the register + Telegram.
-export async function lockMonthDirect(code, month, { cash, account, payable, advanceCarry, breakdown, reason }, by) {
+// `advanceCarry` is accepted for call-compatibility but deliberately ignored: the advance folds
+// fully into `closing` (one running account, owner 2026-07-13), so next month's advanceBalanceIn is 0.
+export async function lockMonthDirect(code, month, { cash, account, payable, breakdown, reason }, by) {
   const e = await loadEmployee(code);
   const md = (e.months || {})[month] || {};
   if (md.locked) return { alreadyLocked: true };
@@ -548,13 +575,20 @@ export async function lockMonthDirect(code, month, { cash, account, payable, adv
   const [y, m] = month.split('-').map(Number);
   const next = m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`;
   const months = { ...(e.months || {}) };
-  const prevNextOpening = Number((months[next] || {}).openingBalance || 0);
-  const prevNextAdvance = Number((months[next] || {}).advanceBalanceIn || 0);
+  // CHRONOLOGY GUARD (2026-07-31, Codex round 3). Locking writes next month's opening balance. If
+  // next month is ALREADY locked, its own payment is frozen around the old balance — overwriting it
+  // desyncs the carry chain (June re-locked after July is paid ⇒ July shows a balance its frozen
+  // payment never used). `unlockMonthDirect` has refused this since it was written; locking never
+  // did. Lock months in order; to redo an earlier month, unlock the later ones first.
+  const nextMd = months[next] || {};
+  if (nextMd.locked || nextMd.payment) return { nextLocked: next };
+  const prevNextOpening = Number(nextMd.openingBalance || 0);
+  const prevNextAdvance = Number(nextMd.advanceBalanceIn || 0);
   const date = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
   // `breakdown` snapshots the salary figures AT LOCK so an already-paid month never re-renders under a
   // later rule change. advanceBalanceIn is forced to 0: the advance folded fully into `closing` (one account).
   months[month] = { ...md, locked: true, lockedAt: new Date().toISOString(),
-    payment: { cash: Number(cash || 0), account: Number(account || 0), net: paid, payable: Number(payable || 0), closing, mode: 'lock', prevNextOpening, prevNextAdvance, ...(breakdown ? { breakdown } : {}), by, reason: reason || '' } };
+    payment: { cash: Number(cash || 0), account: Number(account || 0), net: paid, payable: Number(payable || 0), closing, date, mode: 'lock', prevNextOpening, prevNextAdvance, ...(breakdown ? { breakdown } : {}), by, reason: reason || '' } };
   months[next] = { ...(months[next] || {}), openingBalance: closing, advanceBalanceIn: 0 };
   const entry = { at: new Date().toISOString(), by, code, name: e.name || code, month, field: 'lock', from: `payable ₹${payable}`, to: `paid ₹${paid} (cash ${cash || 0}+acct ${account || 0}); carry ₹${closing}`, reason: reason || '' };
   await saveEmployee(code, { months, decisions: [...(e.decisions || []), entry] });
@@ -620,11 +654,16 @@ export async function addAdvance(code, adv) {
   // Mint a unique id on EVERY add (load-bearing): with arrayUnion, two deep-equal advances (₹500 cash,
   // same day, no remark) would collapse into one = a silently lost payment. A unique id keeps them distinct.
   const a = { ...adv, id: adv.id || ('adv-' + (adv.date || '') + '-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7)) };
+  // Incoming Advances (Hisab → Salary) calls this directly and had NO locked-month check until
+  // 2026-07-31 — accepting a back-dated advance into a sealed month recorded cash that no salary run
+  // would ever deduct. The Person screen's own check is best-effort UX; this is the one that counts.
+  const e = await loadEmployee(code);
+  assertAdvanceAllowed(e, a.date);
   if (isConfigured && db) {
     const { updateDoc, arrayUnion } = await import('firebase/firestore');
     await updateDoc(doc(db, 'att_salary', code), { advances: arrayUnion(a) });   // atomic append — no read-modify-write
   } else {
-    const e = await loadEmployee(code); await saveEmployee(code, { advances: [...(e.advances || []), a] });
+    await saveEmployee(code, { advances: [...(e.advances || []), a] });
   }
   return a;
 }
@@ -634,21 +673,39 @@ export async function addAdvance(code, adv) {
 // one element, write the filtered array back, and verify the count dropped by exactly one. Blocked if the
 // advance's own month — or any LATER month — is already locked/paid (its amount is baked into their carry).
 export async function deleteAdvanceAt(code, index, sig) {
-  const e = await loadEmployee(code);
+  // Does advances[index] still look like the row the owner clicked?
+  const same = (a) => !!a && String(a.date || '') === String(sig.date || '') && Number(a.amount || 0) === Number(sig.amount || 0)
+    && String(a.mode || '') === String(sig.mode || '') && String(a.id || '') === String(sig.id || '');
+  const blocked = (e, a) => {
+    const b = lockedBlocking(e.months, String(a.date || '').slice(0, 7));
+    if (b) throw new Error(`${b.kind}:${b.month}`);
+  };
+  // TRANSACTION (2026-07-31, Codex round 3). This used to read the array, filter one element out and
+  // write the WHOLE array back. A manager's advance landing in that gap (arrayUnion) was silently
+  // erased — and the old length check could not see it, because it compared against the stale
+  // pre-read length. A transaction re-reads and retries instead. arrayUnion only ever APPENDS, so an
+  // interleaved add never shifts `index`; the `same()` check re-validates it on every attempt.
+  if (isConfigured && db) {
+    const { runTransaction } = await import('firebase/firestore');
+    return runTransaction(db, async (tx) => {
+      const ref = doc(db, 'att_salary', code);
+      const snap = await tx.get(ref);
+      if (!snap.exists()) throw new Error('CHANGED');
+      const e = snap.data();
+      const arr = e.advances || [];
+      const a = arr[index];
+      if (!same(a)) throw new Error('CHANGED');
+      blocked(e, a);
+      tx.update(ref, { advances: arr.filter((_, i) => i !== index) });
+      return { deleted: a };
+    });
+  }
+  const e = await loadEmployee(code);          // offline/local mode — single writer, no race to lose
   const arr = e.advances || [];
   const a = arr[index];
-  if (!a) throw new Error('CHANGED');
-  if (String(a.date || '') !== String(sig.date || '') || Number(a.amount || 0) !== Number(sig.amount || 0)
-    || String(a.mode || '') !== String(sig.mode || '') || String(a.id || '') !== String(sig.id || '')) throw new Error('CHANGED');
-  const mk = String(a.date || '').slice(0, 7);
-  const md = (e.months || {})[mk] || {};
-  if (md.locked || md.payment) throw new Error(`LOCKED:${mk}`);
-  const later = Object.entries(e.months || {}).find(([m, d]) => m > mk && d && (d.locked || d.payment));
-  if (later) throw new Error(`LOCKEDLATER:${later[0]}`);
-  const next = arr.filter((_, i) => i !== index);
-  await saveEmployee(code, { advances: next });
-  const chk = await loadEmployee(code);
-  if ((chk.advances || []).length !== arr.length - 1) throw new Error('VERIFY');
+  if (!same(a)) throw new Error('CHANGED');
+  blocked(e, a);
+  await saveEmployee(code, { advances: arr.filter((_, i) => i !== index) });
   return { deleted: a };
 }
 export async function addIncrement(code, inc) {

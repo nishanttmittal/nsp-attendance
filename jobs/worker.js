@@ -230,7 +230,14 @@ async function handle(type, p) {
       const [y, m] = p.month.split('-').map(Number);
       const next = m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`;
       const months = { ...(e.months || {}) };
-      const prevNextOpening = Number((months[next] || {}).openingBalance || 0), prevNextAdvance = Number((months[next] || {}).advanceBalanceIn || 0);
+      // CHRONOLOGY GUARD (2026-07-31) — mirror of lockMonthDirect. Writing next month's opening
+      // balance when next month is already frozen desyncs the carry chain. Unlock later months first.
+      const nextMd = months[next] || {};
+      if (nextMd.locked || nextMd.payment) {
+        await sendTelegram(`🚫 Could not lock <b>${e.name || p.code}</b> ${p.month} — ${next} is already paid & locked. Reopen ${next} first, then lock ${p.month}.`).catch(() => {});
+        return `REFUSED — ${next} is already locked; lock months in order`;
+      }
+      const prevNextOpening = Number(nextMd.openingBalance || 0), prevNextAdvance = Number(nextMd.advanceBalanceIn || 0);
       months[p.month] = { ...md, locked: true, lockedAt: new Date().toISOString(),
         payment: { cash, account, net: paid, payable, closing, date, mode: 'lock', prevNextOpening, prevNextAdvance, ...(p.breakdown ? { breakdown: p.breakdown } : {}), by: p._by || 'owner', reason: p.reason || '' } };
       months[next] = { ...(months[next] || {}), openingBalance: closing, advanceBalanceIn: Number(p.advanceCarry || 0) };
@@ -301,10 +308,19 @@ async function handle(type, p) {
     // is frozen, so the advance would be handed out but never deducted from any salary (money leak).
     // This is the authoritative check; the app's own check is best-effort UX only.
     const advMk = String(p.advance.date || '').slice(0, 7);
-    const mdAdv = ((snap.exists && snap.data().months) || {})[advMk] || {};
+    const allMonths = ((snap.exists && snap.data().months) || {});
+    const mdAdv = allMonths[advMk] || {};
     if (mdAdv.locked || mdAdv.payment) {
       await sendTelegram(`🚫 Advance ₹${p.advance.amount} to ${(snap.exists && snap.data().name) || p.code} NOT saved — ${advMk} salary is already paid & locked. Date it in the current month instead. (by ${p.advance.paidBy || '?'})`);
       return `REJECTED — ${advMk} is locked; advance not recorded`;
+    }
+    // ...and never BEFORE a locked month either (2026-07-31): that month's carry already accounts for
+    // this worker's history, so a back-dated advance would never be recovered. Delete has always
+    // checked this; add did not.
+    const laterLocked = Object.entries(allMonths).find(([m, d]) => m > advMk && d && (d.locked || d.payment));
+    if (laterLocked) {
+      await sendTelegram(`🚫 Advance ₹${p.advance.amount} to ${(snap.exists && snap.data().name) || p.code} NOT saved — a LATER month (${laterLocked[0]}) is already paid & locked, so this advance could never be deducted. Date it in the current month instead. (by ${p.advance.paidBy || '?'})`);
+      return `REJECTED — later month ${laterLocked[0]} is locked; advance not recorded`;
     }
     const advances = (snap.exists && snap.data().advances) || [];
     const already = p.advance.id && advances.some((a) => a.id === p.advance.id);
