@@ -25,8 +25,12 @@ const WATCH = [
 // Nobody is monthly on LOD today. This shouts if that ever changes.
 async function payrollConfigWarnings() {
   const out = [];
-  const snap = await db().collection('att_salary').get().catch(() => null);
-  if (!snap) return out;
+  // FAIL LOUD, NOT OPEN (2026-07-31, Codex round 3): this used to swallow a read failure and return
+  // no warnings, so the run printed "payroll config ok" — a permission outage or Firestore error
+  // reported as a clean configuration. A monitor that cannot read must say so, not stay silent.
+  let snap;
+  try { snap = await db().collection('att_salary').get(); }
+  catch (err) { return [`• ⚠️ Could NOT read att_salary (${err.message}) — payroll configuration was <b>not checked</b> this run. This is "unknown", not "ok".`]; }
   snap.forEach(d => {
     const e = d.data() || {};
     if (e.active === false) return;

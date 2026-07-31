@@ -119,7 +119,9 @@ async function setCheck(page, id, want) {
       console.log(id.padEnd(32) + String(v).padEnd(16) + got);
       if (String(got) !== String(v)) bad.push(`${id}: wanted ${v} got ${got}`);
     }
-    await page.screenshot({ path: path.join(OUT, `dsg_policy_${DRY ? 'dry' : 'saved'}.png`), fullPage: true }).catch(() => {});
+    // NB: this is the form BEFORE Save — named accordingly (it used to be called "…_saved.png",
+    // which read as proof of what was stored; the post-save screenshot below is that proof).
+    await page.screenshot({ path: path.join(OUT, `dsg_policy_${DRY ? 'dry' : 'prefill'}.png`), fullPage: true }).catch(() => {});
 
     if (bad.length) {
       console.log('\n⚠️  fields that did not take:');
@@ -139,17 +141,60 @@ async function setCheck(page, id, want) {
     await page.waitForTimeout(3000);
     console.log('\nSaved. Verifying from the list…');
 
-    // 5. VERIFY: re-open the list, find DSG, open it, re-read every field
+    // 5. VERIFY: re-open the list, find the DSG row, OPEN IT, and re-read every field.
+    // Until 2026-07-31 this only checked that a DSG row appeared in the list and then reported
+    // success — the header claimed every field was verified, which was untrue (Codex round 3).
+    // Presence in the list proves the policy was created; it proves nothing about its times.
     await page.goto('https://onlinerealsoft.com/EmployeePolicyList.aspx', { waitUntil: 'networkidle', timeout: 120000 });
     await page.waitForTimeout(1500);
-    const html = await page.content();
-    const rows = (await page.locator('table tr').allInnerTexts()).map(t => t.replace(/\s+/g, ' ').trim());
-    const found = rows.find(t => /^DSG\b/i.test(t));
-    console.log('  policy list now: ' + rows.filter(Boolean).join('  |  '));
-    if (!found) throw new Error('🚨 SAVED BUT NOT IN THE LIST — treat as NOT created.');
-    const ids = [...new Set((html.match(/RowId=\d+/gi) || []))];
-    console.log('  ✅ DSG present: "' + found + '"');
-    console.log('  RowIds now: ' + ids.join('  '));
+    const rowInfo = await page.locator('table tr').evaluateAll(rows => rows.map((r) => {
+      const a = r.querySelector('a[href*="RowId="]');
+      const m = a ? String(a.getAttribute('href') || '').match(/RowId=(\d+)/) : null;
+      return { text: (r.innerText || '').replace(/\s+/g, ' ').trim(), rowId: m ? m[1] : null };
+    }));
+    console.log('  policy list now: ' + rowInfo.map(r => r.text).filter(Boolean).join('  |  '));
+    const dsgRow = rowInfo.find(r => /^DSG\b/i.test(r.text));
+    if (!dsgRow) throw new Error('🚨 SAVED BUT NOT IN THE LIST — treat as NOT created.');
+    console.log('  ✅ DSG present: "' + dsgRow.text + '"');
+
+    if (!dsgRow.rowId) {
+      console.log('\n⚠️  Could NOT resolve the DSG RowId from the list (the row may use a postback link).');
+      console.log('    The policy EXISTS, but its saved field values were NOT verified. Open it by hand.');
+      process.exit(2);
+    }
+    await page.goto('https://onlinerealsoft.com/EmployeePolicy.aspx?RowId=' + dsgRow.rowId, { waitUntil: 'networkidle', timeout: 120000 });
+    await page.waitForTimeout(2000);
+    if (!(await page.locator(S + 'txtpolicyname').count())) {
+      console.log('\n⚠️  Re-opened RowId=' + dsgRow.rowId + ' but the form did not render — values NOT verified.');
+      process.exit(2);
+    }
+    console.log('\nRe-read from the SAVED policy (RowId=' + dsgRow.rowId + '):');
+    console.log('field'.padEnd(32) + 'wanted'.padEnd(16) + 'saved as');
+    console.log('-'.repeat(70));
+    const drift = [];
+    const cmp = (id, want, got, eq) => {
+      console.log(id.padEnd(32) + String(want).padEnd(16) + got);
+      if (!eq) drift.push(`${id}: wanted "${want}" saved as "${got}"`);
+    };
+    for (const [id, v] of Object.entries(FIELDS)) {
+      const got = await page.locator(S + id).inputValue().catch(() => '(missing)');
+      cmp(id, v, got, String(got).trim() === v);
+    }
+    for (const [id, v] of Object.entries(SELECTS)) {
+      const got = await page.locator(S + id).evaluate(n => (n.options[n.selectedIndex] || {}).text || '').catch(() => '(missing)');
+      cmp(id, v, got, String(got).trim() === v);
+    }
+    for (const [id, v] of Object.entries(CHECKS)) {
+      const got = await page.locator(S + id).isChecked().catch(() => '(missing)');
+      cmp(id, v, got, String(got) === String(v));
+    }
+    if (drift.length) {
+      console.log('\n🚨 SAVED VALUES DO NOT MATCH — the policy exists but is WRONG. Fix it on the portal:');
+      drift.forEach(d => console.log('   ' + d));
+      process.exit(3);
+    }
+    await page.screenshot({ path: path.join(OUT, 'dsg_policy_saved.png'), fullPage: true }).catch(() => {});
+    console.log('\n  ✅ every field verified against the saved policy (screenshot: dsg_policy_saved.png).');
   } finally { await browser.close(); }
   process.exit(0);
 })().catch(e => { console.error('ERR', e.message); process.exit(1); });

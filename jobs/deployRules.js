@@ -118,10 +118,19 @@ async function validateOnly(c, content) {
     });
   } catch (e) {
     if (e.response?.status === 403) {
+      // Recommend the LEAST-PRIVILEGE route, matching what was actually granted on 2026-07-31.
+      // This used to say "grant roles/firebaserules.admin", contradicting the note above and
+      // handing out create/delete/update to fix a read-only validation call (Codex round 3).
       console.log('⚠️  Pre-confirmation validation unavailable: the service account lacks');
-      console.log('    `firebaserules.rulesets.test`. Grant it (roles/firebaserules.admin) to');
-      console.log('    validate before creating anything. Rules will still be compile-checked');
-      console.log('    at creation time — after you confirm, before the live release switches.');
+      console.log('    `firebaserules.rulesets.test`.');
+      console.log('    FIX (least privilege — do NOT grant roles/firebaserules.admin, which also');
+      console.log('    allows create/delete/update): make a custom role holding ONLY that one');
+      console.log('    permission and assign it to the service account. This was already done once');
+      console.log('    — role "Firestore Rules Tester", projects/unico-operations/roles/CustomRole.');
+      console.log('    Console gotcha: the Add-permissions filter is by ROLE, not by permission —');
+      console.log('    filter by "Firebase Rules Admin", then tick the single permission.');
+      console.log('    Rules are still compile-checked at creation time — after you confirm, and');
+      console.log('    before the live release switches.');
       return false;
     }
     throw new Error('validation call failed: ' + JSON.stringify(e.response?.data || e.message));

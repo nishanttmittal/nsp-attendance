@@ -1,5 +1,7 @@
-// ⛔ RETIRED AS A WRITER 2026-07-30 — REPORT-ONLY BY DEFAULT. It no longer writes unless a caller
-// passes { write: true }, and nothing does.
+// ⛔ RETIRED AS A WRITER — REPORT-ONLY. 2026-07-30 the write was switched off behind a
+// { write: true } flag that nothing passed; 2026-07-31 the capability was DELETED. A dormant writer
+// that could still be re-enabled, sitting next to a deduction both engines still apply, is a latent
+// double-deduction — "off by default" was not good enough (Codex round 3). This script now counts.
 //
 // WHY: the PORTAL already deducts an unearned Saturday by moving it into Absent Days. Proven from
 // live June data — low-attendance workers show 0 Saturdays credited while
@@ -26,19 +28,17 @@ const fs = require('fs');
 const XLSX = require('xlsx');
 const { session, setField, downloadMonthly } = require('./lib/realtime');
 const { range } = require('./salaryData');
-const { db } = require('./lib/firestore');
+// NB: no Firestore import — this script is read-only on the portal and writes nothing anywhere.
 
-// ⚠️ UNRESOLVED POLICY CONFLICT — DO NOT "tidy" this number without an owner decision.
-//   this file          QUALIFY = 3   (comment: "owner changed 4→3 on 2026-06-15")
-//   PAYROLL-RULEBOOK §4 = 4          (marked "✅ CONFIRMED (owner, 2026-07-06)" — LATER date)
-//   the portal's own "No. of Present for Weekly Off" is the field that actually decides it.
-// Raising this to 4 makes the audit STRICTER, and this script WRITES unpaidWorkedSat, which both
-// engines subtract from paid days — so the change would CUT PAY. Every value is currently 0, so
-// nothing is being deducted today.
-// Bigger question first: rulebook Checklist-B decided the PORTAL owns the weekly-off curve, so
-// applying unpaidWorkedSat app-side as well would DOUBLE-COUNT. This script may need retiring
-// rather than re-tuning. Flagged by the Codex review 2026-07-30; owner to decide.
-const QUALIFY = 3;                 // present working-days needed in a week to earn that Saturday
+// ✅ CONFLICT RESOLVED 2026-07-31. This was 3, against a rulebook that said 4.
+// The portal itself settled it: "No. of Present for Weekly Off" (`txtnoofweek`) reads **4.00 on all
+// six shifts** — captured into shiftBaseline.json and now drift-watched by settingsGuard.js. The
+// portal is the field that actually decides whether a Saturday is earned, so 4 is the real number
+// and this file's 3 was the stale outlier.
+// Changing it here CANNOT affect pay: this script no longer writes anything (report-only since
+// 2026-07-30, write capability deleted 2026-07-31), and `jobs/auditUnpaidWorkedSat.js` confirms
+// every stored value across all workers and months is 0.
+const QUALIFY = 4;                 // present working-days needed in a week to earn that Saturday
 const pad = n => String(n).padStart(2, '0');
 const fmt = d => `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()}`;
 const isNA = s => !/\d/.test(String(s));
@@ -74,7 +74,7 @@ function computeUnpaid(rows, label) {
   return out;
 }
 
-async function audit(offset = 0, { write = false } = {}) {   // write defaults OFF — see the header
+async function audit(offset = 0) {   // report-only: there is no write path — see the header
   const { first, to, label } = range(offset);
   // extend the start back to the Sunday on/before the 1st so the first Saturday's week is whole
   const from = new Date(first); from.setDate(from.getDate() - from.getDay()); // getDay 0=Sun
@@ -91,23 +91,15 @@ async function audit(offset = 0, { write = false } = {}) {   // write defaults O
     const rows = XLSX.utils.sheet_to_json(XLSX.readFile(file).Sheets.Sheet1, { header: 1, defval: '' }).slice(1);
     const unpaid = computeUnpaid(rows, label);
 
-    // write months[label].unpaidWorkedSat for EVERY employee (0 clears any stale value)
-    const all = await db().collection('att_attendance').get();
-    let batch = db().batch(), n = 0, flagged = 0;
-    for (const d of all.docs) {
-      const v = unpaid[d.id] || 0; if (v) flagged++;
-      if (!write) continue;   // ⛔ report-only: the portal already deducts this Saturday
-      batch.set(d.ref, { months: { [label]: { unpaidWorkedSat: v } } }, { merge: true });
-      if (++n >= 400) { await batch.commit(); batch = db().batch(); n = 0; }   // await every chunk
-    }
-    if (n) await batch.commit();
-    // State the threshold in the log: this report uses QUALIFY, which still differs from the
-    // rulebook's 4. Diagnostic-only since 2026-07-30, but a reader must never have to guess which
-    // number produced these counts.
+    // COUNT ONLY — no write path exists any more (2026-07-31). Until now the function still
+    // accepted { write: true }, which would have written unpaidWorkedSat to every attendance doc.
+    // Nothing passed it, but a retired writer that can still be switched on, sitting beside a live
+    // deduction in both engines, is a latent double-deduction. The capability is gone, not disabled.
+    const flagged = Object.values(unpaid).filter((v) => v > 0).length;
     console.log(
       `weekly-off audit ${label}: ${flagged} employee(s) with an unearned worked Saturday ` +
-      `— threshold QUALIFY=${QUALIFY} present day(s)/week (RULEBOOK §4 says 4; diagnostic only, ` +
-      `NOT written to pay${write ? ' — ⚠️ WRITE MODE IS ON' : ''})`,
+      `— threshold QUALIFY=${QUALIFY} present day(s)/week (matches RULEBOOK §4 and the portal's own ` +
+      `txtnoofweek=4.00 on all six shifts). DIAGNOSTIC ONLY — this script cannot write to pay.`,
       JSON.stringify(unpaid));
     return { label, unpaid, flagged };
   } finally { await browser.close(); }

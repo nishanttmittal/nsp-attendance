@@ -31,8 +31,11 @@ function bad(m) { console.error('ERROR: ' + m); process.exit(1); }
 // Shifts that have a matching office-time policy on the portal.
 // DSG added 2026-07-30 — the DSG policy now EXISTS (RowId 6, full-day line 08:15). Without this the
 // map would silently push a DSG worker back onto the GEN policy on any future run.
-// LOD and wir still fall through to GEN: LOD has no policy of its own (its staff are daily wagers
-// paid by hours, so day classification never reaches their pay) and wir uses the 'amarjeet' policy.
+// NOT LISTED: LOD and wir. Until 2026-07-31 an unmapped shift silently defaulted to 'GEN' — the same
+// silent-default failure that caused the manual-worker OT bug. A comment here claimed wir used the
+// 'amarjeet' policy, but wir was never in the map, so wir workers would have been pushed onto GEN.
+// Rather than guess a portal label from a stale comment, an unmapped shift now REFUSES and asks for
+// PE_POLICY explicitly. (`pick()` also refuses to save if the label isn't a real portal option.)
 const POLICY_FOR_SHIFT = { GEN: 'GEN', '10H': '10H', '12H': '12H', DSG: 'DSG' };
 
 // Find the option whose text matches `wanted` case-insensitively and select it by its EXACT
@@ -56,7 +59,10 @@ const killModal = (page) => page.evaluate(() => {
 (async () => {
   if (!CARD) bad('CARD required');
   if (!NAME && !DEPT && !SHIFT && !GENDER) bad('at least one of NAME/DEPT/SHIFT/GENDER required');
-  if (SHIFT && !POLICY) POLICY = POLICY_FOR_SHIFT[SHIFT.trim().toUpperCase()] || 'GEN';
+  if (SHIFT && !POLICY) {
+    POLICY = POLICY_FOR_SHIFT[SHIFT.trim().toUpperCase()];
+    if (!POLICY) bad(`No office-time policy is mapped for shift "${SHIFT}". Refusing to guess — defaulting to GEN would silently change when this worker counts as late. Pass PE_POLICY=<exact portal policy name>, or add "${SHIFT.trim().toUpperCase()}" to POLICY_FOR_SHIFT once the right policy is confirmed on the portal.`);
+  }
   if (!fs.existsSync(OUT_DIR)) fs.mkdirSync(OUT_DIR, { recursive: true });
   const { browser, page } = await session();
   const dialogs = []; page.on('dialog', d => { dialogs.push(d.message()); d.accept().catch(() => {}); });
@@ -103,6 +109,10 @@ const killModal = (page) => page.evaluate(() => {
       if (NAME && a.name.trim() !== NAME.trim()) m.push(`name: got "${a.name}" want "${NAME}"`);
       if (DEPT && !eqCI(a.dept, DEPT)) m.push(`dept: got "${a.dept}" want "${DEPT}"`);
       if (SHIFT && !eqCI(a.shift, SHIFT)) m.push(`shift: got "${a.shift}" want "${SHIFT}"`);
+      // The office-time POLICY decides when a worker is marked late — it is half of what this script
+      // sets, and it was NOT verified until 2026-07-31. Without it the script could print
+      // "PUSHED + VERIFIED" when the shift saved but the policy silently reverted.
+      if (SHIFT && POLICY && !eqCI(a.policy, POLICY)) m.push(`policy: got "${a.policy}" want "${POLICY}"`);
       if (GENDER && !eqCI(a.gender, GENDER)) m.push(`gender: got "${a.gender}" want "${GENDER}"`);
       return m;
     };
