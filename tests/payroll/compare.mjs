@@ -10,7 +10,8 @@
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { CASES, CALL_SITE_CASES, FIELDS } from './fixtures.mjs';
+import { CASES, FIELDS } from './fixtures.mjs';
+import { checkPayslipText, checkWorkerSource } from './callsites.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
@@ -132,19 +133,19 @@ if (JSON_OUT) {
       if (c.ambiguity) console.log(`        ${c.ambiguity.replace(/\s+/g, ' ')}`);
     }
   }
-  console.log('\n\nCALL-SITE CONTRACT CHECK');
-  console.log('Do the engine\'s real callers actually work? (interface, not arithmetic)');
+  console.log('\n\nCALL-SITE CHECK');
+  console.log('Do the engine\'s real callers actually work? (interface + wiring, not arithmetic)');
   console.log('-'.repeat(132));
-  for (const cs of CALL_SITE_CASES) {
-    let verdict;
-    try {
-      const r = nodeImpl.computePay(cs.args);
-      verdict = `OK — net ₹${money(r.net)}`;
-    } catch (e) {
-      verdict = `BROKEN — ${e.constructor.name}: ${e.message}`;
-    }
-    console.log(`  ${cs.file.padEnd(32)} ${cs.what}`);
-    console.log(`      ${verdict}`);
+  const show = (title, results) => {
+    console.log(`  ${title}`);
+    for (const r of results) console.log(`      ${r.ok ? '✅' : '🚨'} ${r.what.padEnd(52)} ${r.detail}`);
+    return results.every((r) => r.ok);
+  };
+  let callSitesOk = show('jobs/lib/payslipText.js  — REQUIRED AND EXECUTED (Firestore stubbed)', await checkPayslipText());
+  callSitesOk = show('jobs/worker.js           — SOURCE CHECK ONLY (cannot be imported: it is a job runner)', checkWorkerSource()) && callSitesOk;
+  if (!callSitesOk) {
+    console.log('\n🚨 A REAL CALLER IS BROKEN — the arithmetic above can be perfect while payslips are wrong.');
+    process.exitCode = 1;
   }
 
   console.log('\nNext step is owner review of these findings. Refactor nothing until they are approved.\n');

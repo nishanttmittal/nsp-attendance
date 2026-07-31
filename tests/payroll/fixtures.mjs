@@ -316,41 +316,13 @@ export const CASES = [
   },
 ];
 
-// ── Call-site contract ──────────────────────────────────────────────────────────────────
-// Not a rule disagreement — an INTERFACE disagreement. The two engines name the advances
-// parameter differently (`advances` = ledger array vs `advancesThisMonth` = number), and the
-// Node engine destructures `advances` with no default. Any caller written against the web
-// signature therefore crashes the Node engine. Two live callers do exactly that.
-export const CALL_SITE_CASES = [
-  {
-    id: 'worker.js payslip job → salaryCalc.computePay',
-    file: 'jobs/worker.js:361',
-    what: 'Telegram payslip requested through the command bot',
-    args: {
-      emp: { type: 'monthly', amount: 15000, shift: 'GEN' },
-      att: { presentDays: 30, absentDays: 0, otHrs: 0, lateHrs: 0, earlyHrs: 0 },
-      daysInMonth: 30, elapsedDays: 30, fullMonth: false,
-      monthStart: D(2026, 6, 1), toDate: D(2026, 6, 30),
-      advancesThisMonth: 5000, advanceBalanceIn: 0, advanceRecover: 5000,
-      fines: 0, loanInstallment: 0, bonus: 0, payPerfectBonus: false, openingBalance: 0,
-    },
-    expectation: 'must return a payslip; passing the web-style advances parameter must not crash',
-  },
-  {
-    id: 'payslipText.js → salaryCalc.computePay',
-    file: 'jobs/lib/payslipText.js:31',
-    what: 'command-bot payslip text',
-    args: {
-      emp: { type: 'monthly', amount: 15000, shift: 'GEN' },
-      att: { presentDays: 30, absentDays: 0, otHrs: 0, lateHrs: 0, earlyHrs: 0 },
-      daysInMonth: 30, elapsedDays: 30, fullMonth: false,
-      monthStart: D(2026, 6, 1), toDate: D(2026, 6, 30),
-      advancesThisMonth: 5000, advanceBalanceIn: 0, advanceRecover: 0,
-      fines: 0, loanInstallment: 0,
-    },
-    expectation: 'must return a payslip; passing the web-style advances parameter must not crash',
-  },
-];
+// ── Call-site checks live in ./callsites.mjs ────────────────────────────────────────────
+// There used to be a CALL_SITE_CASES table here. It looked like caller coverage but was not: it
+// called salaryCalc.computePay() with hand-written arguments and printed the answers under the
+// callers' filenames, without ever importing either caller. It could not detect a caller that
+// forgot `openingBalance`, skipped applyOverride, or printed NET instead of PAYABLE — the very
+// defects it was added for. Removed 2026-07-31 (Codex round 3) and replaced by callsites.mjs,
+// which REQUIRES AND RUNS jobs/lib/payslipText.js with Firestore stubbed.
 
 // `payable` added 2026-07-30: comparing only base/otPay/net is what let the Node engine ship with
 // no openingBalance/payable at all (Codex review finding 1) — 40 workers' settlement was wrong on
