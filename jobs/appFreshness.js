@@ -28,14 +28,41 @@ async function payrollConfigWarnings() {
   // FAIL LOUD, NOT OPEN (2026-07-31, Codex round 3): this used to swallow a read failure and return
   // no warnings, so the run printed "payroll config ok" — a permission outage or Firestore error
   // reported as a clean configuration. A monitor that cannot read must say so, not stay silent.
-  let snap;
-  try { snap = await db().collection('att_salary').get(); }
-  catch (err) { return [`• ⚠️ Could NOT read att_salary (${err.message}) — payroll configuration was <b>not checked</b> this run. This is "unknown", not "ok".`]; }
+  let snap, attSnap;
+  try {
+    [snap, attSnap] = await Promise.all([
+      db().collection('att_salary').get(),
+      db().collection('att_attendance').get(),
+    ]);
+  } catch (err) { return [`• ⚠️ Could NOT read payroll data (${err.message}) — payroll configuration was <b>not checked</b> this run. This is "unknown", not "ok".`]; }
+
+  const attOf = {};
+  attSnap.forEach(d => { attOf[d.id] = d.data() || {}; });
+
   snap.forEach(d => {
     const e = d.data() || {};
     if (e.active === false) return;
     if ((e.shift || '') === 'LOD' && (e.type || 'monthly') !== 'daily') {
       out.push(`• <b>${e.name || d.id}</b> is MONTHLY on the LOD shift — LOD Saturdays are not supposed to be paid, but a monthly worker WILL be paid them (~Rs 2,580/mo on Rs 20,000). Move them to daily wage, or tell Claude to fix the engine.`);
+    }
+
+    // WORKING BUT NO PAY RATE (owner approved 2026-08-02). Ravi ahmed (00000051) clocked in for five
+    // days and was handed a Rs 3,500 cash advance while his record carried no `type` and no `wage`.
+    // The engine paid him base Rs 0.00 and showed him owing the whole advance — and NOTHING said so,
+    // because an unset wage is indistinguishable from a worker who genuinely earned nothing.
+    // He was found by chance. This is the check that would have caught him on day one.
+    const a = attOf[d.id] || {};
+    // "Working" must mean WORKING, not a trace. The owner's own record (code 1, DEMO) carries
+    // workHrs 0.3 — an 18-minute stray punch from walking past the machine — and any-hours > 0
+    // flagged him every day. A watchdog that cries wolf daily is one the owner learns to ignore,
+    // which is how the thing it was built for gets missed. One present day, one logged day, or
+    // half a day of hours.
+    const logged = Object.values(e.attendanceLog || {}).reduce((s, l) => s + (Array.isArray(l) ? l.length : 0), 0);
+    const working = Number(a.presentDays || 0) >= 1 || logged >= 1 || Number(a.workHrs || 0) >= 4;
+    const rate = (e.type || '') === 'daily' ? Number(e.wage || 0) : Number(e.amount || 0);
+    if (working && !(rate > 0)) {
+      const adv = (e.advances || []).reduce((s, x) => s + Number(x.amount || 0), 0);
+      out.push(`• 💸 <b>${e.name || d.id}</b> is WORKING (${a.presentDays || 0} present, ${Math.round(Number(a.workHrs || 0))}h) but has <b>NO pay rate set</b> (type=${e.type || 'unset'}, wage=${e.wage ?? '—'}, salary=${e.amount ?? '—'}). He will be paid <b>Rs 0</b>.${adv ? ` He has already taken Rs ${adv.toLocaleString('en-IN')} in advances.` : ''} Set it on the Salary screen, or: <code>CODE=${d.id} TYPE=daily WAGE=&lt;rs&gt; DRY=false node jobs/setWorkerPay.js</code>`);
     }
   });
   return out;
