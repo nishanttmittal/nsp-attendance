@@ -187,9 +187,18 @@ async function downloadMonthly(page, fromDdmmyyyy, toDdmmyyyy, kind = 'summary')
 // Find a worker's Employee.aspx edit RowId by card number. The whole roster renders on one
 // EmployeeList.aspx page (no pagination) — scan the row whose text holds the card, grab its
 // Employee.aspx?RowId link. Returns the RowId string, or null if not found. Read-only.
+// Returns the portal RowId for a card number, or null if that worker genuinely is not listed.
+// THROWS if the list did not render — those are different facts and callers acted on them as if
+// they were the same. On 2026-08-02 EmployeeList.aspx returned ZERO rows for several minutes and
+// pushEmployeeEdit reported "worker 00000051 not found on machine", which reads as "this person
+// isn't on the biometric machine" when the truth was "the portal did not answer". Same fixed-sleep
+// fragility that let the settings guard capture an empty page over its own baseline.
 async function findEmployeeRowId(page, card) {
-  await page.goto('https://onlinerealsoft.com/EmployeeList.aspx', { waitUntil: 'domcontentloaded' });
-  await page.waitForTimeout(1500);
+  await page.goto('https://onlinerealsoft.com/EmployeeList.aspx', { waitUntil: 'networkidle', timeout: 120000 });
+  await page.locator('a[href*="Employee.aspx?RowId="]').first()
+    .waitFor({ state: 'attached', timeout: 45000 }).catch(() => {});
+  const listed = await page.locator('a[href*="Employee.aspx?RowId="]').count();
+  if (!listed) throw new Error('EmployeeList.aspx rendered NO employee rows — the portal did not answer. This is NOT "worker not found"; retry rather than concluding anything about this worker.');
   return await page.evaluate((c) => {
     for (const tr of document.querySelectorAll('tr')) {
       if ((tr.innerText || '').includes(c)) {
