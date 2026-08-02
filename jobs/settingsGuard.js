@@ -53,9 +53,20 @@ async function readPage(page, url, ids) {
   // Was: domcontentloaded + a fixed 1200 ms sleep. On a slow night that returned a page whose form
   // had not rendered, so EVERY field read as '<missing>' — and CAPTURE wrote those placeholders
   // over the baseline (2026-08-01). Wait for the form to actually exist instead of guessing a delay.
-  await page.goto(url, { waitUntil: 'networkidle', timeout: 120000 });
-  await page.locator('#MainContent_' + ids[0]).waitFor({ state: 'attached', timeout: 60000 }).catch(() => {});
-  await page.waitForTimeout(400);
+  // 'domcontentloaded', not 'networkidle': this ASP.NET portal keeps connections busy long after the
+  // form is usable, so networkidle made a 12-page sweep exceed its own timeout and get killed mid-run
+  // (twice on 2026-08-02). Correctness here comes from WAITING FOR THE FIELD below — which is what
+  // the original bug lacked — not from waiting on the network.
+  await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
+  // FAIL FAST ON A DEAD PAGE (2026-08-02). The vendor migrated the portal to ERP_-prefixed pages,
+  // so these URLs now return the ASP.NET 404 — and waiting 60 s for a field that will never appear,
+  // twelve times over, made the guard take longer than its own timeout and get killed before it
+  // could report anything. A monitor that cannot finish failing is a monitor that says nothing.
+  const title = await page.title().catch(() => '');
+  if (/resource cannot be found|not found|unauthor/i.test(title))
+    throw new Error(`${url} returned "${title}" — the page no longer exists. The portal moved to ERP_-prefixed pages on 2026-08-02; this watcher needs porting before it can check anything.`);
+  await page.locator('#MainContent_' + ids[0]).waitFor({ state: 'attached', timeout: 15000 }).catch(() => {});
+  await page.waitForTimeout(300);
   return page.evaluate((wanted) => {
     const out = {};
     for (const id of wanted) {
