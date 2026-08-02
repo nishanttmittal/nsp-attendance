@@ -28,6 +28,12 @@ const PAGES = [
   // other policy obeys: shift span − 1:30 − 0:15 grace (DSG span 10:00). It decides whether the
   // designer's day counts full or half, so it is watched from the moment it existed.
   { key: 'policy_DSG', url: 'https://onlinerealsoft.com/EmployeePolicy.aspx?RowId=6' },
+  // LOD policy CREATED 2026-08-01 (RowId 7, confirmed from EmployeePolicyList) — full-day line 09:45
+  // from the same house formula (LOD span 11:30 − 1:30 lunch − 0:15 grace). Before this the 4 LOD
+  // loading staff sat on the GEN policy (line 06:45), which is why the portal reported 13-20 h of
+  // phantom OT for them off an 8.5 h basis. Measured cost of the move: Rs 0.00 for three of them and
+  // +Rs 15.91-31.81 for one (in his favour) — see payroll-daily-wagers.
+  { key: 'policy_LOD', url: 'https://onlinerealsoft.com/EmployeePolicy.aspx?RowId=7' },
 ];
 // fields that change how punches are turned into attendance (the dangerous ones)
 const WATCH = {
@@ -44,8 +50,12 @@ const WATCH = {
 };
 
 async function readPage(page, url, ids) {
-  await page.goto(url, { waitUntil: 'domcontentloaded' });
-  await page.waitForTimeout(1200);
+  // Was: domcontentloaded + a fixed 1200 ms sleep. On a slow night that returned a page whose form
+  // had not rendered, so EVERY field read as '<missing>' — and CAPTURE wrote those placeholders
+  // over the baseline (2026-08-01). Wait for the form to actually exist instead of guessing a delay.
+  await page.goto(url, { waitUntil: 'networkidle', timeout: 120000 });
+  await page.locator('#MainContent_' + ids[0]).waitFor({ state: 'attached', timeout: 60000 }).catch(() => {});
+  await page.waitForTimeout(400);
   return page.evaluate((wanted) => {
     const out = {};
     for (const id of wanted) {
@@ -73,11 +83,50 @@ async function readAll() {
 async function guard() {
   const live = await readAll();
   if (process.env.CAPTURE === 'true') {
+    // REFUSE TO CAPTURE A BROKEN READ (2026-08-01). readPage() writes '<missing>' for any field it
+    // cannot find, and this used to write that straight into the baseline. It happened for real:
+    // a capture run where most pages failed to render replaced almost every reference value with
+    // '<missing>', which would then have made the guard compare against nothing and report "no
+    // drift" forever — the reference destroyed by the very command meant to refresh it.
+    // A baseline is a security reference. An incomplete read is not a new baseline.
+    const broken = [];
+    for (const [pageKey, fields] of Object.entries(live))
+      for (const [f, v] of Object.entries(fields || {}))
+        if (v === '<missing>' || v === '' || v == null) broken.push(`${pageKey}.${f}="${v}"`);
+    if (broken.length) {
+      console.error(`\n🚨 REFUSING TO CAPTURE — ${broken.length} field(s) did not read. The existing baseline is UNCHANGED.`);
+      console.error('   The portal was probably slow or a page did not render. Just run it again.');
+      broken.slice(0, 12).forEach((b) => console.error('   ' + b));
+      if (broken.length > 12) console.error(`   …and ${broken.length - 12} more`);
+      return 2;
+    }
+    // Never shrink the reference either: a page that silently dropped out of PAGES would quietly
+    // stop being watched, and nothing would say so.
+    if (fs.existsSync(BASELINE)) {
+      const prev = JSON.parse(fs.readFileSync(BASELINE, 'utf8'));
+      const lost = Object.keys(prev).filter((k) => !(k in live));
+      if (lost.length) {
+        console.error(`\n🚨 REFUSING TO CAPTURE — would stop watching: ${lost.join(', ')}. Baseline UNCHANGED.`);
+        return 2;
+      }
+    }
     fs.writeFileSync(BASELINE, JSON.stringify(live, null, 1));
-    console.log('baseline captured ->', BASELINE);
+    console.log(`baseline captured (${Object.keys(live).length} pages, all fields read) ->`, BASELINE);
     return 0;
   }
   const base = JSON.parse(fs.readFileSync(BASELINE, 'utf8'));
+  // COULD-NOT-READ is not DRIFT (2026-08-01). If a page fails to render, every field comes back
+  // '<missing>' and this would have shouted "235 settings changed" — a false alarm that trains the
+  // reader to ignore the alert. Report the outage as an outage; it still fails loudly.
+  const unread = [];
+  for (const pageKey of Object.keys(base))
+    for (const f of Object.keys(base[pageKey]))
+      if ((live[pageKey] || {})[f] === '<missing>') unread.push(`${pageKey}.${f}`);
+  if (unread.length) {
+    await sendTelegram(`⚠️ <b>Settings guard could not READ the portal</b> — ${unread.length} field(s) did not render (e.g. ${unread.slice(0, 3).join(', ')}). Settings were <b>not checked</b> this run. This is "unknown", not "ok".`).catch(() => {});
+    console.error(`could not read ${unread.length} field(s) — settings NOT checked this run`);
+    return 2;
+  }
   const drift = [];
   for (const pageKey of Object.keys(base)) {
     for (const f of Object.keys(base[pageKey])) {
