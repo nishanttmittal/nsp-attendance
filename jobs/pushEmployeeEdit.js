@@ -31,12 +31,16 @@ function bad(m) { console.error('ERROR: ' + m); process.exit(1); }
 // Shifts that have a matching office-time policy on the portal.
 // DSG added 2026-07-30 — the DSG policy now EXISTS (RowId 6, full-day line 08:15). Without this the
 // map would silently push a DSG worker back onto the GEN policy on any future run.
-// NOT LISTED: LOD and wir. Until 2026-07-31 an unmapped shift silently defaulted to 'GEN' — the same
-// silent-default failure that caused the manual-worker OT bug. A comment here claimed wir used the
-// 'amarjeet' policy, but wir was never in the map, so wir workers would have been pushed onto GEN.
-// Rather than guess a portal label from a stale comment, an unmapped shift now REFUSES and asks for
-// PE_POLICY explicitly. (`pick()` also refuses to save if the label isn't a real portal option.)
-const POLICY_FOR_SHIFT = { GEN: 'GEN', '10H': '10H', '12H': '12H', DSG: 'DSG' };
+// LOD added 2026-08-01: the LOD policy now EXISTS (RowId 7, full-day line 09:45) and all 4 LOD daily
+// wagers were moved onto it — they had been sitting on GEN (line 06:45), which is why the portal
+// reported 13-20 h of phantom OT for them off an 8.5 h basis.
+// wir -> 'amarjeet' added the same day, and this one is VERIFIED, not inferred: the only wir worker
+// (00000074) reads back {"shift":"wir","policy":"amarjeet"} from the portal, and the policy is
+// RowId 5 — the same row settingsGuard watches as policy_wir. A comment used to claim this while
+// wir was absent from the map, so wir workers would have been pushed onto GEN.
+// An unmapped shift still REFUSES rather than defaulting to GEN — the silent-default failure that
+// caused the manual-worker OT bug. (`pick()` also refuses to save an option the portal doesn't have.)
+const POLICY_FOR_SHIFT = { GEN: 'GEN', '10H': '10H', '12H': '12H', DSG: 'DSG', LOD: 'LOD', WIR: 'amarjeet' };
 
 // Find the option whose text matches `wanted` case-insensitively and select it by its EXACT
 // portal label (so ASP.NET postbacks still fire via Playwright's selectOption).
