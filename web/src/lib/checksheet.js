@@ -1,10 +1,15 @@
 // "Days & OT verification sheet" — the pre-payday muster the owner shares on WhatsApp.
 // Staff check their Days + OT and write their Advance; owner verifies, then pays. Built from the
 // APP's own numbers (present days + net OT), NOT the portal, so it's exactly what the app would pay.
-import * as XLSX from 'xlsx';
+// xlsx (~430 KB) is loaded ON DEMAND, only when the owner actually taps "Check-sheet".
+// It used to be a static import, so every worker paid for it on every app open even
+// though only the owner ever presses that one button. Behaviour is unchanged — the
+// only consumer (shareCheckSheet) was already async.
+const loadXLSX = () => import('xlsx');
 
 // rows = the Salary screen's computed rows [{ emp, pay, ... }]. mk = 'YYYY-MM'.
-export function buildCheckSheet(rows, mk) {
+export async function buildCheckSheet(rows, mk) {
+  const XLSX = await loadXLSX();
   const sorted = [...rows].sort((a, b) =>
     (a.emp.dept || '').localeCompare(b.emp.dept || '') || (a.emp.name || '').localeCompare(b.emp.name || ''));
   const header = ['Name', 'Dept', 'Days', 'OT (hrs)', 'Advance', 'OK'];
@@ -27,7 +32,8 @@ export function buildCheckSheet(rows, mk) {
 
 // Build the .xlsx and hand it to the WhatsApp/share sheet (download fallback on desktop).
 export async function shareCheckSheet(rows, mk) {
-  const wb = buildCheckSheet(rows, mk);
+  const XLSX = await loadXLSX();
+  const wb = await buildCheckSheet(rows, mk);
   const out = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
   const blob = new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
   const filename = `days-OT-check-${mk}.xlsx`;
