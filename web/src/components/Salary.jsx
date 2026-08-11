@@ -47,7 +47,19 @@ function OwnerSalary({ user }) {
   if (openCode) return <Person code={openCode} mk={mk} user={user} onBack={() => { setOpenCode(''); reload(); }} />;
   if (emps === null) return <p className="text-gray-500">Loading…</p>;
 
-  const rows = emps.filter((e) => e.amount || e.wage).map((e) => ({ emp: e, ...payFor(e, attMap, mk, ctx, 0, punches[e.code]) }));
+  const allRows = emps.filter((e) => e.amount || e.wage).map((e) => ({ emp: e, ...payFor(e, attMap, mk, ctx, 0, punches[e.code]) }));
+  // PAST months hide no-activity rows (owner 2026-08-11): a worker whose days/hours are only in the
+  // CURRENT month (new joiner) must not appear in earlier months — with a salary set, a zero-attendance
+  // month otherwise even shows a phantom weekly-off payable. Keep any row with attendance, a money
+  // event, or a carried balance in that month; the running month always shows everyone.
+  const rowRelevant = (r) => {
+    const a = r.att || {}, m = r.md || {};
+    return (a.presentDays || 0) > 0 || (a.workHrs || 0) > 0 || (a.otHrs || 0) > 0 || (a.equivalentDays || 0) > 0
+      || !!m.locked || !!m.payment || !!m.paidSoFar || !!m.override || Number(m.fine || 0) !== 0
+      || Number(m.bonus || 0) !== 0 || Number(m.openingBalance || 0) !== 0
+      || (r.emp.advances || []).some((ad) => (ad.date || '').startsWith(mk));
+  };
+  const rows = mk === istMonth() ? allRows : allRows.filter(rowRelevant);
   const locked = rows.filter((r) => r.md.locked || r.md.payment);   // settled via Lock
   const brokenFix = rows.filter((r) => (r.lateFixed || 0) > 0.25);   // workers auto-corrected for broken-punch fake "late"
   const isSettled = (r) => !!(r.md.locked || r.md.payment);
