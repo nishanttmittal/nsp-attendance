@@ -21,7 +21,7 @@ const round = n => Math.round(n * 100) / 100;
 // Net work hours per shift (rulebook §3) — used to derive the normal hourly rate for OT (paid 1×).
 // DSG (designer) = 09:00–19:00 MINUS the 13:00–13:30 lunch, which is NOT paid → 9.5 working hours
 // (owner 2026-07-28, corrected same day). KEEP IN SYNC with web/src/lib/payroll.js.
-const SHIFT_HOURS = { GEN: 8, '10H': 10, '12H': 12, wir: 10, DSG: 9.5, LOD: 11 };
+const SHIFT_HOURS = { GEN: 8, '10H': 10, '12H': 12, wir: 10, DSG: 9.5, LOD: 10 };
 
 // Effective pay on `toDate` = base + sum of increment deltas effective on/before that date.
 // Each increment is an ADDED amount (e.g. +1000), recorded with effective date + remark.
@@ -68,12 +68,12 @@ function computePay({ emp, att, daysInMonth, elapsedDays, fullMonth, advances = 
   // exceed effElapsed − presentDays. min() deliberately keeps a NEGATIVE override-absent intact.
   const absentForBase = Math.min(Number(att.absentDays || 0), Math.max(0, effElapsed - (att.presentDays || 0)));
   // Daily-wager pay = wage × equivalent-days (owner rule 2026-07-22): machine daily = actual working
-  // hours ÷ standard-day hours (11) → pay scales by the hour at 1×; workHrs includes OT hours
+  // hours ÷ standard-day hours (10; owner 2026-08-11) → pay scales by the hour at 1×; workHrs includes OT hours
   // (so netOtHrs=0 below). appOnly = Σ min(hrs,11)/11; override presets equivalentDays.
   // Portal "Total Work" is RAW first-in→last-out — it never deducts the LOD 13:00–13:30 lunch
-  // (verified 2026-07-24). Owner rule: ₹700 = 11 WORKING hours, lunch unpaid → deduct 30 min per
+  // (verified 2026-07-24). Owner rule 2026-08-11: ₹700 = 10 WORKING hours (9:00–19:30 incl. lunch), lunch unpaid → deduct 30 min per
   // present day here. KEEP IN SYNC with web/src/lib/payroll.js.
-  const dailyStdHrs = Number(emp.stdHours) || Number(emp.standardHours) || 11;
+  const dailyStdHrs = Number(emp.stdHours) || Number(emp.standardHours) || 10;   // owner 2026-08-11: 10-hr basis
   const lunchDeductHrs = 0.5 * (att.presentDays || 0);
   const dailyEquivDays = att.equivalentDays != null ? att.equivalentDays
     : Math.max(0, (att.workHrs || 0) - lunchDeductHrs) / dailyStdHrs;

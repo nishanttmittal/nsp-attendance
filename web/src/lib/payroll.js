@@ -6,9 +6,9 @@ const DAY = 86400000;
 // Net work hours per shift (12H uses 12). Drives the 1× OT hourly rate.
 // DSG (designer) = 09:00–19:00 MINUS the unpaid 13:00–13:30 lunch → 9.5 working hours
 // (owner 2026-07-28). KEEP IN SYNC with jobs/salaryCalc.js.
-export const SHIFT_HOURS = { GEN: 8, '10H': 10, '12H': 12, wir: 10, DSG: 9.5, LOD: 11 };
+export const SHIFT_HOURS = { GEN: 8, '10H': 10, '12H': 12, wir: 10, DSG: 9.5, LOD: 10 };
 // App-only daily-wagers: 11-hour standard day; pay prorates by hours worked.
-export const DAILY_WAGER_HOURS = 11;
+export const DAILY_WAGER_HOURS = 10;   // owner 2026-08-11: LOD 9:00–19:30, ₹700 = 10 working hrs
 
 // Effective pay = base + sum of increment deltas effective on/before the date.
 export function effectiveAmount(emp, toDate) {
@@ -47,15 +47,16 @@ export function computePay({ emp, att, daysInMonth, elapsedDays, fullMonth, adva
   const absentForBase = Math.min(Number(att.absentDays || 0), Math.max(0, effElapsed - (att.presentDays || 0)));
   // Daily-wager pay = wage × equivalent-days (standard-days-worth of actual hours):
   //  • machine daily (owner rule 2026-07-22): equivalentDays = actual working hours ÷ standard-day
-  //    hours (11). Pay scales by the hour — work less → paid less, work more → paid more at the SAME
-  //    ₹/hr (₹700 ÷ 11 ≈ ₹63.6). workHrs already excludes the 30-min lunch and already includes any
+  //    hours (10; owner 2026-08-11). Pay scales by the hour — work less → paid less, more → more at the
+  //    SAME ₹/hr (₹700 ÷ 10 = ₹70). workHrs already excludes the 30-min lunch and already includes any
   //    overtime hours, so there is NO separate OT line (netOtHrs forced to 0 below — see the note).
   //  • app-only daily: Σ min(hours,11)/11 (each manual day capped at 1) from dailyAtt.
   //  • owner override (md.override.days) presets equivalentDays → pay exactly N full days.
   const dailyStdHrs = Number(emp.stdHours) || Number(emp.standardHours) || DAILY_WAGER_HOURS;
   // Portal "Total Work" is RAW first-in→last-out — it never deducts the LOD 13:00–13:30 lunch
   // (verified 2026-07-24: break config + "With Lunch" calc + lunch checkboxes all had no effect).
-  // Owner rule: ₹700 = 11 WORKING hours, lunch unpaid → deduct 30 min per present day here.
+  // Owner rule 2026-08-11: ₹700 = 10 WORKING hours (9:00–19:30 span incl. lunch) — lunch unpaid,
+  // so still deduct 30 min per present day here.
   // Override/appOnly paths supply equivalentDays and are untouched.
   const lunchDeductHrs = 0.5 * (att.presentDays || 0);
   const dailyEquivDays = att.equivalentDays != null ? att.equivalentDays
