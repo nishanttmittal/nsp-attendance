@@ -9,19 +9,22 @@ import Problems from './components/Problems.jsx';
 import Settings from './components/Settings.jsx';
 import Shadow from './components/Shadow.jsx';
 
+// Daily tabs stay on the bar; occasional screens live under ⋯ More (owner 2026-08-11: "app is
+// confusing" — six same-weight tabs, three of them advance-related). Keys are unchanged.
 const TABS = [
-  { key: 'floor', label: 'Floor', feature: 'dashboard' },
-  { key: 'advances', label: 'Advances', feature: 'advances' },
-  { key: 'salary', label: 'Salary', feature: 'salary' },
-  { key: 'incoming', label: 'Advances In', feature: 'salary' },
-  { key: 'problems', label: 'Problems', feature: 'problems' },
-  { key: 'shadow', label: 'Shadow', feature: 'shadow' },
+  { key: 'floor', label: 'Floor', feature: 'dashboard', primary: true },
+  { key: 'salary', label: 'Salary', feature: 'salary', primary: true },
+  { key: 'problems', label: 'Problems', feature: 'problems', primary: true },
+  { key: 'advances', label: 'Advances (manager)', feature: 'advances' },
+  { key: 'incoming', label: 'Hisab advances — accept', feature: 'salary' },
+  { key: 'shadow', label: 'Day check (shadow)', feature: 'shadow' },
 ];
 
 export default function App() {
   const { user, loading } = useAuth();
   const [tab, setTab] = useState('floor');
   const [badge, setBadge] = useState(0);
+  const [moreOpen, setMoreOpen] = useState(false);
 
   useEffect(() => {
     if (!user?.role) return;
@@ -66,16 +69,39 @@ export default function App() {
         </div>
       </header>
 
-      {tab !== 'settings' && (
-        <nav className="bg-white border-b flex">
-          {visible.map((t) => (
-            <button key={t.key} onClick={() => setTab(t.key)}
-              className={`flex-1 py-3 text-sm font-medium ${active === t.key ? 'text-red-700 border-b-2 border-red-700' : 'text-gray-500'}`}>
-              {t.label}{t.key === 'problems' && badge > 0 ? <span className="ml-1 bg-red-600 text-white text-[10px] rounded-full px-1.5 py-0.5">{badge}</span> : null}
-            </button>
-          ))}
-        </nav>
-      )}
+      {tab !== 'settings' && (() => {
+        // ≤4 screens (e.g. a manager) → plain bar; more → 3 daily tabs + a ⋯ More menu
+        const split = visible.length > 4;
+        const bar = split ? visible.filter((t) => t.primary) : visible;
+        const more = split ? visible.filter((t) => !t.primary) : [];
+        const activeMore = more.find((t) => t.key === active);
+        return (
+          <nav className="bg-white border-b flex relative">
+            {bar.map((t) => (
+              <button key={t.key} onClick={() => { setTab(t.key); setMoreOpen(false); }}
+                className={`flex-1 py-3 text-sm font-medium ${active === t.key ? 'text-red-700 border-b-2 border-red-700' : 'text-gray-500'}`}>
+                {t.label}{t.key === 'problems' && badge > 0 ? <span className="ml-1 bg-red-600 text-white text-[10px] rounded-full px-1.5 py-0.5">{badge}</span> : null}
+              </button>
+            ))}
+            {more.length > 0 && (
+              <button onClick={() => setMoreOpen((o) => !o)}
+                className={`flex-1 py-3 text-sm font-medium ${activeMore ? 'text-red-700 border-b-2 border-red-700' : 'text-gray-500'}`}>
+                {activeMore ? activeMore.label.split(' ')[0] : '⋯ More'}
+              </button>
+            )}
+            {moreOpen && more.length > 0 && (
+              <div className="absolute right-2 top-full mt-1 bg-white border rounded-xl shadow-lg z-20 min-w-[220px] py-1">
+                {more.map((t) => (
+                  <button key={t.key} onClick={() => { setTab(t.key); setMoreOpen(false); }}
+                    className={`block w-full text-left px-4 py-3 text-sm ${active === t.key ? 'text-red-700 font-semibold' : 'text-gray-700'} hover:bg-gray-50`}>
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </nav>
+        );
+      })()}
 
       <main className="flex-1 p-4 max-w-3xl w-full mx-auto">
         {tab === 'settings' && canSee(user.role, 'settings') ? (

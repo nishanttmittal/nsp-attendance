@@ -30,6 +30,7 @@ function OwnerSalary({ user }) {
   const [showRemoved, setShowRemoved] = useState(false);   // include resigned/removed (kept for costing)
   const [filter, setFilter] = useState('all');       // all | topay | paid — chips above the list
   const [showMoney, setShowMoney] = useState(false); // 💸 total box tapped open → cash/account detail
+  const [showTools, setShowTools] = useState(false); // 🧰 rare tools folded away (owner 2026-08-11: screen too busy)
   const ctx = useMemo(() => monthCtx(mk), [mk]);
   // manual/off-machine workers — passed to the advance card so they can be picked for advances
   const manualPeople = useMemo(() => (emps || []).filter((e) => e.manual || e.appOnly).map((e) => ({ code: e.code, name: e.name || e.code, dept: e.dept || '' })), [emps]);
@@ -37,29 +38,47 @@ function OwnerSalary({ user }) {
   async function reload() {
     const [list, am, pu] = await Promise.all([loadEmployees(showRemoved), loadAllAttendance(), loadAllPunches()]);
     setEmps(list); setAttMap(am); setPunches(pu);
+    // refresh the instant-paint cache (default view only — showRemoved is a rare owner toggle)
+    if (!showRemoved) { try { localStorage.setItem('nsp_salary_cache_v1', JSON.stringify({ emps: list, attMap: am, punches: pu, at: Date.now() })); } catch { /* full/blocked storage — cache is optional */ } }
   }
+  // Instant paint (owner 2026-08-11 "app is slow"): show the last-loaded data immediately on open,
+  // then reload() replaces it with fresh figures in the background. Payments/locks always act on
+  // fresh per-worker reads, so a briefly-stale list can never mis-pay.
+  useEffect(() => {
+    try {
+      const c = JSON.parse(localStorage.getItem('nsp_salary_cache_v1') || 'null');
+      if (c && Array.isArray(c.emps) && c.emps.length) { setEmps(c.emps); setAttMap(c.attMap || {}); setPunches(c.punches || {}); }
+    } catch { /* corrupt cache — ignore, fresh load below */ }
+  }, []);
   useEffect(() => { reload(); }, [showRemoved]);
   // instant reflection when an owner records an advance (optimistic — the write persists in background)
   const onAdvanceSaved = (code, adv) => setEmps((prev) => (prev || []).map((e) => e.code === code ? { ...e, advances: [...(e.advances || []), adv] } : e));
   // undo the optimistic add if the background write is rejected (e.g. the month turned out to be locked)
   const onAdvanceRevert = (code, advId) => setEmps((prev) => (prev || []).map((e) => e.code === code ? { ...e, advances: (e.advances || []).filter((a) => a.id !== advId) } : e));
 
+  // Memoized (owner 2026-08-11 "app is slow"): payFor scans every worker's per-day punches, so
+  // recomputing 80 workers on EVERY render (each search keystroke, chip tap, dialog open) was the
+  // typing lag. Now it recomputes only when the data or the month actually changes.
+  const rows = useMemo(() => {
+    if (!emps) return [];
+    const allRows = emps.filter((e) => e.amount || e.wage).map((e) => ({ emp: e, ...payFor(e, attMap, mk, ctx, 0, punches[e.code]) }));
+    // PAST months hide no-activity rows (owner 2026-08-11): a worker whose days/hours are only in the
+    // CURRENT month (new joiner) must not appear in earlier months — with a salary set, a zero-attendance
+    // month otherwise even shows a phantom weekly-off payable. Keep any row with attendance, a money
+    // event, or a carried balance in that month; the running month always shows everyone.
+    const rowRelevant = (r) => {
+      const a = r.att || {}, m = r.md || {};
+      return (a.presentDays || 0) > 0 || (a.workHrs || 0) > 0 || (a.otHrs || 0) > 0 || (a.equivalentDays || 0) > 0
+        || !!m.locked || !!m.payment || !!m.paidSoFar || !!m.override || Number(m.fine || 0) !== 0
+        || Number(m.bonus || 0) !== 0 || Number(m.openingBalance || 0) !== 0
+        || (r.emp.advances || []).some((ad) => (ad.date || '').startsWith(mk));
+    };
+    return mk === istMonth() ? allRows : allRows.filter(rowRelevant);
+  }, [emps, attMap, punches, mk, ctx]);
+
   if (openCode) return <Person code={openCode} mk={mk} user={user} onBack={() => { setOpenCode(''); reload(); }} />;
   if (emps === null) return <p className="text-gray-500">Loading…</p>;
 
-  const allRows = emps.filter((e) => e.amount || e.wage).map((e) => ({ emp: e, ...payFor(e, attMap, mk, ctx, 0, punches[e.code]) }));
-  // PAST months hide no-activity rows (owner 2026-08-11): a worker whose days/hours are only in the
-  // CURRENT month (new joiner) must not appear in earlier months — with a salary set, a zero-attendance
-  // month otherwise even shows a phantom weekly-off payable. Keep any row with attendance, a money
-  // event, or a carried balance in that month; the running month always shows everyone.
-  const rowRelevant = (r) => {
-    const a = r.att || {}, m = r.md || {};
-    return (a.presentDays || 0) > 0 || (a.workHrs || 0) > 0 || (a.otHrs || 0) > 0 || (a.equivalentDays || 0) > 0
-      || !!m.locked || !!m.payment || !!m.paidSoFar || !!m.override || Number(m.fine || 0) !== 0
-      || Number(m.bonus || 0) !== 0 || Number(m.openingBalance || 0) !== 0
-      || (r.emp.advances || []).some((ad) => (ad.date || '').startsWith(mk));
-  };
-  const rows = mk === istMonth() ? allRows : allRows.filter(rowRelevant);
   const locked = rows.filter((r) => r.md.locked || r.md.payment);   // settled via Lock
   const brokenFix = rows.filter((r) => (r.lateFixed || 0) > 0.25);   // workers auto-corrected for broken-punch fake "late"
   const isSettled = (r) => !!(r.md.locked || r.md.payment);
@@ -240,15 +259,25 @@ function OwnerSalary({ user }) {
         ))}
       </div>
 
-      <label className="flex items-center gap-2 text-xs text-slate-500 px-1"><input type="checkbox" className="w-5 h-5 accent-slate-700" checked={showRemoved} onChange={(e) => setShowRemoved(e.target.checked)} /> Show removed/resigned staff (kept in the sheet for costing)</label>
-      <p className="text-[11px] text-slate-500 px-1">Tap 💵 Cash or 🏦 Account → a box opens: split across <b>Cash + Account</b>, tick <b>🎯 Bonus day</b> on top if giving one, then <b>Pay &amp; lock</b> (Undo if you mis-tap). Tap the <b>name</b> for OT / details. <span className="text-slate-400">(pay v5)</span></p>
-
       <AdvanceCard user={user} extra={manualPeople} onSaved={onAdvanceSaved} />
-      <AdvancesExportCard emps={emps} />
-      <DeclareWorkerCard user={user} emps={emps} onSaved={reload} />
-      <AddWorkerCard user={user} onAdded={reload} />
-      {mk === istMonth() && <SelfPunchCard />}
       {noSalary.length > 0 && <NoSalaryList list={noSalary} onSaved={reload} />}
+
+      {/* rarely-used tools folded away so the daily screen stays clean (owner 2026-08-11) */}
+      <button onClick={() => setShowTools((s) => !s)} className="w-full text-left bg-white rounded-2xl border-2 border-slate-200 p-3 active:bg-slate-50">
+        <span className="text-sm font-bold text-slate-700">🧰 More tools</span>
+        <span className="text-[11px] text-slate-500 ml-2">add worker · self-punch · exports · removed staff</span>
+        <span className="float-right text-slate-400">{showTools ? '▲' : '▼'}</span>
+      </button>
+      {showTools && (
+        <div className="space-y-3">
+          <AdvancesExportCard emps={emps} />
+          <DeclareWorkerCard user={user} emps={emps} onSaved={reload} />
+          <AddWorkerCard user={user} onAdded={reload} />
+          {mk === istMonth() && <SelfPunchCard />}
+          <label className="flex items-center gap-2 text-xs text-slate-500 px-1"><input type="checkbox" className="w-5 h-5 accent-slate-700" checked={showRemoved} onChange={(e) => setShowRemoved(e.target.checked)} /> Show removed/resigned staff (kept in the sheet for costing)</label>
+          <p className="text-[11px] text-slate-500 px-1">Tap 💵 Cash or 🏦 Account → a box opens: split across <b>Cash + Account</b>, tick <b>🎯 Bonus day</b> on top if giving one, then <b>Pay &amp; lock</b> (Undo if you mis-tap). Tap the <b>name</b> for OT / details. <span className="text-slate-400">(pay v6)</span></p>
+        </div>
+      )}
       {showReport && <ReportModal user={user} mk={mk} rows={rows} onClose={() => setShowReport(false)} />}
       {payC && <FastPaySheet payC={payC} mk={mk} busy={!!busy} onChange={setPayC} onCancel={() => setPayC(null)} onConfirm={doFastLock} />}
     </div>
