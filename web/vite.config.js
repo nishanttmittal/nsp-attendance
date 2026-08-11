@@ -11,6 +11,11 @@ export default defineConfig({
     tailwindcss(),
     VitePWA({
       registerType: 'autoUpdate',
+      workbox: {
+        // NEVER serve the SPA shell for Firebase's reserved /__/auth/* paths (auth iframe/handler)
+        // — required when co-hosted on unico-operations.firebaseapp.com/attendance/ (2026-08-11).
+        navigateFallbackDenylist: [/^\/__/],
+      },
       manifest: {
         name: 'NSP Attendance',
         short_name: 'Attendance',
