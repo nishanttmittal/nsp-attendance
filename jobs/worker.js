@@ -547,6 +547,19 @@ async function main() {
     }
   } catch (e) { console.error('weekly-off audit failed:', e.message); }
 
+  // once-a-day: LOD grace engine (owner rule 2026-08-11) — recompute loading daily-wagers'
+  // equivalentDays from punches with the 15-min both-ways grace (current + last month).
+  try {
+    const gref = db().collection('att_alert_state').doc('lod_grace');
+    const today = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
+    if ((await gref.get()).data()?.date !== today) {
+      const { graceAdjust } = require('./lodGrace');
+      const rows = await graceAdjust([0, 1]);
+      await gref.set({ date: today, updated: rows.length, at: new Date().toISOString() });
+      console.log(`LOD grace: ${rows.length} worker-months recomputed`);
+    }
+  } catch (e) { console.error('LOD grace failed:', e.message); }
+
   // Pending jobs + any job STUCK in 'running' past a safe timeout (GitHub Actions
   // killed mid-run would otherwise sit 'running' forever) — P2-6 stale recovery.
   const pend = await db().collection('att_job_requests').where('status', '==', 'pending').limit(10).get();
