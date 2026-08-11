@@ -13,7 +13,8 @@
 const { db } = require('./lib/firestore');
 
 const SHIFT_START = 9 * 60, SHIFT_END = 19 * 60 + 30;   // 09:00–19:30
-const STD_HOURS = 10, LUNCH_HRS = 0.5, GRACE_MIN = 15;
+const LUNCH_FROM = 13 * 60, LUNCH_TO = 13 * 60 + 30;    // unpaid lunch window 13:00–13:30
+const STD_HOURS = 10, GRACE_MIN = 15;
 
 const toMin = (s) => { const m = /^(\d{1,2}):(\d{2})$/.exec(s || ''); return m ? (+m[1]) * 60 + (+m[2]) : null; };
 
@@ -26,9 +27,13 @@ function dayHours(iRaw, oRaw) {
   const lateMin = Math.max(0, i - SHIFT_START);
   const earlyMin = Math.max(0, SHIFT_END - o);
   const extraMin = Math.max(0, o - SHIFT_END);
+  // lunch-aware (owner 2026-08-12): deduct only the MINUTES actually overlapping 13:00–13:30 —
+  // someone arriving 13:30 took no lunch and loses nothing; leaving 13:15 loses 15 min.
+  const outClamped = Math.min(o, SHIFT_END);
+  const lunchMin = Math.max(0, Math.min(outClamped, LUNCH_TO) - Math.max(inM, LUNCH_FROM));
   const base = (lateMin + earlyMin) <= GRACE_MIN
     ? STD_HOURS
-    : Math.max(0, (Math.min(o, SHIFT_END) - inM) / 60 - LUNCH_HRS);
+    : Math.max(0, (outClamped - inM - lunchMin) / 60);
   const ot = extraMin > GRACE_MIN ? extraMin / 60 : 0;        // ignore ≤15 min past 19:30
   return { hrs: base + ot, kind: 'worked' };
 }
