@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import { loadEmployees, loadAllAttendance, loadAllPunches, loadEmployee, saveEmployee, loadPayout, loadAdvanceBalances, queueAdvance, addAdvanceDirect, loadRoster, istMonth, queueJob, lockMonthDirect, unlockMonthDirect, queueLock, queueUnlock, addManualWorker, pushWorkerProfile, MACHINE_DEPTS, MACHINE_SHIFTS, MACHINE_GENDERS, DEPT_DEFAULT_SHIFT } from '../lib/data';
+import { loadEmployees, loadAllAttendance, loadAllPunches, loadEmployee, saveEmployee, loadPayout, loadAdvanceBalances, queueAdvance, addAdvanceDirect, loadRoster, loadAttendanceReview, istMonth, queueJob, lockMonthDirect, unlockMonthDirect, queueLock, queueUnlock, addManualWorker, pushWorkerProfile, MACHINE_DEPTS, MACHINE_SHIFTS, MACHINE_GENDERS, DEPT_DEFAULT_SHIFT } from '../lib/data';
 import { monthOptions, monthCtx, payFor, rupee, paymentBreakdown } from '../lib/paycalc';
+import { SHIFT_HOURS } from '../lib/payroll';
 import Person from './Person.jsx';
 import SelfPunchCard from './SelfPunchCard.jsx';
 import NamePick from './NamePick.jsx';
@@ -31,6 +32,8 @@ function OwnerSalary({ user }) {
   const [filter, setFilter] = useState('all');       // all | topay | paid — chips above the list
   const [showMoney, setShowMoney] = useState(false); // 💸 total box tapped open → cash/account detail
   const [showTools, setShowTools] = useState(false); // 🧰 rare tools folded away (owner 2026-08-11: screen too busy)
+  const [peekCode, setPeekCode] = useState('');      // 👀 quick problem-peek sheet (owner 2026-08-12: name tap = problems only, fast pay)
+  const [reviewDoc, setReviewDoc] = useState(null);  // this month's to-handle list (for the peek)
   const ctx = useMemo(() => monthCtx(mk), [mk]);
   // manual/off-machine workers — passed to the advance card so they can be picked for advances
   const manualPeople = useMemo(() => (emps || []).filter((e) => e.manual || e.appOnly).map((e) => ({ code: e.code, name: e.name || e.code, dept: e.dept || '' })), [emps]);
@@ -51,6 +54,7 @@ function OwnerSalary({ user }) {
     } catch { /* corrupt cache — ignore, fresh load below */ }
   }, []);
   useEffect(() => { reload(); }, [showRemoved]);
+  useEffect(() => { setReviewDoc(null); loadAttendanceReview(mk).then(setReviewDoc).catch(() => {}); }, [mk]);
   // instant reflection when an owner records an advance (optimistic — the write persists in background)
   const onAdvanceSaved = (code, adv) => setEmps((prev) => (prev || []).map((e) => e.code === code ? { ...e, advances: [...(e.advances || []), adv] } : e));
   // undo the optimistic add if the background write is rejected (e.g. the month turned out to be locked)
@@ -251,7 +255,7 @@ function OwnerSalary({ user }) {
         {visible.map((r) => (
           <OwnerRow key={r.emp.code} r={r} mk={mk} busy={busy === r.emp.code} user={user}
             justPaidMode={justPaid[r.emp.code]}
-            onName={() => setOpenCode(r.emp.code)}
+            onName={() => setPeekCode(r.emp.code)}
             onPay={(mode) => payNow(r, mode)}
             onAdvanceSaved={onAdvanceSaved}
             onAdvanceRevert={onAdvanceRevert}
@@ -280,6 +284,68 @@ function OwnerSalary({ user }) {
       )}
       {showReport && <ReportModal user={user} mk={mk} rows={rows} onClose={() => setShowReport(false)} />}
       {payC && <FastPaySheet payC={payC} mk={mk} busy={!!busy} onChange={setPayC} onCancel={() => setPayC(null)} onConfirm={doFastLock} />}
+      {peekCode && (() => { const pr = rows.find((x) => x.emp.code === peekCode); return pr ? (
+        <QuickPeek r={pr} review={reviewDoc}
+          onPay={(mode) => { setPeekCode(''); payNow(pr, mode); }}
+          onFull={() => { setPeekCode(''); setOpenCode(peekCode); }}
+          onClose={() => setPeekCode('')} />
+      ) : null; })()}
+    </div>
+  );
+}
+
+
+// 👀 QUICK PEEK (owner 2026-08-12): tap a name while paying → ONLY this worker's month problems
+// + instant Pay buttons. Built entirely from data already on screen (r.att / r.pay / r.detail)
+// plus the month's to-handle doc — no extra reads, opens instantly. "Full page" opens Person.
+function QuickPeek({ r, review, onPay, onFull, onClose }) {
+  const { emp, att = {}, pay = {}, md = {} } = r;
+  const detail = r.detail || [];
+  const singles = detail.filter((d) => d.single);
+  const shortDays = detail.filter((d) => (d.kind === 'half' || d.kind === 'absent') && (d.in || d.out) && !d.single);
+  const lateHrs = (att.lateHrs || 0) + (att.earlyHrs || 0);
+  const hourly = (Number(pay.perDay) || 0) / (SHIFT_HOURS[emp.shift] || 8);
+  const otCut = Math.min(att.otHrs || 0, lateHrs) * hourly;
+  const revEarly = ((review && review.earlyFull) || []).filter((e) => e.code === emp.code);
+  const revBroken = ((review && review.brokenDays) || []).find((b) => b.code === emp.code);
+  const advM = Number(r.advancesThisMonth || 0);
+  const carry = Number(md.openingBalance || 0);
+  const settled = !!(md.locked || md.payment);
+  const problems = [];
+  if ((att.lateDays || 0) > 0 || lateHrs > 0.2) problems.push({ icon: '⏰', text: `Late/early ${att.lateDays || 0} day${(att.lateDays || 0) === 1 ? '' : 's'} · ${lateHrs.toFixed(1)}h — already cut from OT (≈ ${rupee(Math.round(otCut))})` });
+  if ((r.lateFixed || 0) > 0.25) problems.push({ icon: '🔧', text: `Machine missed a punch — ${r.lateFixed.toFixed(1)}h fake late auto-restored to OT (punch-fixed)` });
+  if (singles.length) problems.push({ icon: '🕳', text: `Single punch: ${singles.map((d) => d.ymd.slice(8) + ' (' + (d.in || d.out) + ')').join(', ')} — fix in Problems tab if wrong` });
+  if (shortDays.length) problems.push({ icon: '📉', text: `Short days: ${shortDays.map((d) => `${d.ymd.slice(8)}: ${d.in || '—'}→${d.out || '—'} (${d.kind})`).join(' · ')}` });
+  revEarly.forEach((e) => problems.push({ icon: '👀', text: `${e.date.slice(5)} left ${e.out} but counted FULL (−${e.shortHrs}h ≈ ${rupee(e.value)})` }));
+  if (revBroken && !shortDays.length) problems.push({ icon: '👀', text: `${revBroken.count} broken days this month — see Problems tab` });
+  if ((att.unpaidWorkedSat || 0) > 0) problems.push({ icon: '🗓', text: `${att.unpaidWorkedSat} worked Saturday(s) in an unearned week — OT only, day unpaid (rule)` });
+  if (advM > 0 || Math.abs(carry) > 1) problems.push({ icon: '💸', text: `Advances this month ${rupee(advM)}${Math.abs(carry) > 1 ? ` · carry ${carry > 0 ? 'owed to him' : 'he owes'} ${rupee(Math.abs(carry))}` : ''}` });
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-end sm:items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-5 space-y-3" onClick={(e) => e.stopPropagation()}>
+        <div className="text-center">
+          <p className="font-bold text-slate-900 text-xl">{emp.name || emp.code}</p>
+          <p className="text-xs text-slate-500 mt-0.5">{emp.dept || ''} · {att.presentDays || 0} days · OT {(pay.otHrsNet ?? Math.max(0, (att.otHrs || 0) - lateHrs)).toFixed(1)}h</p>
+          <p className={`text-3xl font-extrabold mt-1 ${settled ? 'text-emerald-700' : 'text-slate-900'}`}>{settled ? '✅ ' + rupee(md.payment?.net || 0) : rupee(pay.payable || 0)}</p>
+          {settled && <p className="text-[11px] text-emerald-700">already paid & locked</p>}
+        </div>
+        <div className="space-y-1.5">
+          {problems.length === 0 && <p className="bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2 text-sm text-emerald-800">✅ No problems this month — clean record.</p>}
+          {problems.map((p, i) => (
+            <p key={i} className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-[13px] text-slate-700">{p.icon} {p.text}</p>
+          ))}
+        </div>
+        {!settled && (
+          <div className="grid grid-cols-2 gap-2">
+            <button onClick={() => onPay('cash')} className="bg-emerald-600 text-white rounded-2xl py-4 text-lg font-bold shadow-lg shadow-emerald-200 active:bg-emerald-700 active:scale-95 transition-all">💵 Cash</button>
+            <button onClick={() => onPay('account')} className="bg-slate-800 text-white rounded-2xl py-4 text-lg font-bold shadow-lg shadow-slate-300 active:bg-slate-900 active:scale-95 transition-all">🏦 Account</button>
+          </div>
+        )}
+        <div className="flex justify-between">
+          <button onClick={onFull} className="text-sm text-slate-500 py-2">📄 Full page →</button>
+          <button onClick={onClose} className="text-sm text-slate-500 py-2">Close</button>
+        </div>
+      </div>
     </div>
   );
 }
