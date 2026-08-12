@@ -143,6 +143,21 @@ function assertAdvanceAllowed(emp, ymd) {
   if (b) throw new Error(`${b.kind}:${b.month}`);
 }
 
+// One-tap absence dock from the QuickPeek (owner 2026-08-12): ADD `days` worth of fine to the
+// month (fine = perDay × days, cumulative). Refuses locked months. Returns the new fine total.
+export async function addMonthFine(code, mk, amount) {
+  if (!isConfigured || !db) return 0;
+  const ref = doc(db, 'att_salary', code);
+  const snap = await getDoc(ref);
+  const data = snap.exists() ? snap.data() : {};
+  const md = (data.months || {})[mk] || {};
+  if (md.locked || md.payment) throw new Error('LOCKED: month already paid & locked');
+  const fine = Math.round((Number(md.fine) || 0) + Number(amount));
+  const { updateDoc } = await import('firebase/firestore');
+  await updateDoc(ref, { ['months.' + mk + '.fine']: fine });
+  return fine;
+}
+
 export async function addAdvanceDirect(code, advance, by) {
   const id = advance.id || ('adv-' + (advance.date || '') + '-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7));
   const adv = { ...advance, id };

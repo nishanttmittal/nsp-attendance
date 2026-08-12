@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { loadEmployees, loadAllAttendance, loadAllPunches, loadEmployee, saveEmployee, loadPayout, loadAdvanceBalances, queueAdvance, addAdvanceDirect, loadRoster, loadAttendanceReview, istMonth, queueJob, lockMonthDirect, unlockMonthDirect, queueLock, queueUnlock, addManualWorker, pushWorkerProfile, MACHINE_DEPTS, MACHINE_SHIFTS, MACHINE_GENDERS, DEPT_DEFAULT_SHIFT } from '../lib/data';
+import { loadEmployees, loadAllAttendance, loadAllPunches, loadEmployee, saveEmployee, loadPayout, loadAdvanceBalances, queueAdvance, addAdvanceDirect, loadRoster, loadAttendanceReview, addMonthFine, istMonth, queueJob, lockMonthDirect, unlockMonthDirect, queueLock, queueUnlock, addManualWorker, pushWorkerProfile, MACHINE_DEPTS, MACHINE_SHIFTS, MACHINE_GENDERS, DEPT_DEFAULT_SHIFT } from '../lib/data';
 import { monthOptions, monthCtx, payFor, rupee, paymentBreakdown } from '../lib/paycalc';
 import { SHIFT_HOURS } from '../lib/payroll';
 import Person from './Person.jsx';
@@ -285,9 +285,10 @@ function OwnerSalary({ user }) {
       {showReport && <ReportModal user={user} mk={mk} rows={rows} onClose={() => setShowReport(false)} />}
       {payC && <FastPaySheet payC={payC} mk={mk} busy={!!busy} onChange={setPayC} onCancel={() => setPayC(null)} onConfirm={doFastLock} />}
       {peekCode && (() => { const pr = rows.find((x) => x.emp.code === peekCode); return pr ? (
-        <QuickPeek r={pr} review={reviewDoc}
+        <QuickPeek r={pr} review={reviewDoc} mk={mk}
           onPay={(mode) => { setPeekCode(''); payNow(pr, mode); }}
           onFull={() => { setPeekCode(''); setOpenCode(peekCode); }}
+          onCut={async (amount) => { await addMonthFine(pr.emp.code, mk, amount); await reload(); }}
           onClose={() => setPeekCode('')} />
       ) : null; })()}
     </div>
@@ -298,7 +299,8 @@ function OwnerSalary({ user }) {
 // 👀 QUICK PEEK (owner 2026-08-12): tap a name while paying → ONLY this worker's month problems
 // + instant Pay buttons. Built entirely from data already on screen (r.att / r.pay / r.detail)
 // plus the month's to-handle doc — no extra reads, opens instantly. "Full page" opens Person.
-function QuickPeek({ r, review, onPay, onFull, onClose }) {
+function QuickPeek({ r, review, mk, onPay, onFull, onCut, onClose }) {
+  const [cutting, setCutting] = useState(false);
   const { emp, att = {}, pay = {}, md = {} } = r;
   const detail = r.detail || [];
   const singles = detail.filter((d) => d.single);
@@ -320,6 +322,9 @@ function QuickPeek({ r, review, onPay, onFull, onClose }) {
   if (revBroken && !shortDays.length) problems.push({ icon: '👀', text: `${revBroken.count} broken days this month — see Problems tab` });
   if ((att.unpaidWorkedSat || 0) > 0) problems.push({ icon: '🗓', text: `${att.unpaidWorkedSat} worked Saturday(s) in an unearned week — OT only, day unpaid (rule)` });
   if (advM > 0 || Math.abs(carry) > 1) problems.push({ icon: '💸', text: `Advances this month ${rupee(advM)}${Math.abs(carry) > 1 ? ` · carry ${carry > 0 ? 'owed to him' : 'he owes'} ${rupee(Math.abs(carry))}` : ''}` });
+  if (Number(md.fine || 0) > 0) problems.push({ icon: '✂️', text: `Fine/dock already applied this month: ${rupee(md.fine)} (inside the payable)` });
+  const dock = pay.suggestedWeeklyOffDock || {};
+  const dockable = !settled && (dock.days || 0) > 0;
   return (
     <div className="fixed inset-0 z-50 bg-black/40 flex items-end sm:items-center justify-center p-4" onClick={onClose}>
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-5 space-y-3" onClick={(e) => e.stopPropagation()}>
@@ -335,6 +340,13 @@ function QuickPeek({ r, review, onPay, onFull, onClose }) {
             <p key={i} className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-[13px] text-slate-700">{p.icon} {p.text}</p>
           ))}
         </div>
+        {dockable && (
+          <div className="bg-amber-50 border-2 border-amber-200 rounded-xl px-3 py-2.5 flex items-center justify-between gap-2">
+            <span className="text-[13px] text-amber-900">📉 {att.absentDays} absents → rule allows a <b>{dock.days}-day cut</b> (≈ {rupee(dock.amount)}). Your call.</span>
+            <button disabled={cutting} onClick={async () => { setCutting(true); try { await onCut(Math.round(Number(pay.perDay) || 0)); } finally { setCutting(false); } }}
+              className="shrink-0 bg-amber-600 text-white text-xs font-bold rounded-lg px-3 py-2 disabled:opacity-50 active:bg-amber-700">{cutting ? '…' : `✂ Cut 1 day −${rupee(Math.round(Number(pay.perDay) || 0))}`}</button>
+          </div>
+        )}
         {!settled && (
           <div className="grid grid-cols-2 gap-2">
             <button onClick={() => onPay('cash')} className="bg-emerald-600 text-white rounded-2xl py-4 text-lg font-bold shadow-lg shadow-emerald-200 active:bg-emerald-700 active:scale-95 transition-all">💵 Cash</button>
