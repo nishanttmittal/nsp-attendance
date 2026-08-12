@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { loadEmployees, loadAllAttendance, loadAllPunches, loadEmployee, saveEmployee, loadPayout, loadAdvanceBalances, queueAdvance, addAdvanceDirect, loadRoster, loadAttendanceReview, addMonthFine, istMonth, queueJob, lockMonthDirect, unlockMonthDirect, queueLock, queueUnlock, addManualWorker, pushWorkerProfile, MACHINE_DEPTS, MACHINE_SHIFTS, MACHINE_GENDERS, DEPT_DEFAULT_SHIFT } from '../lib/data';
+import { loadEmployees, loadAllAttendance, loadAllPunches, loadEmployee, saveEmployee, loadPayout, loadAdvanceBalances, queueAdvance, addAdvanceDirect, loadRoster, loadAttendanceReview, addMonthFine, saveMonth, istMonth, queueJob, lockMonthDirect, unlockMonthDirect, queueLock, queueUnlock, addManualWorker, pushWorkerProfile, MACHINE_DEPTS, MACHINE_SHIFTS, MACHINE_GENDERS, DEPT_DEFAULT_SHIFT } from '../lib/data';
 import { monthOptions, monthCtx, payFor, rupee, paymentBreakdown } from '../lib/paycalc';
 import { SHIFT_HOURS } from '../lib/payroll';
 import Person from './Person.jsx';
@@ -289,6 +289,7 @@ function OwnerSalary({ user }) {
           onPay={(mode) => { setPeekCode(''); payNow(pr, mode); }}
           onFull={() => { setPeekCode(''); setOpenCode(peekCode); }}
           onCut={async (amount) => { await addMonthFine(pr.emp.code, mk, amount); await reload(); }}
+          onBonus={async (on) => { await saveMonth(pr.emp.code, mk, { perfectBonusPaid: on }); await reload(); }}
           onClose={() => setPeekCode('')} />
       ) : null; })()}
     </div>
@@ -299,7 +300,7 @@ function OwnerSalary({ user }) {
 // 👀 QUICK PEEK (owner 2026-08-12): tap a name while paying → ONLY this worker's month problems
 // + instant Pay buttons. Built entirely from data already on screen (r.att / r.pay / r.detail)
 // plus the month's to-handle doc — no extra reads, opens instantly. "Full page" opens Person.
-function QuickPeek({ r, review, mk, onPay, onFull, onCut, onClose }) {
+function QuickPeek({ r, review, mk, onPay, onFull, onCut, onBonus, onClose }) {
   const [cutting, setCutting] = useState(false);
   const { emp, att = {}, pay = {}, md = {} } = r;
   const detail = r.detail || [];
@@ -325,6 +326,8 @@ function QuickPeek({ r, review, mk, onPay, onFull, onCut, onClose }) {
   if (Number(md.fine || 0) > 0) problems.push({ icon: '✂️', text: `Fine/dock already applied this month: ${rupee(md.fine)} (inside the payable)` });
   const dock = pay.suggestedWeeklyOffDock || {};
   const dockable = !settled && (dock.days || 0) > 0;
+  const bonusOn = !!md.perfectBonusPaid;
+  const bonusable = !settled && (pay.perfectEligible || bonusOn);
   return (
     <div className="fixed inset-0 z-50 bg-black/40 flex items-end sm:items-center justify-center p-4" onClick={onClose}>
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-5 space-y-3" onClick={(e) => e.stopPropagation()}>
@@ -340,6 +343,15 @@ function QuickPeek({ r, review, mk, onPay, onFull, onCut, onClose }) {
             <p key={i} className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-[13px] text-slate-700">{p.icon} {p.text}</p>
           ))}
         </div>
+        {bonusable && (
+          <div className="bg-emerald-50 border-2 border-emerald-200 rounded-xl px-3 py-2.5 flex items-center justify-between gap-2">
+            <span className="text-[13px] text-emerald-900">🎯 Full attendance — <b>+1 day bonus</b> (≈ {rupee(Math.round(Number(pay.perDay) || 0))}). Optional.</span>
+            <button onClick={() => onBonus(!bonusOn)}
+              className={`shrink-0 text-xs font-bold rounded-lg px-3 py-2 active:scale-95 ${bonusOn ? 'bg-white border-2 border-emerald-600 text-emerald-700' : 'bg-emerald-600 text-white'}`}>
+              {bonusOn ? '✓ Added — tap to remove' : '+ Add 1 day'}
+            </button>
+          </div>
+        )}
         {dockable && (
           <div className="bg-amber-50 border-2 border-amber-200 rounded-xl px-3 py-2.5 flex items-center justify-between gap-2">
             <span className="text-[13px] text-amber-900">📉 {att.absentDays} absents → rule allows a <b>{dock.days}-day cut</b> (≈ {rupee(dock.amount)}). Your call.</span>
