@@ -1,4 +1,9 @@
 name: Deploy PWA to Pages
+# 2026-08-12 (owner: "only one app link"): the github.io URL is RETIRED. Pages now publishes
+# only redirect/ — a forwarder to https://unico-operations.firebaseapp.com/attendance/ that
+# preserves path+query (old punch.html links keep working) plus a kill-switch sw.js that
+# unregisters the old cached PWA. The real app deploys to Firebase Hosting from
+# ~/unico-default-site (see memory: session-2026-08-11-portal-roster-sync deploy runbook).
 on:
   push:
     branches: [main]
@@ -18,19 +23,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-      - name: Install & build
-        working-directory: web
-        run: |
-          npm ci
-          npm run build
-        env:
-          PWA_BASE: /nsp-attendance/
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: web/dist
+          path: redirect
 
   deploy:
     needs: build
