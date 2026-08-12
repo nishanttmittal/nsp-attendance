@@ -231,7 +231,10 @@ export default function Person({ code, mk, user, onBack }) {
         </div>
       </div>
 
-      {emp.type !== 'daily' && (
+      {/* Daily wagers settle from the Salary list, so they skip the card while UNLOCKED — but a
+          LOCKED month must always show it, else they have no 🔓 Unlock anywhere (owner hit this
+          2026-08-12: "not able to unlock loading staff"). */}
+      {(emp.type !== 'daily' || md.locked || md.payment) && (
         <SettleLockCard pay={pay} md={md} busy={busy} onLock={doLock} onUnlock={doUnlock} />
       )}
 
