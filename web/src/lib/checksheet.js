@@ -13,7 +13,8 @@ export function checkRow(r) {
   const perDay = Number(r.pay.perDay) || 0;
   const plus = (r.pay.perfectBonus || 0) > 0 ? 1 : 0;
   const minus = perDay > 0 ? Math.round(((Number(r.md?.fine) || 0) / perDay) * 2) / 2 : 0;
-  const pm = [plus ? `+${plus}` : '', minus ? `−${minus}` : ''].filter(Boolean).join(' ');
+  // ASCII minus only — U+2212 renders as garbage/nothing in jsPDF's built-in fonts
+  const pm = [plus ? `+${plus}` : '', minus ? `-${minus}` : ''].filter(Boolean).join(' ');
   const days = r.pay.paidDays != null ? r.pay.paidDays : (r.pay.presentDays || 0);
   return [r.emp.name || r.emp.code, r.emp.dept || '', days, pm, r.pay.otHrsNet || 0, '', ''];
 }
