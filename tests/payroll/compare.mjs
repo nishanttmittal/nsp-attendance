@@ -124,6 +124,9 @@ if (JSON_OUT) {
   console.log('\n\nCLASSIFICATION SUMMARY');
   console.log('-'.repeat(132));
   console.log(`cases: ${CASES.length}   comparisons: ${rows.length}   agree: ${rows.length - disagreements.length}   disagree: ${disagreements.length}`);
+  // ANY disagreement = non-zero exit (Codex finding 2026-08-12: this runner exited 0 with 6
+  // open disagreements, so a pre-pay gate reading only the exit code would have passed).
+  if (disagreements.length) process.exitCode = 1;
   for (const [v, list] of Object.entries(byVerdict)) {
     const cases = [...new Set(list.map(r => r.case))];
     console.log(`\n  ${v}  (${cases.length} case${cases.length === 1 ? '' : 's'})`);

@@ -2,7 +2,15 @@
 
 Deployment rule: no *unexplained* disagreement may ship. Intentional disagreement is fine.
 
-Run `node tests/payroll/compare.mjs` to regenerate. Last run: **2026-07-30**.
+Run `node tests/payroll/compare.mjs` to regenerate. Last run: **2026-08-12**.
+The runner now EXITS 1 when any disagreement exists (Codex pre-pay review 2026-08-12 found it
+exiting 0 with 6 open disagreements — a gate reading the exit code would have passed).
+
+**2026-08-12: daily-wager/LOD basis moved ÷11 → ÷10** (owner 2026-08-11: LOD shift 9:00–19:30,
+"overtime calculated by 10 hours basis"; applies from July 2026, owner-approved for the July run).
+Three fixtures updated: ot-lod-shift (otPay 500→550), daily-wager-hours-based + never-gets-separate-ot
+(net 7,381.82→8,120). Live LOD wagers actually pay via punch-based equivalentDays (jobs/lodGrace.js,
+15-min grace both ways, lunch-aware); the fixtures pin the engine's aggregate fallback.
 
 ```
 cases: 33   comparisons: 132   agree: 132   disagree: 0

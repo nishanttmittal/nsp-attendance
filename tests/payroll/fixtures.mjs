@@ -76,12 +76,13 @@ export const CASES = [
 
   {
     id: 'ot-lod-shift',
-    rule: '#6 — LOD (loading) = 09:00–20:30 span 11.5 h MINUS the unpaid 30-min lunch → 11 h',
+    rule: '#6 — LOD (loading) = 09:00–19:30 span 10.5 h MINUS the unpaid 30-min lunch → 10 h (owner 2026-08-11)',
     emp: { ...MONTHLY, shift: 'LOD' }, att: { ...FULL_JUNE, otHrs: 11 }, params: { ...JUNE },
-    expected: { base: 15000, otPay: 500, net: 15500 },
-    derivation: '11 h × (500 ÷ 11). LOD was MISSING from the shift table until 2026-07-28 and fell '
-      + 'back to the ÷8 default, which would have priced its overtime 37.5% too high. Harmless so '
-      + 'far only because every LOD worker is a daily wager (no separate OT) — this locks it shut.',
+    expected: { base: 15000, otPay: 550, net: 15550 },
+    derivation: '11 h × (500 ÷ 10). Owner moved LOD from 09:00–20:30/11 h to 09:00–19:30/10 h on '
+      + '2026-08-11 ("overtime calculated by 10 hours basis") — applies from July 2026 onward, '
+      + 'owner-approved retroactively for the July pay run. LOD was MISSING from the shift table '
+      + 'until 2026-07-28 (÷8 fallback = OT 37.5% too high); this case locks the divisor shut.',
   },
   {
     id: 'ot-unknown-shift-falls-back-to-8',
@@ -173,15 +174,18 @@ export const CASES = [
     derivation: '500 × 29; not eligible → no bonus',
   },
 
-  // ── Daily wagers (owner 2026-07-22) — wage × hours ÷ 11, lunch unpaid, NO separate OT ───
+  // ── Daily wagers — wage × hours ÷ 10 (owner 2026-08-11; was ÷11 from 2026-07-22), lunch unpaid,
+  //    NO separate OT. NOTE: live LOD wagers are normally paid via att_attendance.equivalentDays
+  //    (jobs/lodGrace.js — per-day punches, 15-min grace both ways, lunch-aware); these cases pin
+  //    the ENGINE's aggregate fallback (workHrs − 0.5×presentDays) ÷ stdHours. ───
   {
     id: 'daily-wager-hours-based',
-    rule: 'payroll-daily-wagers — (workHrs − 0.5 × presentDays) ÷ 11 × ₹700',
+    rule: 'payroll-daily-wagers — (workHrs − 0.5 × presentDays) ÷ 10 × ₹700 (owner 2026-08-11)',
     emp: { type: 'daily', wage: 700, shift: 'GEN' },
     att: { presentDays: 10, absentDays: 0, otHrs: 0, lateHrs: 0, earlyHrs: 0, workHrs: 121 },
     params: { ...JUNE },
-    expected: { base: 7381.82, otPay: 0, net: 7381.82 },
-    derivation: '(121 − 5) ÷ 11 = 10.5454 equivalent days × 700',
+    expected: { base: 8120, otPay: 0, net: 8120 },
+    derivation: '(121 − 5) ÷ 10 = 11.6 equivalent days × 700 = 8,120 (₹70/hr since 2026-08-11)',
   },
   {
     id: 'daily-wager-never-gets-separate-ot',
@@ -189,7 +193,7 @@ export const CASES = [
     emp: { type: 'daily', wage: 700, shift: 'GEN' },
     att: { presentDays: 10, absentDays: 0, otHrs: 20, lateHrs: 0, earlyHrs: 0, workHrs: 121 },
     params: { ...JUNE },
-    expected: { base: 7381.82, otPay: 0, net: 7381.82 },
+    expected: { base: 8120, otPay: 0, net: 8120 },
     derivation: 'identical to the previous case — 20 OT hours must change nothing',
   },
   {
