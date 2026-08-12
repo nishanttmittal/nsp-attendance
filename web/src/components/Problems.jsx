@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { loadMissedDoc, loadLateList, loadEmployees, loadRoster, loadAllAttendance, loadPayout, decideResignPrompt, leaveMissedPunch, queueScanMissed, queueReprocess, queueJob, istMonth } from '../lib/data';
+import { loadMissedDoc, loadLateList, loadEmployees, loadRoster, loadAllAttendance, loadPayout, loadAttendanceReview, decideResignPrompt, leaveMissedPunch, queueScanMissed, queueReprocess, queueJob, istMonth } from '../lib/data';
 import { monthOptions } from '../lib/paycalc';
 import { SHIFT_HOURS } from '../lib/payroll';
 import { problemsPdf, sharePdf } from '../lib/salaryPdf';
@@ -26,6 +26,7 @@ export default function Problems({ user }) {
   const [roster, setRoster] = useState([]);
   const [busy, setBusy] = useState('');
   const [scanSt, setScanSt] = useState('');
+  const [review, setReview] = useState(null);   // 👀 "to handle" list for mMonth (admin-only)
   const isAdmin = user.role === 'admin';
 
   // current-month concerns (late / resign / high-OT / unpaid)
@@ -59,6 +60,7 @@ export default function Problems({ user }) {
     const md = await loadMissedDoc(mMonth);
     setMissed(md.entries || []); setShort(md.shortHours || []);
     try { setLate(await loadLateList(mMonth, 3)); } catch { /* ignore */ }
+    if (isAdmin) { try { setReview(await loadAttendanceReview(mMonth)); } catch { /* ignore */ } }
     try {
       const emps = await loadEmployees(true);
       setLeftSet(new Set(emps.flatMap((e) => ((e.missedLeave || {})[mMonth] || []).map((d) => e.code + '|' + d))));
@@ -111,6 +113,33 @@ export default function Problems({ user }) {
               <span className="text-red-700 font-semibold">{h.ot}h <span className="text-gray-400 font-normal">({h.perDay}h/day · {h.days}d)</span></span>
             </div>
           ))}
+        </Card>
+      )}
+
+      {isAdmin && review && (review.earlyFull.length > 0 || review.brokenDays.length > 0) && (
+        <Card title={`👀 To handle — ${monthLabel}`} sub="Days worth a word — pay is already correct; nothing here is automatic.">
+          {review.earlyFull.length > 0 && (
+            <div className="pt-1">
+              <p className="text-xs font-semibold text-slate-600">Left early but still counted a FULL day (total ≈ ₹{review.totalEarlyValue})</p>
+              {review.earlyFull.map((e, i) => (
+                <div key={i} className="py-1.5 flex justify-between text-sm border-t border-gray-50 first:border-0">
+                  <span>{e.name} <span className="text-gray-400 text-xs">{e.date.slice(5)}</span></span>
+                  <span className="text-slate-600">{e.in}→{e.out} <span className="text-amber-700 font-semibold">−{e.shortHrs}h ≈ ₹{e.value}</span></span>
+                </div>
+              ))}
+            </div>
+          )}
+          {review.brokenDays.length > 0 && (
+            <div className="pt-2">
+              <p className="text-xs font-semibold text-slate-600">Repeat broken days (2+ short days with punches — already paid half/zero)</p>
+              {review.brokenDays.map((b) => (
+                <div key={b.code} className="py-1.5 text-sm border-t border-gray-50 first:border-0">
+                  <span>{b.name}</span>
+                  <span className="text-gray-500 text-xs ml-2">{b.days.map((v) => `${v.date.slice(8)}: ${v.in || '—'}→${v.out || '—'} (${v.kind})`).join(' · ')}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </Card>
       )}
 

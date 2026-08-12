@@ -560,6 +560,19 @@ async function main() {
     }
   } catch (e) { console.error('LOD grace failed:', e.message); }
 
+  // once-a-day: "To handle" attendance review (owner 2026-08-12) — early-but-paid-full days +
+  // broken-day patterns → att_meta/attendance_review_{mk} for the Problems tab.
+  try {
+    const rref = db().collection('att_alert_state').doc('attendance_review');
+    const today = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
+    if ((await rref.get()).data()?.date !== today) {
+      const { buildReview } = require('./attendanceReview');
+      const r = await buildReview([0, 1]);
+      await rref.set({ date: today, result: r, at: new Date().toISOString() });
+      console.log('attendance review:', JSON.stringify(r));
+    }
+  } catch (e) { console.error('attendance review failed:', e.message); }
+
   // Pending jobs + any job STUCK in 'running' past a safe timeout (GitHub Actions
   // killed mid-run would otherwise sit 'running' forever) — P2-6 stale recovery.
   const pend = await db().collection('att_job_requests').where('status', '==', 'pending').limit(10).get();

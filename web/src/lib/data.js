@@ -430,6 +430,16 @@ export async function loadMissedPunches(month) {
 export const istMonth = () => new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 7);
 
 // Missed punches + short-hours days together (one scan doc per month).
+// "To handle" attendance review for a month (early-but-paid-full days + broken-day patterns),
+// written daily by jobs/attendanceReview.js. Empty shape when absent.
+export async function loadAttendanceReview(month) {
+  const mk = month || istMonth();
+  if (!isConfigured || !db) return { earlyFull: [], brokenDays: [], totalEarlyValue: 0 };
+  const snap = await getDoc(doc(db, 'att_meta', 'attendance_review_' + mk));
+  const d = snap.exists() ? snap.data() : {};
+  return { earlyFull: d.earlyFull || [], brokenDays: d.brokenDays || [], totalEarlyValue: d.totalEarlyValue || 0, computedAt: d.computedAt };
+}
+
 export async function loadMissedDoc(month) {
   const mk = month || istMonth();
   if (!isConfigured || !db) return { entries: [], shortHours: [] };

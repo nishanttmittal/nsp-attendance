@@ -9,13 +9,13 @@
 //    not worked -> paid weekly-off IF the week earned it (>=4 present-days), else ABSENT
 //  • grace on: absent-line 4:00->3:45, full-line -15min per shift
 
-export const SHIFT_FULLCUT = { GEN: 7, '10H': 9, '12H': 10.5, wir: 9, DSG: 8.5, LOD: 10 };
+export const SHIFT_FULLCUT = { GEN: 7, '10H': 9, '12H': 10.5, wir: 9, DSG: 8.5, LOD: 8.75 };   // LOD 9:00-19:30 since 2026-08-11
 // Shift DURATION (gross span incl. lunch) — used for app-side OT = worked − shift hours.
-export const SHIFT_HOURS = { GEN: 8.5, '10H': 10.5, '12H': 12, wir: 10.5, DSG: 10, LOD: 11.5 };
+export const SHIFT_HOURS = { GEN: 8.5, '10H': 10.5, '12H': 12, wir: 10.5, DSG: 10, LOD: 10.5 };   // LOD span 10:30 since 2026-08-11
 // Shift START time (hours) — the portal counts "late" from here; used to detect the broken-punch
 // inflation where a lone evening punch (missing morning IN) is misread as a very-late arrival.
 export const SHIFT_START = { GEN: 9, '10H': 9, '12H': 9, wir: 9.5, DSG: 9, LOD: 9 };
-export const WEEKLY_OFF_NEEDS = 4;
+export const WEEKLY_OFF_NEEDS = 3;   // owner changed 4->3 on 2026-06-15 (portal txtnoofweek=3); engine synced 2026-08-12
 // Owner rule (2026-07-12): a day's OT of 15 minutes OR LESS is ignored (paid 0); MORE than 15 min
 // counts in full. Threshold, not a per-day deduction.
 const OT_MIN = 0.25;
