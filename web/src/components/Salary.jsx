@@ -980,7 +980,7 @@ function ReportModal({ user, mk, rows, onClose }) {
   }
   return (
     <div className="fixed inset-0 bg-black/40 z-20 grid place-items-center p-4" onClick={onClose}>
-      <div className="bg-white rounded-2xl p-4 w-full max-w-sm space-y-3" onClick={(e) => e.stopPropagation()}>
+      <div className="bg-white rounded-2xl p-4 w-full max-w-sm space-y-3 max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="font-bold text-lg text-slate-800">📄 Reports</div>
         <select className="w-full border-2 border-slate-200 rounded-xl px-3 py-2.5 bg-white" value={f.report} onChange={(e) => setF({ ...f, report: e.target.value })}>
           {REPORTS.map((r) => <option key={r.v} value={r.v}>{r.label}</option>)}
