@@ -2,7 +2,7 @@
 // Uses "Rs" (jspdf's default font has no ₹ glyph).
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { checkRow } from './checksheet';
+import { checkRow, registerRow } from './checksheet';
 
 const rs = (n) => 'Rs ' + Number(n || 0).toLocaleString('en-IN');
 
@@ -190,6 +190,30 @@ export function checkSheetPdf(rows, monthLabel) {
     headStyles: { fillColor: [192, 57, 43] },
     columnStyles: { 5: { cellWidth: 26 }, 6: { cellWidth: 24 } },
     margin: { left: 14, right: 14 },
+  });
+  return doc;
+}
+
+// PDF twin of the give-salary register xlsx (same registerRow columns).
+export function giveSalaryRegisterPdf(rows, monthLabel) {
+  const doc = new jsPDF({ orientation: 'landscape' });
+  doc.setFontSize(15); doc.text('NSP ENTERPRISES - Salary register  -  ' + (monthLabel || ''), 14, 14);
+  doc.setFontSize(9); doc.setTextColor(120);
+  doc.text('Days incl. paid Saturdays  |  Adv c/f = old advance owed  |  Payable = after all advances  |  blank Cash/Account = fill while paying', 14, 20);
+  doc.setTextColor(0);
+  const sorted = [...rows].sort((a, b) =>
+    (a.emp.dept || '').localeCompare(b.emp.dept || '') || (a.emp.name || '').localeCompare(b.emp.name || ''));
+  const body = sorted.map(registerRow);
+  const num = (k) => body.reduce((x, r) => x + (Number(r[k]) || 0), 0);
+  const keys = ['Dept', 'Name', 'Rate', 'Days', 'OT hrs', 'Adv c/f', 'Adv paid', 'Total adv', 'Payable', 'Cash', 'Account', 'Status'];
+  const tot = { Dept: '', Name: 'TOTAL', Rate: '', Days: '', 'OT hrs': '', 'Adv c/f': num('Adv c/f'), 'Adv paid': num('Adv paid'), 'Total adv': num('Total adv'), Payable: num('Payable'), Cash: num('Cash'), Account: num('Account'), Status: '' };
+  autoTable(doc, {
+    startY: 25,
+    head: [keys],
+    body: [...body, tot].map((r) => keys.map((k) => r[k])),
+    theme: 'grid', styles: { fontSize: 8, cellPadding: 1.4 }, headStyles: { fillColor: [192, 57, 43] },
+    didParseCell: (d) => { if (d.row.index === body.length && d.section === 'body') d.cell.styles.fontStyle = 'bold'; },
+    margin: { left: 10, right: 10 },
   });
   return doc;
 }

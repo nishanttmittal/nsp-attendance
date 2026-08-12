@@ -5,8 +5,8 @@ import { SHIFT_HOURS } from '../lib/payroll';
 import Person from './Person.jsx';
 import SelfPunchCard from './SelfPunchCard.jsx';
 import NamePick from './NamePick.jsx';
-import { payslipAllPdf, lockedRegisterPdf, sharePdf, advanceSplit, advancesPdf, checkSheetPdf } from '../lib/salaryPdf';
-import { shareCheckSheet } from '../lib/checksheet';
+import { payslipAllPdf, lockedRegisterPdf, sharePdf, advanceSplit, advancesPdf, checkSheetPdf, giveSalaryRegisterPdf } from '../lib/salaryPdf';
+import { shareCheckSheet, shareSalaryRegisterXlsx } from '../lib/checksheet';
 import WorkerSummary from './WorkerSummary.jsx';
 
 // SALARY — owner ticks person by person; manager sees ticked list and marks PAID.
@@ -994,6 +994,12 @@ function ReportModal({ user, mk, rows, onClose }) {
         {st === 'sent' ? <p className="text-sm text-emerald-700">✓ On its way to Telegram (1–2 min). Forward it to WhatsApp from there.</p> : (
           <button onClick={send} disabled={st === 'sending'} className="w-full bg-blue-600 text-white rounded-2xl py-3 font-bold shadow-lg shadow-blue-300 disabled:opacity-50 disabled:shadow-none active:bg-blue-700 active:scale-95 transition-all">✈️ Send to Telegram</button>
         )}
+        <div className="grid grid-cols-2 gap-2">
+          <button onClick={() => sharePdf(giveSalaryRegisterPdf(rows, monthOptions(3).find((m) => m.mk === mk)?.label || mk), `salary-register-${mk}.pdf`)}
+            className="bg-emerald-600 text-white rounded-2xl py-3 font-bold shadow active:bg-emerald-700 active:scale-95 transition-all">💰 Give-salary<div className="text-[11px] font-normal opacity-90">PDF</div></button>
+          <button onClick={() => shareSalaryRegisterXlsx(rows, mk)}
+            className="bg-emerald-600 text-white rounded-2xl py-3 font-bold shadow active:bg-emerald-700 active:scale-95 transition-all">💰 Give-salary<div className="text-[11px] font-normal opacity-90">Excel</div></button>
+        </div>
         <button onClick={register} className="w-full bg-white border-2 border-emerald-300 text-emerald-700 rounded-2xl py-3 font-bold active:bg-emerald-50 active:scale-95 transition-all">🟢 Salary register PDF — share / WhatsApp</button>
         <button onClick={lockedReg} className="w-full bg-white border-2 border-slate-300 text-slate-800 rounded-2xl py-3 font-bold active:bg-slate-50 active:scale-95 transition-all">🔒 Locked salary + payments PDF <span className="font-normal text-xs text-slate-500">(days·OT·adv·payable·net·cash·account·carry)</span></button>
         {st === 'nolock' && <p className="text-xs text-amber-700">No salary is locked yet for {monthOptions(3).find((m) => m.mk === mk)?.label || mk}. Lock/pay some workers first.</p>}
