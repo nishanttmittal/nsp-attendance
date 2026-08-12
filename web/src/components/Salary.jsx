@@ -323,7 +323,7 @@ function QuickPeek({ r, review, mk, onPay, onFull, onCut, onBonus, onClose }) {
   if (revBroken && !shortDays.length) problems.push({ icon: '👀', text: `${revBroken.count} broken days this month — see Problems tab` });
   if ((att.unpaidWorkedSat || 0) > 0) problems.push({ icon: '🗓', text: `${att.unpaidWorkedSat} worked Saturday(s) in an unearned week — OT only, day unpaid (rule)` });
   if (advM > 0 || Math.abs(carry) > 1) problems.push({ icon: '💸', text: `Advances this month ${rupee(advM)}${Math.abs(carry) > 1 ? ` · carry ${carry > 0 ? 'owed to him' : 'he owes'} ${rupee(Math.abs(carry))}` : ''}` });
-  if (Number(md.fine || 0) > 0) problems.push({ icon: '✂️', text: `Fine/dock already applied this month: ${rupee(md.fine)} (inside the payable)` });
+  const fineApplied = Number(md.fine || 0);
   const dock = pay.suggestedWeeklyOffDock || {};
   const dockable = !settled && (dock.days || 0) > 0;
   const bonusOn = !!md.perfectBonusPaid;
@@ -352,6 +352,16 @@ function QuickPeek({ r, review, mk, onPay, onFull, onCut, onBonus, onClose }) {
             </button>
           </div>
         )}
+        {fineApplied > 0 && !settled && (
+          <div className="bg-slate-50 border-2 border-slate-200 rounded-xl px-3 py-2.5 flex items-center justify-between gap-2">
+            <span className="text-[13px] text-slate-700">✂️ Fine/dock applied: <b>{rupee(fineApplied)}</b> (inside the payable)</span>
+            <button disabled={cutting} onClick={async () => { setCutting(true); try { await onCut(-fineApplied); } finally { setCutting(false); } }}
+              className="shrink-0 bg-white border-2 border-slate-400 text-slate-700 text-xs font-bold rounded-lg px-3 py-2 disabled:opacity-50">{cutting ? '…' : '↩ Remove'}</button>
+          </div>
+        )}
+        {fineApplied > 0 && settled && (
+          <p className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-[13px] text-slate-700">✂️ Fine/dock {rupee(fineApplied)} was applied (inside the locked payment)</p>
+        )}
         {dockable && (
           <div className="bg-amber-50 border-2 border-amber-200 rounded-xl px-3 py-2.5 flex items-center justify-between gap-2">
             <span className="text-[13px] text-amber-900">📉 {att.absentDays} absents → rule allows a <b>{dock.days}-day cut</b> (≈ {rupee(dock.amount)}). Your call.</span>
@@ -366,9 +376,10 @@ function QuickPeek({ r, review, mk, onPay, onFull, onCut, onBonus, onClose }) {
           </div>
         )}
         <div className="flex justify-between">
-          <button onClick={onFull} className="text-sm text-slate-500 py-2">📄 Full page →</button>
+          <button onClick={onFull} className="text-sm text-slate-500 py-2">{settled ? '🔓 Unlock / details →' : '📄 Full page →'}</button>
           <button onClick={onClose} className="text-sm text-slate-500 py-2">Close</button>
         </div>
+        {settled && <p className="text-[11px] text-slate-400 -mt-1">To re-do a payment: 🔓 opens the full page — unlock there (asks your action password), then pay again.</p>}
       </div>
     </div>
   );

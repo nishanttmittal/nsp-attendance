@@ -152,7 +152,7 @@ export async function addMonthFine(code, mk, amount) {
   const data = snap.exists() ? snap.data() : {};
   const md = (data.months || {})[mk] || {};
   if (md.locked || md.payment) throw new Error('LOCKED: month already paid & locked');
-  const fine = Math.round((Number(md.fine) || 0) + Number(amount));
+  const fine = Math.max(0, Math.round((Number(md.fine) || 0) + Number(amount)));
   const { updateDoc } = await import('firebase/firestore');
   await updateDoc(ref, { ['months.' + mk + '.fine']: fine });
   return fine;
