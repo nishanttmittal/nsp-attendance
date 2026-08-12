@@ -5,7 +5,7 @@ import { SHIFT_HOURS } from '../lib/payroll';
 import Person from './Person.jsx';
 import SelfPunchCard from './SelfPunchCard.jsx';
 import NamePick from './NamePick.jsx';
-import { payslipAllPdf, lockedRegisterPdf, sharePdf, advanceSplit, advancesPdf } from '../lib/salaryPdf';
+import { payslipAllPdf, lockedRegisterPdf, sharePdf, advanceSplit, advancesPdf, checkSheetPdf } from '../lib/salaryPdf';
 import { shareCheckSheet } from '../lib/checksheet';
 import WorkerSummary from './WorkerSummary.jsx';
 
@@ -219,9 +219,10 @@ function OwnerSalary({ user }) {
       </button>
 
       {/* actions */}
-      <div className="grid grid-cols-2 gap-2">
-        <button onClick={() => shareCheckSheet(rows, mk)} className="bg-blue-600 text-white rounded-2xl py-4 font-bold shadow-lg shadow-blue-300 active:bg-blue-700 active:scale-95 transition-all">📋 Check-sheet<div className="text-[11px] font-normal opacity-90">days &amp; OT → WhatsApp</div></button>
-        <button onClick={() => setShowReport(true)} className="bg-white text-slate-600 border-2 border-slate-200 rounded-2xl py-4 font-bold active:bg-slate-50 active:scale-95 transition-all">📄 Reports<div className="text-[11px] font-normal text-slate-400">register · locked PDF</div></button>
+      <div className="grid grid-cols-3 gap-2">
+        <button onClick={() => shareCheckSheet(rows, mk)} className="bg-blue-600 text-white rounded-2xl py-4 font-bold shadow-lg shadow-blue-300 active:bg-blue-700 active:scale-95 transition-all">📋 Check<div className="text-[11px] font-normal opacity-90">Excel</div></button>
+        <button onClick={() => sharePdf(checkSheetPdf(rows, mos[mi]?.label || mk), `days-OT-check-${mk}.pdf`)} className="bg-blue-600 text-white rounded-2xl py-4 font-bold shadow-lg shadow-blue-300 active:bg-blue-700 active:scale-95 transition-all">📋 Check<div className="text-[11px] font-normal opacity-90">PDF</div></button>
+        <button onClick={() => setShowReport(true)} className="bg-white text-slate-600 border-2 border-slate-200 rounded-2xl py-4 font-bold active:bg-slate-50 active:scale-95 transition-all">📄 Reports<div className="text-[11px] font-normal text-slate-400">register · PDF</div></button>
       </div>
 
       {brokenFix.length > 0 && (

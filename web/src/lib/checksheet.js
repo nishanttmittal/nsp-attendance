@@ -7,29 +7,24 @@
 // only consumer (shareCheckSheet) was already async.
 const loadXLSX = () => import('xlsx');
 
+// One check-sheet row. Days = PAID days (paid Saturdays INCLUDED — owner 2026-08-12: don't show
+// them separately). ± Day = owner-added bonus (+1) / dock-fine converted to days (−N).
+export function checkRow(r) {
+  const perDay = Number(r.pay.perDay) || 0;
+  const plus = (r.pay.perfectBonus || 0) > 0 ? 1 : 0;
+  const minus = perDay > 0 ? Math.round(((Number(r.md?.fine) || 0) / perDay) * 2) / 2 : 0;
+  const pm = [plus ? `+${plus}` : '', minus ? `−${minus}` : ''].filter(Boolean).join(' ');
+  const days = r.pay.paidDays != null ? r.pay.paidDays : (r.pay.presentDays || 0);
+  return [r.emp.name || r.emp.code, r.emp.dept || '', days, pm, r.pay.otHrsNet || 0, '', ''];
+}
+
 // rows = the Salary screen's computed rows [{ emp, pay, ... }]. mk = 'YYYY-MM'.
 export async function buildCheckSheet(rows, mk) {
   const XLSX = await loadXLSX();
   const sorted = [...rows].sort((a, b) =>
     (a.emp.dept || '').localeCompare(b.emp.dept || '') || (a.emp.name || '').localeCompare(b.emp.name || ''));
   const header = ['Name', 'Dept', 'Days', '± Day', 'OT (hrs)', 'Advance', 'OK'];
-  const body = sorted.map((r) => {
-    // ± Day: owner-added full-attendance bonus (+1) and/or dock-fine converted to days (owner
-    // 2026-08-12: exports must show cut/added days so the sheet matches what is actually paid)
-    const perDay = Number(r.pay.perDay) || 0;
-    const plus = (r.pay.perfectBonus || 0) > 0 ? 1 : 0;
-    const minus = perDay > 0 ? Math.round(((Number(r.md?.fine) || 0) / perDay) * 2) / 2 : 0;
-    const pm = [plus ? `+${plus}` : '', minus ? `−${minus}` : ''].filter(Boolean).join(' ');
-    return [
-      r.emp.name || r.emp.code,
-      r.emp.dept || '',
-      r.pay.presentDays || 0,
-      pm,
-      r.pay.otHrsNet || 0,
-      '',   // staff writes their advance here
-      '',   // staff ticks OK
-    ];
-  });
+  const body = sorted.map(checkRow);
   const aoa = [[`NSP — Days & OT check-sheet · ${mk}`], [], header, ...body];
   const ws = XLSX.utils.aoa_to_sheet(aoa);
   ws['!cols'] = [{ wch: 24 }, { wch: 14 }, { wch: 7 }, { wch: 7 }, { wch: 9 }, { wch: 12 }, { wch: 6 }];

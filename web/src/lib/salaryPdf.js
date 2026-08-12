@@ -2,6 +2,7 @@
 // Uses "Rs" (jspdf's default font has no ₹ glyph).
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { checkRow } from './checksheet';
 
 const rs = (n) => 'Rs ' + Number(n || 0).toLocaleString('en-IN');
 
@@ -170,6 +171,29 @@ export function advancesPdf(groups, asOfLabel) {
 
 // Problems-tab export: a clean one-document summary of every attendance problem so the owner
 // can show/brief staff. data = { monthLabel, missed, short, late, highOt, resigns }.
+// PDF twin of the xlsx check-sheet (owner 2026-08-12: both formats). Same rows: Days = paid days
+// incl. Saturdays, ± Day = bonus/dock. Staff fill Advance + sign.
+export function checkSheetPdf(rows, monthLabel) {
+  const doc = new jsPDF();
+  doc.setFontSize(16); doc.text('NSP ENTERPRISES', 14, 16);
+  doc.setFontSize(12); doc.text('Days & OT check-sheet  -  ' + (monthLabel || ''), 14, 24);
+  doc.setFontSize(9); doc.setTextColor(120);
+  doc.text('Days include paid Saturdays. Staff: check Days + OT, write your Advance, sign.', 14, 30);
+  doc.setTextColor(0);
+  const sorted = [...rows].sort((a, b) =>
+    (a.emp.dept || '').localeCompare(b.emp.dept || '') || (a.emp.name || '').localeCompare(b.emp.name || ''));
+  autoTable(doc, {
+    startY: 36,
+    head: [['Name', 'Dept', 'Days', '+/- Day', 'OT (hrs)', 'Advance', 'Sign']],
+    body: sorted.map(checkRow),
+    theme: 'grid', styles: { fontSize: 9, cellPadding: 1.6 },
+    headStyles: { fillColor: [192, 57, 43] },
+    columnStyles: { 5: { cellWidth: 26 }, 6: { cellWidth: 24 } },
+    margin: { left: 14, right: 14 },
+  });
+  return doc;
+}
+
 export function problemsPdf(data) {
   const doc = new jsPDF();
   const W = doc.internal.pageSize.getWidth();
