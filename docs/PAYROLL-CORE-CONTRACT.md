@@ -287,3 +287,16 @@ Backups walk collections sequentially. **Executable queues must be quarantined b
 restore**, or the worker replays jobs whose effects are already in the restored data. Firestore
 `Timestamp` values do not survive JSON: they must be revived on restore, and the drill must assert
 the restored *type*, not just the value (see `jobs/restoreDrill.js`).
+
+## Amendment — daily-wager / LOD basis (owner 2026-08-11, in force from July 2026 pay run)
+
+The LOD (loading) shift is **09:00–19:30** (span 10:30 incl. the unpaid 13:00–13:30 lunch) and a
+daily wage buys **10 working hours** (`₹700 ÷ 10 = ₹70/hr`). This supersedes the 2026-07-22 rule
+(09:00–20:30 / 11 h) everywhere: `DAILY_WAGER_HOURS = 10`, `SHIFT_HOURS.LOD = 10`, engine fallback
+`dailyStdHrs = 10`, fixtures updated 2026-08-12. Owner approved applying the 10-hour basis to the
+July 2026 salaries (paid 2026-08-12); months locked before that date keep their frozen snapshots.
+Live LOD wagers are normally priced by `att_attendance.months[mk].equivalentDays` from
+`jobs/lodGrace.js` (per-day punches; late+early ≤15 min → full day; ≤15 min past 19:30 earns
+nothing, beyond counts in full; lunch deducted only for the minutes actually overlapping
+13:00–13:30; owner dayOverrides win). The aggregate `(workHrs − 0.5×presentDays) ÷ 10` path is the
+fallback when no equivalentDays is present.
