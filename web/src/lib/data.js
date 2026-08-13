@@ -3,6 +3,7 @@
 import { isConfigured, db } from './firebase';
 import { doc, setDoc, collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { getDoc, getDocs } from './readmeter';   // metered reads → usage_reads/{date} (quota diagnosis)
+import { cacheGet, cachePut, cacheDrop } from './cache';   // 20-min IndexedDB window on heavy immutable-ish reads
 
 const MOCK = {
   at: new Date().toISOString(),
@@ -202,21 +203,39 @@ export async function addAdvanceDirect(code, advance, by) {
   return adv;
 }
 
+// QUOTA SAVER (13-08-2026): attendance + punches change only when the portal sync jobs run, yet the
+// Salary screen and EVERY Person page were re-reading all ~70 workers' docs on each open — the main
+// eater of the shared 50k-reads/day free quota (a settle day burned tens of thousands). A 20-min
+// IndexedDB window means at most 20-min staleness on ATTENDANCE ONLY (fine while settling a past
+// month); money (att_salary) stays live on every read. Worst case the sync's newest punches show up
+// 20 min late — never wrong money.
+const ATT_TTL = 20 * 60 * 1000;
+
 // All employees' monthly attendance at once (for the salary register PDF).
 export async function loadAllAttendance() {
   if (!isConfigured || !db) return {};
+  const hit = await cacheGet('att_attendance', ATT_TTL);
+  if (hit) return hit;
   const snap = await getDocs(collection(db, 'att_attendance'));
-  return Object.fromEntries(snap.docs.map(d => [d.id, d.data()]));
+  const out = Object.fromEntries(snap.docs.map(d => [d.id, d.data()]));
+  cachePut('att_attendance', out);
+  return out;
 }
 
 // Raw daily in/out punches (att_punches) — feeds the app-side attendance engine (Shadow view).
 export async function loadAllPunches() {
   if (!isConfigured || !db) return {};
+  const hit = await cacheGet('att_punches', ATT_TTL);
+  if (hit) return hit;
   const snap = await getDocs(collection(db, 'att_punches'));
-  return Object.fromEntries(snap.docs.map(d => [d.id, d.data()]));
+  const out = Object.fromEntries(snap.docs.map(d => [d.id, d.data()]));
+  cachePut('att_punches', out);
+  return out;
 }
 export async function loadPunchDoc(code) {
   if (!isConfigured || !db) return null;
+  const bulk = await cacheGet('att_punches', ATT_TTL);   // fresh bulk cache already holds this worker
+  if (bulk) return bulk[code] || null;
   const d = await getDoc(doc(db, 'att_punches', code));
   return d.exists() ? d.data() : null;
 }
@@ -489,6 +508,8 @@ export async function queueScanMissed(month, by) {
 // Ask the worker to REPROCESS attendance on Realtime for a date range (dd/MM/yyyy, all employees).
 // Recalculation only — pulls corrected present/OT/late from the existing punches; deletes nothing.
 export async function queueReprocess(from, to, by) {
+  // a reprocess rewrites attendance — drop the read-cache so the result isn't hidden for 20 min
+  cacheDrop('att_attendance'); cacheDrop('att_punches');
   return queueJob('reprocess_period', { from, to }, by);
 }
 // "Leave as is" decision for a missed punch — stored on att_salary so the daily rescan
