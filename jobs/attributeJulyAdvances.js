@@ -12,9 +12,22 @@ const DRY = process.env.DRY_RUN !== 'false';
 
 (async () => {
   const snap = await db().collection('att_salary').get();
-  const backup = {}; const plan = [];
+  const backup = {}; const plan = []; const dupes = [];
   for (const d of snap.docs) {
     const e = d.data();
+    // DOUBLE-ENTRY CHECK (owner 14-08): while the advance seemed "not to show" he may have tapped
+    // again — each tap mints a fresh id, so system dedupe can't catch a human re-tap. Flag any
+    // same-day same-amount same-mode pairs among recent (Jul/Aug 2026) advances. REPORT ONLY.
+    {
+      const seen = {};
+      for (const a of (e.advances || [])) {
+        const dt = String(a.date || '');
+        if (!(dt.startsWith('2026-07') || dt.startsWith('2026-08'))) continue;
+        const k = dt + '|' + Number(a.amount || 0) + '|' + (a.mode || '');
+        if (seen[k]) dupes.push({ code: d.id, name: e.name || '', date: dt, amount: a.amount, mode: a.mode || '', by: a.paidBy || '' });
+        seen[k] = true;
+      }
+    }
     const md = (e.months || {})[OLD] || {};
     if (md.locked || md.payment) continue;                       // July settled → Aug advances stay Aug
     const joined = String(e.joinDate || '').slice(0, 7);
@@ -40,4 +53,10 @@ const DRY = process.env.DRY_RUN !== 'false';
   }
   for (const p of plan) console.log(`${DRY ? '[DRY] ' : ''}${p.code} ${p.name}: ${p.hits.join(', ')} -> mk=${OLD}`);
   console.log(`${DRY ? 'WOULD stamp' : 'STAMPED'} ${plan.reduce((s, p) => s + p.hits.length, 0)} advances on ${plan.length} workers`);
+  if (dupes.length) {
+    console.log('\n⚠ POSSIBLE DOUBLE ENTRIES (same worker+date+amount+mode — owner to confirm, nothing auto-deleted):');
+    for (const x of dupes) console.log(`  ${x.code} ${x.name}: ${x.date} ₹${x.amount} ${x.mode} (by ${x.by})`);
+  } else {
+    console.log('\n✓ no duplicate advances found in Jul/Aug 2026');
+  }
 })().catch((e) => { console.error(e); process.exit(1); });
