@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { loadEmployees, loadAllAttendance, loadAllPunches, loadEmployee, saveEmployee, loadPayout, loadAdvanceBalances, queueAdvance, addAdvanceDirect, loadRoster, loadAttendanceReview, addMonthFine, saveMonth, istMonth, queueJob, lockMonthDirect, unlockMonthDirect, queueLock, queueUnlock, addManualWorker, pushWorkerProfile, MACHINE_DEPTS, MACHINE_SHIFTS, MACHINE_GENDERS, DEPT_DEFAULT_SHIFT } from '../lib/data';
+import { loadEmployees, loadAllAttendance, loadAllPunches, loadEmployee, saveEmployee, loadPayout, loadAdvanceBalances, queueAdvance, addAdvanceDirect, loadRoster, loadAttendanceReview, addMonthFine, saveMonth, istMonth, queueJob, lockMonthDirect, unlockMonthDirect, queueLock, queueUnlock, addManualWorker, pushWorkerProfile, advanceMonth, attributeAdvanceMk, MACHINE_DEPTS, MACHINE_SHIFTS, MACHINE_GENDERS, DEPT_DEFAULT_SHIFT } from '../lib/data';
 import { monthOptions, monthCtx, payFor, rupee, paymentBreakdown } from '../lib/paycalc';
 import { SHIFT_HOURS } from '../lib/payroll';
 import Person from './Person.jsx';
@@ -75,7 +75,7 @@ function OwnerSalary({ user }) {
       return (a.presentDays || 0) > 0 || (a.workHrs || 0) > 0 || (a.otHrs || 0) > 0 || (a.equivalentDays || 0) > 0
         || !!m.locked || !!m.payment || !!m.paidSoFar || !!m.override || Number(m.fine || 0) !== 0
         || Number(m.bonus || 0) !== 0 || Number(m.openingBalance || 0) !== 0
-        || (r.emp.advances || []).some((ad) => (ad.date || '').startsWith(mk));
+        || (r.emp.advances || []).some((ad) => advanceMonth(ad) === mk);
     };
     return mk === istMonth() ? allRows : allRows.filter(rowRelevant);
   }, [emps, attMap, punches, mk, ctx]);
@@ -98,7 +98,7 @@ function OwnerSalary({ user }) {
   // Total money GIVEN OUT this month = advances handed out during the month (ALL people, even
   // no-salary ones — an advance is cash out regardless) + salary actually paid (locked payment
   // net = cash+account at lock; part payments via paidSoFar for months not locked yet).
-  const advEntries = emps.flatMap((e) => (e.advances || []).filter((a) => (a.date || '').startsWith(mk)));
+  const advEntries = emps.flatMap((e) => (e.advances || []).filter((a) => advanceMonth(a) === mk));
   const advancesOut = advEntries.reduce((t, a) => t + Number(a.amount || 0), 0);
   const advCash = advEntries.filter((a) => a.mode !== 'account').reduce((t, a) => t + Number(a.amount || 0), 0);
   const salaryOut = rows.reduce((s, r) => s + Number(r.md.payment ? (r.md.payment.net || 0) : (r.md.paidSoFar || 0)), 0);
@@ -475,7 +475,7 @@ function OwnerRow({ r, mk, busy, justPaidMode, user, onName, onPay, onUndo, onAd
     if (sealed) { setAdv({ ...adv, st: 'That month is already paid & locked — advance not allowed.' }); return; }
     // Mint the id HERE so the direct write and the network-blip fallback share ONE id — a write that
     // lands but times out is then deduped by the worker on retry (never records the advance twice).
-    const advance = { id: 'adv-' + adv.date + '-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7), date: adv.date, mode: adv.mode, amount: Number(adv.amount), remark: '', paidBy: user.email };
+    const advance = { id: 'adv-' + adv.date + '-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7), date: adv.date, mode: adv.mode, amount: Number(adv.amount), remark: '', paidBy: user.email, mk: attributeAdvanceMk(emp, adv.date) };
     // OPTIMISTIC: reflect INSTANTLY, then persist in the background — the owner never waits on the network.
     onAdvanceSaved?.(emp.code, advance);
     setAdv({ amount: '', date: advToday, mode: adv.mode, st: 'done' });
@@ -502,7 +502,7 @@ function OwnerRow({ r, mk, busy, justPaidMode, user, onName, onPay, onUndo, onAd
   // Advance picture for this row: total the worker owes = balance BROUGHT FORWARD from earlier months
   // (openingBalance; − = owes us, + = credit in his favour) + advances GIVEN this running month.
   const carried = Number(pay.openingBalance || 0);
-  const monthAdv = (emp.advances || []).filter((a) => (a.date || '').startsWith(mk)).reduce((t, a) => t + Number(a.amount || 0), 0);
+  const monthAdv = (emp.advances || []).filter((a) => advanceMonth(a) === mk).reduce((t, a) => t + Number(a.amount || 0), 0);
   const advOwed = -carried + monthAdv;               // + = worker owes; − = net credit to worker
   const bfOwed = carried < 0 ? -carried : 0;
   const bfCredit = carried > 0 ? carried : 0;
@@ -670,7 +670,9 @@ function AdvancesExportCard({ emps }) {
       .map((e) => ({
         name: e.name || e.code, code: e.code, dept: e.dept || '',
         bf: Number(((e.months || {})[mk] || {}).openingBalance || 0),   // leftover carried from last month
-        entries: (e.advances || []).filter((a) => a.date && a.date.startsWith(mk) && a.date <= asOf),
+        // attributed month decides where an entry lists; the asOf cap only trims same-month later
+        // entries (a next-month-dated advance pulled back into this month must still appear here)
+        entries: (e.advances || []).filter((a) => a.date && advanceMonth(a) === mk && (advanceMonth(a) !== a.date.slice(0, 7) || a.date <= asOf)),
       }))
       .filter((g) => g.entries.length || Math.round(g.bf) !== 0)
       .sort((a, b) => (a.name || '').localeCompare(b.name || ''));

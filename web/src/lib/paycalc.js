@@ -1,7 +1,7 @@
 // Month context + per-person pay computation shared by the Salary list and Person page.
 // All rule complexity stays here — screens just show the result.
 import { computePay } from './payroll';
-import { monthData, dailyAtt, istMonth } from './data';
+import { monthData, dailyAtt, istMonth, advanceMonth } from './data';
 import { monthOt, monthDetail, monthLateFix } from './attendanceEngine';
 
 // Day-value for present-count: full=1, half=0.5, absent=0. Owner's per-day override (md.dayOverrides,
@@ -92,7 +92,7 @@ export function attFor(emp, attMap, mk) {
 export function payFor(emp, attMap, mk, ctx, graceDelta = 0, punchDoc = null) {
   const att = attFor(emp, attMap, mk);
   const md = monthData(emp, mk);
-  const advs = (emp.advances || []).filter((a) => (a.date || '').startsWith(mk));
+  const advs = (emp.advances || []).filter((a) => advanceMonth(a) === mk);
   const advancesThisMonth = advs.reduce((s, a) => s + Number(a.amount || 0), 0);
   const advanceBalanceIn = Number(md.advanceBalanceIn || 0);
   // ONE advance account (owner 2026-07-13): the engine always cuts the FULL outstanding advance

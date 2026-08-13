@@ -304,18 +304,30 @@ async function handle(type, p) {
   if (type === 'add_advance') {  // manager-created; applied with admin SDK (bypasses rules)
     const ref = db().collection('att_salary').doc(p.code);
     const snap = await ref.get();
-    // GUARD (2026-07-17): never record an advance dated into a LOCKED month — the month's payment
+    // GUARD (2026-07-17): never record an advance whose month is LOCKED — the month's payment
     // is frozen, so the advance would be handed out but never deducted from any salary (money leak).
     // This is the authoritative check; the app's own check is best-effort UX only.
-    const advMk = String(p.advance.date || '').slice(0, 7);
+    const dateMk = String(p.advance.date || '').slice(0, 7);
     // An advance with no usable date belongs to no month, so no salary run can ever deduct it —
     // same leak, different cause. The app rejects this (BADDATE); the manager queue must too, or
     // the two paths this guard was unified across would disagree again (2026-07-31).
-    if (!/^\d{4}-\d{2}$/.test(advMk)) {
+    if (!/^\d{4}-\d{2}$/.test(dateMk)) {
       await sendTelegram(`🚫 Advance ₹${p.advance.amount} to ${(snap.exists && snap.data().name) || p.code} NOT saved — it has no valid date ("${p.advance.date || ''}"), so it could never be deducted from a salary. Re-enter it with a date. (by ${p.advance.paidBy || '?'})`);
       return `REJECTED — advance has no valid date; not recorded`;
     }
-    const allMonths = ((snap.exists && snap.data().months) || {});
+    // OWNER RULE (13-08-2026): while the worker's PREVIOUS month is still unlocked, a new advance
+    // belongs to that previous month (it is netted off the salary being settled); once locked,
+    // advances belong to their own calendar month. Must mirror data.js attributeAdvanceMk exactly.
+    const empData = snap.exists ? snap.data() : {};
+    if (!p.advance.mk) {
+      const [ay, am] = dateMk.split('-').map(Number);
+      const prevMk = am === 1 ? (ay - 1) + '-12' : ay + '-' + String(am - 1).padStart(2, '0');
+      const joined = String(empData.joinDate || '').slice(0, 7);
+      const prevMd = (empData.months || {})[prevMk] || {};
+      p.advance.mk = (joined && joined > prevMk) || prevMd.locked || prevMd.payment ? dateMk : prevMk;
+    }
+    const advMk = p.advance.mk;
+    const allMonths = (empData.months || {});
     const mdAdv = allMonths[advMk] || {};
     if (mdAdv.locked || mdAdv.payment) {
       await sendTelegram(`🚫 Advance ₹${p.advance.amount} to ${(snap.exists && snap.data().name) || p.code} NOT saved — ${advMk} salary is already paid & locked. Date it in the current month instead. (by ${p.advance.paidBy || '?'})`);
@@ -380,7 +392,7 @@ async function handle(type, p) {
       att = attDoc.exists ? attDoc.data() : { presentDays: 0, absentDays: 0, otHrs: 0, lateHrs: 0, earlyHrs: 0 };
     }
     const md = (emp.months && emp.months[mk]) || {};
-    const adv = (emp.advances || []).filter(a => (a.date || '').startsWith(mk)).reduce((s, a) => s + Number(a.amount || 0), 0);
+    const adv = (emp.advances || []).filter(a => ((a.mk) || (a.date || '').slice(0, 7)) === mk).reduce((s, a) => s + Number(a.amount || 0), 0);
     // Apply the owner's manual override (days / OT) exactly as the app does — without this the
     // Telegram payslip reports different figures from the screen (Codex review 2026-07-30).
     const { applyOverride } = require('./lib/applyOverride');

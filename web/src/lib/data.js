@@ -136,12 +136,30 @@ function lockedBlocking(months, mk) {
   const later = Object.entries(months || {}).find(([m, d]) => m > mk && d && (d.locked || d.payment));
   return later ? { kind: 'LOCKEDLATER', month: later[0] } : null;
 }
-function assertAdvanceAllowed(emp, ymd) {
-  const mk = String(ymd || '').slice(0, 7);
-  if (!/^\d{4}-\d{2}$/.test(mk)) throw new Error('BADDATE');   // an advance must carry a real date
-  const b = lockedBlocking(emp.months, mk);
+function assertAdvanceAllowed(emp, ymd, mk) {
+  const dm = String(ymd || '').slice(0, 7);
+  if (!/^\d{4}-\d{2}$/.test(dm)) throw new Error('BADDATE');   // an advance must carry a real date
+  const b = lockedBlocking(emp.months, mk || dm);
   if (b) throw new Error(`${b.kind}:${b.month}`);
 }
+
+// OWNER RULE (13-08-2026): a month's salary is settled in the first days of the NEXT month, and any
+// advance handed out in that window is against the month still being settled. So while the worker's
+// PREVIOUS month is unlocked, a new advance belongs to that previous month; once it's locked,
+// advances belong to their own calendar month. The choice is stamped as `mk` on the entry at save
+// time — advanceMonth() is what every money screen/filter must read, never the raw date.
+export function attributeAdvanceMk(emp, ymd) {
+  const dm = String(ymd || '').slice(0, 7);
+  if (!/^\d{4}-\d{2}$/.test(dm)) return dm;
+  const [y, m] = dm.split('-').map(Number);
+  const prev = m === 1 ? (y - 1) + '-12' : y + '-' + String(m - 1).padStart(2, '0');
+  // a worker who joined after `prev` has no old month to settle — stay in the advance's own month
+  const joined = String((emp && emp.joinDate) || '').slice(0, 7);
+  if (joined && joined > prev) return dm;
+  const pmd = ((emp && emp.months) || {})[prev] || {};
+  return (pmd.locked || pmd.payment) ? dm : prev;
+}
+export function advanceMonth(a) { return (a && a.mk) || String((a && a.date) || '').slice(0, 7); }
 
 // One-tap absence dock from the QuickPeek (owner 2026-08-12): ADD `days` worth of fine to the
 // month (fine = perDay × days, cumulative). Refuses locked months. Returns the new fine total.
@@ -165,9 +183,10 @@ export async function addAdvanceDirect(code, advance, by) {
   const ref = doc(db, 'att_salary', code);
   const snap = await getDoc(ref);
   const data = snap.exists() ? snap.data() : {};
-  // Authoritative money-leak guard: never record an advance dated into a locked/paid month, or
-  // before one (2026-07-31: the later-month case was missing here, though delete already checked it).
-  assertAdvanceAllowed(data, adv.date);
+  adv.mk = adv.mk || attributeAdvanceMk(data, adv.date);   // owner rule: unlocked last month claims it
+  // Authoritative money-leak guard: never record an advance whose month (attributed, not dated) is
+  // locked/paid, or before one (2026-07-31: the later-month case was missing here; delete checked it).
+  assertAdvanceAllowed(data, adv.date, adv.mk);
   const advances = data.advances || [];
   if (!advances.some((a) => a.id === id)) {   // idempotent: skip if this id is already recorded
     if (snap.exists()) {
@@ -683,7 +702,8 @@ export async function addAdvance(code, adv) {
   // 2026-07-31 — accepting a back-dated advance into a sealed month recorded cash that no salary run
   // would ever deduct. The Person screen's own check is best-effort UX; this is the one that counts.
   const e = await loadEmployee(code);
-  assertAdvanceAllowed(e, a.date);
+  a.mk = a.mk || attributeAdvanceMk(e, a.date);   // owner rule: unlocked last month claims it
+  assertAdvanceAllowed(e, a.date, a.mk);
   if (isConfigured && db) {
     const { updateDoc, arrayUnion } = await import('firebase/firestore');
     await updateDoc(doc(db, 'att_salary', code), { advances: arrayUnion(a) });   // atomic append — no read-modify-write
@@ -702,7 +722,7 @@ export async function deleteAdvanceAt(code, index, sig) {
   const same = (a) => !!a && String(a.date || '') === String(sig.date || '') && Number(a.amount || 0) === Number(sig.amount || 0)
     && String(a.mode || '') === String(sig.mode || '') && String(a.id || '') === String(sig.id || '');
   const blocked = (e, a) => {
-    const b = lockedBlocking(e.months, String(a.date || '').slice(0, 7));
+    const b = lockedBlocking(e.months, advanceMonth(a));   // attributed month, not the raw date
     if (b) throw new Error(`${b.kind}:${b.month}`);
   };
   // TRANSACTION (2026-07-31, Codex round 3). This used to read the array, filter one element out and

@@ -192,6 +192,16 @@ async function handle(msg, role) {
       const advance = { amount, mode: mode === 'account' ? 'bank' : mode, date: istToday(), paidBy: role === 'owner' ? 'owner (bot)' : 'manager (bot)' };
       const ref = db().collection('att_salary').doc(emp.code);
       const snap = await ref.get();
+      // OWNER RULE (13-08-2026): unlocked previous month claims a new advance (mirrors data.js attributeAdvanceMk)
+      {
+        const ed = snap.exists ? snap.data() : {};
+        const dm = advance.date.slice(0, 7);
+        const [ay, am] = dm.split('-').map(Number);
+        const prevMk = am === 1 ? (ay - 1) + '-12' : ay + '-' + String(am - 1).padStart(2, '0');
+        const joined = String(ed.joinDate || '').slice(0, 7);
+        const prevMd = (ed.months || {})[prevMk] || {};
+        advance.mk = (joined && joined > prevMk) || prevMd.locked || prevMd.payment ? dm : prevMk;
+      }
       const advances = (snap.exists && snap.data().advances) || [];
       advances.push(advance);
       await ref.set({ advances }, { merge: true });

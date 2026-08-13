@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { loadEmployee, loadAllAttendance, loadPunchDoc, saveEmployee, saveMonth, addAdvance, deleteAdvanceAt, addIncrement, settleAndResign, checkActionPassword, queueJob, queueLock, queueUnlock, lockMonthDirect, unlockMonthDirect, editNameDept, istMonth, removeWorker, restoreWorker, deleteWorkerHard, workerEverPaid } from '../lib/data';
+import { loadEmployee, loadAllAttendance, loadPunchDoc, saveEmployee, saveMonth, addAdvance, deleteAdvanceAt, addIncrement, settleAndResign, checkActionPassword, queueJob, queueLock, queueUnlock, lockMonthDirect, unlockMonthDirect, editNameDept, istMonth, removeWorker, restoreWorker, deleteWorkerHard, workerEverPaid, attributeAdvanceMk } from '../lib/data';
 import { monthCtx, payFor, rupee, paymentBreakdown } from '../lib/paycalc';
 import { payslipOnePdf, sharePdf } from '../lib/salaryPdf';
 import { graceDeltaDays } from '../lib/attendanceEngine';
@@ -32,9 +32,12 @@ export default function Person({ code, mk, user, onBack }) {
   // worker's attendance (~66 docs) after each advance, which is exactly what made entry slow.
   async function addAdvanceFast(f) {
     if (monthSealed(f.date)) { alert('That month is already paid & locked — advance not allowed. Date it in an open month.'); return; }
-    const a = { id: 'adv-' + f.date + '-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7), date: f.date, mode: f.mode, amount: Number(f.amount), remark: f.remark || '', paidBy: user.email };
+    const a = { id: 'adv-' + f.date + '-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7), date: f.date, mode: f.mode, amount: Number(f.amount), remark: f.remark || '', paidBy: user.email, mk: attributeAdvanceMk(emp, f.date) };
     setEmp((prev) => ({ ...prev, advances: [...(prev.advances || []), a] }));   // instant
-    try { await addAdvance(code, a); }
+    try {
+      const saved = await addAdvance(code, a);   // saved copy carries mk (which month it belongs to)
+      setEmp((prev) => ({ ...prev, advances: (prev.advances || []).map((x) => x.id === a.id ? saved : x) }));
+    }
     catch { setEmp((prev) => ({ ...prev, advances: (prev.advances || []).filter((x) => x.id !== a.id) })); alert('Could not save the advance — try again.'); }
   }
   async function delAdvance(index, sig) {
@@ -96,7 +99,10 @@ export default function Person({ code, mk, user, onBack }) {
   const workedSat = pay.weeklyOffPresent || 0;
   const satCut = pay.saturdaysCut || 0;
   // This month's advances WITH dates (only those logged as ledger entries; carried balances have none).
-  const advLines = advs.map((a) => `${rupee(a.amount)} on ${Number((a.date || '').slice(8, 10))} ${MON}`).join(', ');
+  // label each advance by ITS OWN date — an advance given in Aug but counted against July (owner
+  // rule, advance `mk`) must still read "13 Aug", not a made-up July date
+  const MONS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const advLines = advs.map((a) => `${rupee(a.amount)} on ${Number((a.date || '').slice(8, 10))} ${MONS[Number((a.date || '').slice(5, 7)) - 1] || MON}`).join(', ');
   const paidDaysN = pay.paidDays || 0;
   const holidayN = pay.holiday || 0;
   const prevBal = Math.round((pay.openingBalance || 0) * 100) / 100;   // + = owed to worker, − = he owes
