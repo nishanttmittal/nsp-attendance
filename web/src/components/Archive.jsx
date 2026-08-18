@@ -1,26 +1,44 @@
 import { useEffect, useState } from 'react';
-import { loadArchive } from '../lib/data';
+import { loadArchive, loadEmployees } from '../lib/data';
 import { rupee } from '../lib/paycalc';
 
-// Archive of resigned + removed workers. The machine record is deleted on resign, but the
-// full payroll record + punch history is kept here (att_archive) so nothing is ever lost.
+// Records of everyone no longer working here. Removed staff live in TWO places, and showing only
+// one of them is why the owner reported "cannot see archive worker salary record" (2026-08-19):
+//   1. att_archive — older resignations, archived BEFORE the 2026-07-12 change (e.g. poonam,
+//      sukhrani). These are gone from att_salary entirely, so nothing else in the app shows them.
+//   2. att_salary with active:false — the current model keeps the live doc so name + paid history
+//      stay searchable. The Salary tab's "Show removed" toggle also reaches these.
+// This screen merges both so no leaver is ever invisible.
 export default function Archive() {
   const [rows, setRows] = useState(null);
   const [open, setOpen] = useState(null);
-  useEffect(() => { loadArchive().then(setRows).catch(() => setRows([])); }, []);
+  useEffect(() => {
+    Promise.all([
+      loadArchive().catch(() => []),
+      loadEmployees(true).then((l) => (l || []).filter((e) => e.active === false)).catch(() => []),
+    ]).then(([archived, inactive]) => {
+      const seen = new Set(archived.map((a) => a.code));
+      const asArchive = inactive.filter((e) => !seen.has(e.code)).map((e) => ({
+        code: e.code, name: e.name, dept: e.dept, doj: e.joinDate,
+        archivedAt: e.exitDate || e.resignedAt || '', salary: e, source: 'inactive',
+      }));
+      setRows([...archived, ...asArchive]
+        .sort((a, b) => String(b.archivedAt || '').localeCompare(String(a.archivedAt || ''))));
+    }).catch(() => setRows([]));
+  }, []);
 
   if (rows === null) return <p className="text-gray-500">Loading…</p>;
   if (!rows.length) return (
     <div className="text-center text-gray-500 py-10">
       <div className="text-3xl mb-2">🗄️</div>
-      <p className="text-sm">No archived workers yet.</p>
-      <p className="text-xs text-gray-400 mt-1">When you resign someone, their full record is saved here before they're removed from the machine.</p>
+      <p className="text-sm">No removed workers yet.</p>
+      <p className="text-xs text-gray-400 mt-1">When someone leaves, their full record — salary, months and every payment — is kept here. Nothing is ever deleted.</p>
     </div>
   );
 
   return (
     <div className="space-y-2">
-      <p className="text-xs text-gray-500">{rows.length} archived worker{rows.length > 1 ? 's' : ''}. Their history is kept safe even though they're removed from the machine.</p>
+      <p className="text-xs text-gray-500">{rows.length} removed worker{rows.length > 1 ? 's' : ''}. Their salary, months and payments are kept safe even though they're off the machine. Tap a name for the full record.</p>
       {rows.map((a) => {
         const payments = Object.entries((a.salary && a.salary.months) || {})
           .filter(([, m]) => m && m.payment).map(([mk, m]) => ({ mk, ...m.payment }))
