@@ -12,7 +12,13 @@ const CONTRACTORS = [
   { key: 'naveen', label: 'Naveen' },
   { key: 'jitender', label: 'Jitender' },
 ];
+// An explicit `contractor` field on the worker wins; otherwise fall back to reading the name.
+// The field exists because five welders carry no contractor in their name (owner named them
+// 2026-08-19: kamtaprasad→Jitender, rakesh singh→Naveen, hardev→Naveen, virender + rajesh kumar
+// →Jitender) and renaming a live worker to fix a grouping would be the wrong lever.
 const contractorOf = (e) => {
+  const set = String(e.contractor || '').trim();
+  if (set) return set;
   const hay = `${e.name || ''} ${e.nickname || ''}`.toLowerCase();
   const hit = CONTRACTORS.find((c) => hay.includes(c.key));
   return hit ? hit.label : 'Not marked';
@@ -128,9 +134,9 @@ export default function Welders() {
       })}
 
       <p className="text-[11px] text-slate-500 px-1">
-        Contractor is read from the worker's name. A welder showing under "Not marked" just needs
-        "naveen" or "jitender" in his name to group correctly. Actual contractor payment and
-        per-piece rates live in the welder app.
+        Grouping uses the worker's <b>contractor</b> field, falling back to his name. If a new welder
+        lands under "Not marked", tell Claude who he works under and it gets stamped on his record —
+        no need to rename him. Actual contractor payment and per-piece rates live in the welder app.
       </p>
     </div>
   );
