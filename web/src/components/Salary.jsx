@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { loadEmployees, loadAllAttendance, loadAllPunches, loadEmployee, saveEmployee, loadPayout, loadAdvanceBalances, queueAdvance, addAdvanceDirect, loadRoster, loadAttendanceReview, addMonthFine, saveMonth, istMonth, queueJob, lockMonthDirect, unlockMonthDirect, queueLock, queueUnlock, addManualWorker, pushWorkerProfile, advanceMonth, attributeAdvanceMk, MACHINE_DEPTS, MACHINE_SHIFTS, MACHINE_GENDERS, DEPT_DEFAULT_SHIFT } from '../lib/data';
+import { advanceStatement, loadEmployees, loadAllAttendance, loadAllPunches, loadEmployee, saveEmployee, loadPayout, loadAdvanceBalances, queueAdvance, addAdvanceDirect, loadRoster, loadAttendanceReview, addMonthFine, saveMonth, istMonth, queueJob, lockMonthDirect, unlockMonthDirect, queueLock, queueUnlock, addManualWorker, pushWorkerProfile, advanceMonth, attributeAdvanceMk, MACHINE_DEPTS, MACHINE_SHIFTS, MACHINE_GENDERS, DEPT_DEFAULT_SHIFT } from '../lib/data';
 import { monthOptions, monthCtx, payFor, rupee, paymentBreakdown } from '../lib/paycalc';
 import { SHIFT_HOURS } from '../lib/payroll';
 import Person from './Person.jsx';
@@ -698,41 +698,118 @@ function AdvancesExportCard({ emps }) {
 // MANAGER Advances page (feature 'advances'): give an advance to any worker and see each worker's
 // outstanding balance "till today" — with NO salary/pay figures. Balances come from the salary-free
 // att_meta/advance_balances mirror (the worker writes it); the manager can't read att_salary at all.
+const shortMonth = (mk) => (/^\d{4}-\d{2}$/.test(mk || '')
+  ? new Date(Date.UTC(+mk.slice(0, 4), +mk.slice(5, 7) - 1, 1)).toLocaleString('default', { month: 'short', timeZone: 'UTC' })
+  : '');
+
 export function ManagerAdvances({ user }) {
   const [bal, setBal] = useState(null);
   const [extra, setExtra] = useState({});   // code -> amount added this session (instant reflection)
   const [q, setQ] = useState('');
+  const [openCode, setOpenCode] = useState('');       // row expanded for the date-wise breakdown
+  const [detail, setDetail] = useState({});           // code -> { entries[], bfMonth } | { denied:true }
   useEffect(() => { loadAdvanceBalances().then(setBal); }, []);
   const items = bal?.items || {};
-  const owedOf = (code) => Math.round((items[code]?.totalOwed || 0) + (extra[code] || 0));
+  // Owner rule (19-08-2026): once the old month is LOCKED, show the carried-forward balance and the
+  // advances given AFTER it SEPARATELY — never merged into one figure. `thisMonth` = advances given in
+  // the running month; `bf` = whatever the settled months left behind (+ owes us, − credit to him).
+  // Prefer the statement read straight from att_salary once a row has been opened (owner only, and
+  // authoritative); fall back to the salary-free att_meta mirror, which is all a manager can read.
+  const thisOf = (code) => Math.round((detail[code] && !detail[code].denied ? detail[code].since : (items[code]?.thisMonth || 0)) + (extra[code] || 0));
+  const bfOf = (code) => Math.round(detail[code] && !detail[code].denied
+    ? -detail[code].bf
+    : (items[code]?.bfOwed || 0) - (items[code]?.bfCredit || 0));
   const onSaved = (code, adv) => setExtra((p) => ({ ...p, [code]: (p[code] || 0) + Number(adv.amount || 0) }));
   const list = useMemo(() => Object.entries(items).map(([code, v]) => ({ code, ...v }))
     .filter((v) => !q || (v.name || '').toLowerCase().includes(q.toLowerCase()))
-    .sort((a, b) => owedOf(b.code) - owedOf(a.code)), [items, q, extra]);   // eslint-disable-line react-hooks/exhaustive-deps
+    // current-month activity first (that's the month being worked on), carried-forward-only rows after
+    .sort((a, b) => (thisOf(b.code) - thisOf(a.code)) || (bfOf(b.code) - bfOf(a.code))), [items, q, extra]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const totThis = list.reduce((s, v) => s + thisOf(v.code), 0);
+  const totBf = list.reduce((s, v) => s + Math.max(0, bfOf(v.code)), 0);
+
+  // Date-wise detail for ONE worker, loaded only when his row is tapped (one doc read, not the whole
+  // roster). att_salary is owner-only by rule, so a manager simply gets the "denied" note instead.
+  async function toggle(code) {
+    if (openCode === code) { setOpenCode(''); return; }
+    setOpenCode(code);
+    if (detail[code]) return;
+    try {
+      const st = advanceStatement(await loadEmployee(code));
+      setDetail((p) => ({ ...p, [code]: st }));
+    } catch { setDetail((p) => ({ ...p, [code]: { denied: true } })); }
+  }
+
   return (
     <div className="space-y-3">
       <AdvanceCard user={user} balances={items} extraOwed={extra} onSaved={onSaved} />
       <div className="bg-white rounded-2xl border-2 border-slate-200 p-3 space-y-2">
         <div className="flex items-center justify-between">
-          <div className="font-bold text-slate-700">Outstanding advances (till today)</div>
+          <div className="font-bold text-slate-700">Advances</div>
           {bal?.updatedAt && <span className="text-[11px] text-slate-400">as of {new Date(bal.updatedAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</span>}
+        </div>
+        <div className="flex gap-2 text-center">
+          <div className="flex-1 rounded-xl bg-rose-50 border border-rose-100 py-1.5">
+            <div className="text-[10px] text-rose-700 font-semibold uppercase tracking-wide">This month</div>
+            <div className="font-bold text-rose-800">{rupee(totThis)}</div>
+          </div>
+          <div className="flex-1 rounded-xl bg-slate-50 border border-slate-200 py-1.5">
+            <div className="text-[10px] text-slate-500 font-semibold uppercase tracking-wide">Carried forward</div>
+            <div className="font-bold text-slate-700">{rupee(totBf)}</div>
+          </div>
         </div>
         <input className="w-full border-2 border-slate-200 rounded-xl px-3 py-2.5 text-base" placeholder="🔍 Search worker…" value={q} onChange={(e) => setQ(e.target.value)} />
         {!bal && <p className="text-sm text-slate-400">Loading…</p>}
         <div className="divide-y divide-slate-100 max-h-[58vh] overflow-auto">
           {list.map((v) => {
-            const owed = owedOf(v.code);
+            const now = thisOf(v.code), bf = bfOf(v.code);
+            const d = detail[v.code], isOpen = openCode === v.code;
             return (
-              <div key={v.code} className="py-2.5 flex items-center justify-between gap-2">
-                <span className="min-w-0 truncate text-sm text-slate-700">{v.name}{v.dept ? <span className="text-slate-400"> · {v.dept}</span> : null}</span>
-                <b className={`shrink-0 ${owed > 0 ? 'text-rose-700' : owed < 0 ? 'text-emerald-700' : 'text-slate-400'}`}>{owed > 0 ? `₹${owed.toLocaleString('en-IN')}` : owed < 0 ? `₹${(-owed).toLocaleString('en-IN')} cr` : '₹0'}</b>
+              <div key={v.code} className="py-2.5">
+                <button onClick={() => toggle(v.code)} className="w-full flex items-center justify-between gap-2 text-left">
+                  <span className="min-w-0 truncate text-sm text-slate-700">{v.name}{v.dept ? <span className="text-slate-400"> · {v.dept}</span> : null}</span>
+                  <span className="shrink-0 text-right">
+                    <b className={now > 0 ? 'text-rose-700' : 'text-slate-400'}>{rupee(now)}</b>
+                    <span className="text-[11px] text-slate-400"> {isOpen ? '▾' : '▸'}</span>
+                    {bf !== 0 && (
+                      <div className="text-[11px] text-slate-500 leading-tight">
+                        {bf > 0 ? `${rupee(bf)} carried fwd` : `${rupee(-bf)} credit carried fwd`}
+                      </div>
+                    )}
+                  </span>
+                </button>
+                {isOpen && (
+                  <div className="mt-1.5 ml-1 pl-2 border-l-2 border-slate-100 text-[12px] space-y-0.5">
+                    {!d && <p className="text-slate-400">Loading…</p>}
+                    {d?.denied && <p className="text-slate-400">Date-wise detail is owner-only.</p>}
+                    {d && !d.denied && (
+                      <>
+                        {bf !== 0 && (
+                          <div className="flex justify-between text-slate-500">
+                            <span>Carried forward{d.bfMonth ? ` (after ${shortMonth(d.bfMonth)} lock)` : ''}</span>
+                            <span>{bf > 0 ? rupee(bf) : `${rupee(-bf)} cr`}</span>
+                          </div>
+                        )}
+                        {d.entries.map((a, i) => (
+                          <div key={a.id || i} className="flex justify-between text-slate-700">
+                            <span>{a.date ? `${a.date.slice(8, 10)}/${a.date.slice(5, 7)}` : '—'} · {a.mode || 'cash'}{a.remark ? ` · ${a.remark}` : ''}</span>
+                            <span>{rupee(Number(a.amount || 0))}</span>
+                          </div>
+                        ))}
+                        {!d.entries.length && <p className="text-slate-400">No advance given since the last lock.</p>}
+                        <div className="flex justify-between font-bold text-slate-800 border-t border-slate-100 pt-0.5">
+                          <span>Total advance</span><span>{rupee(bf + now)}</span>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
               </div>
             );
           })}
           {bal && !list.length && <p className="text-sm text-slate-400 py-2">No workers match.</p>}
         </div>
       </div>
-      <p className="text-[11px] text-slate-500 px-1">Advances you record here are applied within a few minutes and the owner gets a Telegram alert. Balances refresh automatically. This page never shows salaries.</p>
+      <p className="text-[11px] text-slate-500 px-1">Tap a worker for the date-wise list. Advances recorded here apply within a few minutes and the owner gets a Telegram alert. This page never shows salaries.</p>
     </div>
   );
 }

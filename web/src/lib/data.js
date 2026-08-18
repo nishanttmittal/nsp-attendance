@@ -162,6 +162,31 @@ export function attributeAdvanceMk(emp, ymd) {
 }
 export function advanceMonth(a) { return (a && a.mk) || String((a && a.date) || '').slice(0, 7); }
 
+// ONE worker's advance statement as the owner wants to read it (rule 19-08-2026): "once the old month
+// is locked it should show carried forward advance or balance, and advances paid after that date wise".
+// So the account starts at the balance the LAST LOCK carried out, and lists every advance given since.
+//   bf  − = he owes us (shown as "carried forward"), + = credit in his favour
+//   since = advances attributed to any month AFTER the last locked one
+// A month that is still OPEN has not been settled, so its advances are still outstanding and must be
+// listed — counting only the running calendar month hid ₹1.09L across 7 workers (raju ₹6k vs ₹61.5k).
+export function advanceStatement(emp) {
+  const months = (emp && emp.months) || {};
+  const lockedMks = Object.keys(months).filter((m) => months[m] && months[m].locked).sort();
+  const bfMonth = lockedMks.length ? lockedMks[lockedMks.length - 1] : '';
+  // the lock's closing balance lands on the month straight after it
+  const after = bfMonth ? nextMonthKey(bfMonth) : '';
+  const bf = after ? Number((months[after] || {}).openingBalance || 0) : 0;
+  const entries = ((emp && emp.advances) || [])
+    .filter((a) => !bfMonth || advanceMonth(a) > bfMonth)
+    .sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')));
+  const since = entries.reduce((t, a) => t + Number(a.amount || 0), 0);
+  return { bfMonth, bf, entries, since, owed: Math.round(-bf + since) };   // owed + = worker owes us
+}
+export function nextMonthKey(mk) {
+  const d = new Date(Date.UTC(Number(String(mk).slice(0, 4)), Number(String(mk).slice(5, 7)), 1));
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+}
+
 // One-tap absence dock from the QuickPeek (owner 2026-08-12): ADD `days` worth of fine to the
 // month (fine = perDay × days, cumulative). Refuses locked months. Returns the new fine total.
 export async function addMonthFine(code, mk, amount) {

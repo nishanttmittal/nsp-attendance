@@ -12,6 +12,12 @@ const { runDueTasks } = require('./scheduler');
 
 const DL = path.resolve(__dirname, 'downloads');
 
+// "2026-07" -> "2026-08" (mirrors web/src/lib/data.js nextMonthKey)
+const nextMonthKey = (mk) => {
+  const d = new Date(Date.UTC(Number(String(mk).slice(0, 4)), Number(String(mk).slice(5, 7)), 1));
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+};
+
 // ── Job authorization (P1-1) ────────────────────────────────────────────────
 // The queue runs with Admin SDK, so a job request is a PRIVILEGED API call — it
 // must be authorized here, not just by Firestore create rules. `requestedBy` is
@@ -523,13 +529,26 @@ async function main() {
     sal.forEach(d => {
       const e = d.data();
       if (e.active === false) return;
-      const md = (e.months || {})[cur] || {};
-      const bf = Number(md.openingBalance || 0);                                   // running balance b/f (− = owes us)
-      const monthAdv = (e.advances || []).filter(a => String(a.date || '').startsWith(cur)).reduce((t, a) => t + Number(a.amount || 0), 0);
+      // Owner rule 19-08-2026: the account starts at the balance the LAST LOCK carried out, and counts
+      // every advance given SINCE that lock. Keep in step with web/src/lib/data.js advanceStatement().
+      // Was: bf from the running month + advances dated in the running calendar month — that hid an
+      // unlocked month's advances entirely AND lost its carry-in, under-reporting ₹1.09L over 7 workers
+      // (raju showed ₹6,000 against a real ₹61,555). Under-reporting money owed is the dangerous way to
+      // be wrong, so this counts from the last settled point instead of the calendar month.
+      const months = e.months || {};
+      const lockedMks = Object.keys(months).filter(m => (months[m] || {}).locked).sort();
+      const bfMonth = lockedMks.length ? lockedMks[lockedMks.length - 1] : '';
+      const after = bfMonth ? nextMonthKey(bfMonth) : '';
+      const bf = after ? Number((months[after] || {}).openingBalance || 0) : 0;   // − = owes us
+      const advMk = a => a.mk || String(a.date || '').slice(0, 7);
+      const sinceAdv = (e.advances || [])
+        .filter(a => !bfMonth || advMk(a) > bfMonth)
+        .reduce((t, a) => t + Number(a.amount || 0), 0);
       advItems[d.id] = {
         name: e.name || d.id, nickname: e.nickname || '', dept: e.dept || '',
         bfOwed: Math.round(bf < 0 ? -bf : 0), bfCredit: Math.round(bf > 0 ? bf : 0),
-        thisMonth: Math.round(monthAdv), totalOwed: Math.round(-bf + monthAdv),    // + = worker owes; − = credit
+        thisMonth: Math.round(sinceAdv), totalOwed: Math.round(-bf + sinceAdv),   // + = worker owes; − = credit
+        sinceLock: bfMonth || null,
       };
     });
     await db().collection('att_meta').doc('advance_balances').set({ month: cur, items: advItems, updatedAt: new Date().toISOString() });
