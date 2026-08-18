@@ -9,10 +9,12 @@ const col = (h, ...names) => { const l = h.map(x => x.toLowerCase()); for (const
 (async () => {
   const { browser, page } = await session();
   try {
-    await page.goto('https://onlinerealsoft.com/EmployeeList.aspx', { waitUntil: 'domcontentloaded' });
+    // old EmployeeList.aspx deleted with the old portal (Aug 2026) — V26 list only now
+    await page.goto('https://onlinerealsoft.com/ERP_EmployeeList.aspx', { waitUntil: 'domcontentloaded' });
     await page.waitForTimeout(1800);
     const grid = await readGrid(page);
     const h = grid[0];
+    if (!h) throw new Error('ERP_EmployeeList.aspx rendered no table — portal did not answer; retry later.');
     const ci = col(h, 'empcode', 'emp code', 'code'), ni = col(h, 'empname', 'emp name', 'name'), di = col(h, 'dept_name', 'dept', 'department');
     const fdb = db();
     let batch = fdb.batch(), n = 0, total = 0;
