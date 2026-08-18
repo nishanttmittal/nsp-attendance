@@ -10,8 +10,8 @@ const MAP = [
   ['00000302', 'kamtaprasad welder',      'Jitender'],
   ['00000077', 'rakesh singh welder',     'Naveen'],
   ['00000093', 'hardev welder',           'Naveen'],
-  ['00000067', 'virender welder',         'Jitender'],   // removed
-  ['00000075', 'rajesh kumar welder raju', 'Jitender'],  // removed
+  ['00000067', 'virender welder',         'Naveen'],   // removed (owner corrected 01:49: Naveen, not Jitender)
+  ['00000075', 'rajesh kumar welder raju', 'Naveen'],  // removed (owner corrected 01:49)
 ];
 const DRY = process.env.DRY_RUN !== 'false';
 
