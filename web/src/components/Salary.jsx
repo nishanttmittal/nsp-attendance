@@ -713,19 +713,27 @@ export function ManagerAdvances({ user }) {
   // Owner rule (19-08-2026): once the old month is LOCKED, show the carried-forward balance and the
   // advances given AFTER it SEPARATELY — never merged into one figure. `thisMonth` = advances given in
   // the running month; `bf` = whatever the settled months left behind (+ owes us, − credit to him).
-  // Prefer the statement read straight from att_salary once a row has been opened (owner only, and
-  // authoritative); fall back to the salary-free att_meta mirror, which is all a manager can read.
-  const thisOf = (code) => Math.round((detail[code] && !detail[code].denied ? detail[code].since : (items[code]?.thisMonth || 0)) + (extra[code] || 0));
-  const bfOf = (code) => Math.round(detail[code] && !detail[code].denied
-    ? -detail[code].bf
-    : (items[code]?.bfOwed || 0) - (items[code]?.bfCredit || 0));
-  const onSaved = (code, adv) => setExtra((p) => ({ ...p, [code]: (p[code] || 0) + Number(adv.amount || 0) }));
+  // Mirror basis (att_meta) — all a manager can read, and the ONLY basis the header totals use so a
+  // total never shifts just because a row was opened. `extra` = advances saved this session, which the
+  // mirror won't carry until the queue worker rewrites it.
+  const mirrorThis = (code) => Math.round((items[code]?.thisMonth || 0) + (extra[code] || 0));
+  const mirrorBf = (code) => Math.round((items[code]?.bfOwed || 0) - (items[code]?.bfCredit || 0));
+  // Per-row: once a row is opened, prefer the statement read straight from att_salary (owner-only and
+  // authoritative). It ALREADY includes a just-saved advance — adding `extra` here would double it, so
+  // `extra` applies to the mirror branch only, and onSaved drops the cached statement to force a refetch.
+  const thisOf = (code) => (detail[code] && !detail[code].denied ? Math.round(detail[code].since) : mirrorThis(code));
+  const bfOf = (code) => (detail[code] && !detail[code].denied ? Math.round(-detail[code].bf) : mirrorBf(code));
+  const onSaved = (code, adv) => {
+    setExtra((p) => ({ ...p, [code]: (p[code] || 0) + Number(adv.amount || 0) }));
+    setDetail((p) => { const n = { ...p }; delete n[code]; return n; });   // stale now — refetch on next tap
+    setOpenCode((c) => (c === code ? '' : c));
+  };
   const list = useMemo(() => Object.entries(items).map(([code, v]) => ({ code, ...v }))
     .filter((v) => !q || (v.name || '').toLowerCase().includes(q.toLowerCase()))
     // current-month activity first (that's the month being worked on), carried-forward-only rows after
-    .sort((a, b) => (thisOf(b.code) - thisOf(a.code)) || (bfOf(b.code) - bfOf(a.code))), [items, q, extra]);   // eslint-disable-line react-hooks/exhaustive-deps
-  const totThis = list.reduce((s, v) => s + thisOf(v.code), 0);
-  const totBf = list.reduce((s, v) => s + Math.max(0, bfOf(v.code)), 0);
+    .sort((a, b) => (mirrorThis(b.code) - mirrorThis(a.code)) || (mirrorBf(b.code) - mirrorBf(a.code))), [items, q, extra]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const totThis = list.reduce((s, v) => s + mirrorThis(v.code), 0);
+  const totBf = list.reduce((s, v) => s + Math.max(0, mirrorBf(v.code)), 0);
 
   // Date-wise detail for ONE worker, loaded only when his row is tapped (one doc read, not the whole
   // roster). att_salary is owner-only by rule, so a manager simply gets the "denied" note instead.
