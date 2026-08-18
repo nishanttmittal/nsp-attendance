@@ -11,14 +11,23 @@ import WorkerSummary from './WorkerSummary.jsx';
 const CONTRACTORS = [
   { key: 'naveen', label: 'Naveen' },
   { key: 'jitender', label: 'Jitender' },
+  { key: 'raju', label: 'Raju' },
 ];
-// An explicit `contractor` field on the worker wins; otherwise fall back to reading the name.
-// The field exists because five welders carry no contractor in their name (owner named them
-// 2026-08-19: kamtaprasad→Jitender, rakesh singh→Naveen, hardev→Naveen, virender + rajesh kumar
-// →Jitender) and renaming a live worker to fix a grouping would be the wrong lever.
-const contractorOf = (e) => {
-  const set = String(e.contractor || '').trim();
-  if (set) return set;
+// Which contractor a welder worked under IN THAT MONTH. Welders move between contractors (owner
+// 2026-08-19: virender, rajesh kumar and rakesh singh were under RAJU till July and under NAVEEN
+// from August), so a single flat field would silently re-write history — open July and their days
+// would be credited to the wrong contractor. Resolution order:
+//   1. contractorHistory[] — [{ from:'YYYY-MM', contractor }], the entry with the latest `from` <= mk
+//   2. contractor — a flat field, for welders who never changed hands
+//   3. the worker's name, which usually carries the contractor
+// Same effective-dated idea the welder app already uses for per-piece rates.
+const contractorOn = (e, mk) => {
+  const hist = Array.isArray(e.contractorHistory) ? e.contractorHistory : [];
+  const eff = hist.filter((h) => h && h.contractor && (!h.from || String(h.from) <= mk))
+    .sort((a, b) => String(a.from || '').localeCompare(String(b.from || '')));
+  if (eff.length) return String(eff[eff.length - 1].contractor).trim();
+  const flat = String(e.contractor || '').trim();
+  if (flat) return flat;
   const hay = `${e.name || ''} ${e.nickname || ''}`.toLowerCase();
   const hit = CONTRACTORS.find((c) => hay.includes(c.key));
   return hit ? hit.label : 'Not marked';
@@ -55,7 +64,7 @@ export default function Welders() {
       const r = payFor(e, attMap, mk, ctx, 0, punches[e.code]);
       return {
         r, code: e.code, name: e.name || e.code, active: e.active !== false,
-        contractor: contractorOf(e), days: r.pay.paidDays || 0,
+        contractor: contractorOn(e, mk), days: r.pay.paidDays || 0,
         otHrs: r.pay.otHrsNet || 0, earned: monthPay(r.pay),
       };
     // a welder with no attendance in the month isn't the contractor's cost that month
@@ -82,7 +91,7 @@ export default function Welders() {
       <div className="bg-amber-50 border-2 border-amber-200 rounded-2xl p-3">
         <div className="font-bold text-amber-900">🔧 Welders — paid by contractor</div>
         <p className="text-[11px] text-amber-800 mt-0.5">
-          Welders are paid <b>per piece through the welder app</b> by Naveen / Jitender. Nothing here is
+          Welders are paid <b>per piece through the welder app</b> by their contractor. Nothing here is
           settled or paid from this app — these figures show what each contractor's team is worth for the
           month, from attendance. Owner-only.
         </p>
