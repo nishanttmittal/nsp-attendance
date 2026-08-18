@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { loadEmployees, loadAllAttendance, loadAllPunches, istMonth } from '../lib/data';
 import { monthOptions, monthCtx, payFor, rupee } from '../lib/paycalc';
+import WorkerSummary from './WorkerSummary.jsx';
 
 // WELDERS — contractor-paid, NEVER settled here (owner rule 2026-08-19).
 // Welders are paid PIECE-RATE through the welder app by contractors Naveen / Jitender. Their
@@ -17,6 +18,11 @@ const contractorOf = (e) => {
   return hit ? hit.label : 'Not marked';
 };
 const isWelder = (e) => (e.dept || '').toUpperCase() === 'WELDING';
+// What the welder EARNED for the month = days + OT + any extras, BEFORE any advance is cut.
+// (`pay.net` is after the advance recovery and `pay.payable` also folds in last month's balance —
+// neither answers "how much is he getting as monthly pay", which is what this screen is for.)
+const monthPay = (p) => Number(p.base || 0) + Number(p.otPay || 0) + Number(p.perfectBonus || 0)
+  + Number(p.restoreSaturdayPay || 0) + Number(p.gracePay || 0) + Number(p.bonus || 0);
 
 export default function Welders() {
   const [emps, setEmps] = useState(null);
@@ -24,6 +30,7 @@ export default function Welders() {
   const [punches, setPunches] = useState({});
   const [mk, setMk] = useState(() => localStorage.getItem('nsp_welders_mk') || istMonth());
   const [openGroup, setOpenGroup] = useState('');
+  const [openWorker, setOpenWorker] = useState('');
 
   useEffect(() => {
     let alive = true;
@@ -38,14 +45,15 @@ export default function Welders() {
   const groups = useMemo(() => {
     if (!emps) return [];
     const rows = emps.filter(isWelder).map((e) => {
+      // keep the WHOLE payFor row — WorkerSummary renders the same detail as the regular Salary tab
       const r = payFor(e, attMap, mk, ctx, 0, punches[e.code]);
       return {
-        code: e.code, name: e.name || e.code, active: e.active !== false,
+        r, code: e.code, name: e.name || e.code, active: e.active !== false,
         contractor: contractorOf(e), days: r.pay.paidDays || 0,
-        otHrs: r.pay.otHrsNet || 0, earned: Number(r.pay.net || 0),
+        otHrs: r.pay.otHrsNet || 0, earned: monthPay(r.pay),
       };
     // a welder with no attendance in the month isn't the contractor's cost that month
-    }).filter((r) => r.days > 0 || r.earned > 0);
+    }).filter((x) => x.days > 0 || x.earned > 0);
     const by = {};
     rows.forEach((r) => { (by[r.contractor] = by[r.contractor] || []).push(r); });
     return Object.entries(by)
@@ -108,14 +116,10 @@ export default function Welders() {
             </button>
             {isOpen && (
               <div className="mt-2 divide-y divide-slate-100 text-[13px]">
-                {g.list.map((r) => (
-                  <div key={r.code} className="py-1.5 flex items-center justify-between gap-2">
-                    <span className="min-w-0 truncate text-slate-700">
-                      {r.name}{!r.active && <span className="text-slate-400"> · removed</span>}
-                      <span className="text-slate-400"> · {r.days}d{r.otHrs > 0 ? ` · OT ${r.otHrs}h` : ''}</span>
-                    </span>
-                    <b className="shrink-0 text-slate-800">{rupee(r.earned)}</b>
-                  </div>
+                {g.list.map((w) => (
+                  <WelderRow key={w.code} w={w} mk={mk}
+                    open={openWorker === w.code}
+                    onToggle={() => setOpenWorker(openWorker === w.code ? '' : w.code)} />
                 ))}
               </div>
             )}
@@ -128,6 +132,49 @@ export default function Welders() {
         "naveen" or "jitender" in his name to group correctly. Actual contractor payment and
         per-piece rates live in the welder app.
       </p>
+    </div>
+  );
+}
+
+// One welder: headline pay + the SAME detail block the regular Salary tab shows (WorkerSummary) —
+// present/absent/half/missed-punch dates, late, Saturdays, fine, advances, carried balance.
+// Everything the regular row gives EXCEPT any way to settle, lock or pay.
+function WelderRow({ w, mk, open, onToggle }) {
+  const { pay } = w.r;
+  return (
+    <div className="py-1.5">
+      <button onClick={onToggle} className="w-full flex items-center justify-between gap-2 text-left">
+        <span className="min-w-0 truncate text-slate-700">
+          {w.name}{!w.active && <span className="text-slate-400"> · removed</span>}
+          <span className="text-slate-400"> · {w.days}d{w.otHrs > 0 ? ` · OT ${w.otHrs}h` : ''}</span>
+          <span className="text-blue-700 underline decoration-dotted underline-offset-2 ml-1">details {open ? '▾' : '▸'}</span>
+        </span>
+        <b className="shrink-0 text-slate-800">{rupee(w.earned)}</b>
+      </button>
+      {open && (
+        <div className="mt-1">
+          <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-[12px] bg-white border border-slate-200 rounded-lg p-2">
+            <span className="text-slate-500">Monthly rate</span>
+            <span className="text-right font-semibold">{rupee(w.r.emp.amount || w.r.emp.wage || 0)}{w.r.emp.type === 'daily' ? '/day' : '/month'}</span>
+            <span className="text-slate-500">Days pay ({pay.paidDays}d)</span>
+            <span className="text-right font-semibold">{rupee(pay.base)}</span>
+            {(pay.otPay || 0) > 0 && (<><span className="text-slate-500">Overtime ({pay.otHrsNet}h)</span>
+              <span className="text-right font-semibold">{rupee(pay.otPay)}</span></>)}
+            {(pay.perfectBonus || 0) > 0 && (<><span className="text-slate-500">Perfect-attendance day</span>
+              <span className="text-right font-semibold">{rupee(pay.perfectBonus)}</span></>)}
+            {(pay.restoreSaturdayPay || 0) > 0 && (<><span className="text-slate-500">Saturdays given back</span>
+              <span className="text-right font-semibold">{rupee(pay.restoreSaturdayPay)}</span></>)}
+            {(pay.gracePay || 0) > 0 && (<><span className="text-slate-500">Grace</span>
+              <span className="text-right font-semibold">{rupee(pay.gracePay)}</span></>)}
+            {(pay.bonus || 0) > 0 && (<><span className="text-slate-500">Bonus</span>
+              <span className="text-right font-semibold">{rupee(pay.bonus)}</span></>)}
+            <span className="text-slate-500 font-bold border-t border-slate-100 pt-0.5">Month pay</span>
+            <span className="text-right font-bold border-t border-slate-100 pt-0.5">{rupee(w.earned)}</span>
+          </div>
+          <WorkerSummary r={w.r} mk={mk} />
+          <p className="text-[10px] text-slate-400 px-1 pt-0.5">Not settled here — paid per piece by the contractor.</p>
+        </div>
+      )}
     </div>
   );
 }

@@ -162,6 +162,14 @@ export function attributeAdvanceMk(emp, ymd) {
 }
 export function advanceMonth(a) { return (a && a.mk) || String((a && a.date) || '').slice(0, 7); }
 
+// CONTRACTOR-PAID (owner rule 2026-08-19): welders are paid PER PIECE through the welder app by
+// contractors Naveen / Jitender — this app never pays them. Their attendance is kept only for
+// contractor-earning visibility and floor discipline, so they must stay OUT of the Salary tab's
+// payable totals, the "to pay" queue and the salary register; otherwise the app shows money it does
+// not owe, and settling them to clear the list records cash that never moved (that is exactly how
+// ₹4.15L of June+July "payments" got recorded). Their own screen is the Welders tab.
+export const isContractorPaid = (e) => String((e && e.dept) || '').toUpperCase() === 'WELDING';
+
 // ONE worker's advance statement as the owner wants to read it (rule 19-08-2026): "once the old month
 // is locked it should show carried forward advance or balance, and advances paid after that date wise".
 // So the account starts at the balance the LAST LOCK carried out, and lists every advance given since.

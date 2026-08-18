@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { advanceStatement, loadEmployees, loadAllAttendance, loadAllPunches, loadEmployee, saveEmployee, loadPayout, loadAdvanceBalances, queueAdvance, addAdvanceDirect, loadRoster, loadAttendanceReview, addMonthFine, saveMonth, istMonth, queueJob, lockMonthDirect, unlockMonthDirect, queueLock, queueUnlock, addManualWorker, pushWorkerProfile, advanceMonth, attributeAdvanceMk, MACHINE_DEPTS, MACHINE_SHIFTS, MACHINE_GENDERS, DEPT_DEFAULT_SHIFT } from '../lib/data';
+import { advanceStatement, isContractorPaid, loadEmployees, loadAllAttendance, loadAllPunches, loadEmployee, saveEmployee, loadPayout, loadAdvanceBalances, queueAdvance, addAdvanceDirect, loadRoster, loadAttendanceReview, addMonthFine, saveMonth, istMonth, queueJob, lockMonthDirect, unlockMonthDirect, queueLock, queueUnlock, addManualWorker, pushWorkerProfile, advanceMonth, attributeAdvanceMk, MACHINE_DEPTS, MACHINE_SHIFTS, MACHINE_GENDERS, DEPT_DEFAULT_SHIFT } from '../lib/data';
 import { monthOptions, monthCtx, payFor, rupee, paymentBreakdown } from '../lib/paycalc';
 import { SHIFT_HOURS } from '../lib/payroll';
 import Person from './Person.jsx';
@@ -29,6 +29,9 @@ function OwnerSalary({ user }) {
   const [payC, setPayC] = useState(null);   // owner pay&settle dialog: { r, mode, amount, remark }
   const [justPaid, setJustPaid] = useState({});   // code -> mode, paid THIS session (shows ✓ + Undo)
   const [showRemoved, setShowRemoved] = useState(false);   // include resigned/removed (kept for costing)
+  // Contractor-paid welders are OUT of this screen by default (owner rule 2026-08-19) — they are paid
+  // per piece in the welder app, so counting them here shows money this app does not owe. Toggle to peek.
+  const [showWelders, setShowWelders] = useState(false);
   const [filter, setFilter] = useState('all');       // all | topay | paid — chips above the list
   const [showMoney, setShowMoney] = useState(false); // 💸 total box tapped open → cash/account detail
   const [showTools, setShowTools] = useState(false); // 🧰 rare tools folded away (owner 2026-08-11: screen too busy)
@@ -65,7 +68,9 @@ function OwnerSalary({ user }) {
   // typing lag. Now it recomputes only when the data or the month actually changes.
   const rows = useMemo(() => {
     if (!emps) return [];
-    const allRows = emps.filter((e) => e.amount || e.wage).map((e) => ({ emp: e, ...payFor(e, attMap, mk, ctx, 0, punches[e.code]) }));
+    const allRows = emps.filter((e) => e.amount || e.wage)
+      .filter((e) => showWelders || !isContractorPaid(e))
+      .map((e) => ({ emp: e, ...payFor(e, attMap, mk, ctx, 0, punches[e.code]) }));
     // PAST months hide no-activity rows (owner 2026-08-11): a worker whose days/hours are only in the
     // CURRENT month (new joiner) must not appear in earlier months — with a salary set, a zero-attendance
     // month otherwise even shows a phantom weekly-off payable. Keep any row with attendance, a money
@@ -78,7 +83,7 @@ function OwnerSalary({ user }) {
         || (r.emp.advances || []).some((ad) => advanceMonth(ad) === mk);
     };
     return mk === istMonth() ? allRows : allRows.filter(rowRelevant);
-  }, [emps, attMap, punches, mk, ctx]);
+  }, [emps, attMap, punches, mk, ctx, showWelders]);
 
   if (openCode) return <Person code={openCode} mk={mk} user={user} onBack={() => { setOpenCode(''); reload(); }} />;
   if (emps === null) return <p className="text-gray-500">Loading…</p>;
@@ -280,6 +285,7 @@ function OwnerSalary({ user }) {
           <AddWorkerCard user={user} onAdded={reload} />
           {mk === istMonth() && <SelfPunchCard />}
           <label className="flex items-center gap-2 text-xs text-slate-500 px-1"><input type="checkbox" className="w-5 h-5 accent-slate-700" checked={showRemoved} onChange={(e) => setShowRemoved(e.target.checked)} /> Show removed/resigned staff (kept in the sheet for costing)</label>
+          <label className="flex items-center gap-2 text-xs text-slate-500 px-1"><input type="checkbox" className="w-5 h-5 accent-slate-700" checked={showWelders} onChange={(e) => setShowWelders(e.target.checked)} /> Include contractor-paid welders <span className="text-slate-400">(they are paid per piece in the welder app — see the Welders tab; including them here adds them to totals and the register)</span></label>
           <p className="text-[11px] text-slate-500 px-1">Tap 💵 Cash or 🏦 Account → a box opens: split across <b>Cash + Account</b>, tick <b>🎯 Bonus day</b> on top if giving one, then <b>Pay &amp; lock</b> (Undo if you mis-tap). Tap the <b>name</b> for OT / details. <span className="text-slate-400">(pay v6)</span></p>
         </div>
       )}
