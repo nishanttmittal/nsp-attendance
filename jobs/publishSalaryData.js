@@ -2,7 +2,7 @@
 // att_attendance/{code}, which the PWA Salary tab reads for on-screen payslips. Runs daily.
 const path = require('path');
 const fs = require('fs');
-const { session, setField } = require('./lib/realtime');
+const { session, downloadMonthly } = require('./lib/realtime');
 const { parseSummary, range } = require('./salaryData');
 const { db } = require('./lib/firestore');
 
@@ -15,12 +15,9 @@ const OUT_DIR = path.resolve(__dirname, 'downloads');
   const { browser, page } = await session();
   try {
     const { first, to, label } = range(0);
-    await page.goto('https://onlinerealsoft.com/NewMonthly.aspx', { waitUntil: 'domcontentloaded' }); await page.waitForTimeout(1200);
-    if (await page.locator('#MainContent_chknewwindow').isChecked().catch(() => false)) await page.uncheck('#MainContent_chknewwindow').catch(() => {});
-    await setField(page, '#MainContent_txtdate', fmt(first));
-    await setField(page, '#MainContent_txttodate', fmt(to));
+    // downloadMonthly works on EITHER portal (old NewMonthly.aspx was deleted 2026-08 — V26 only now)
     const file = path.join(OUT_DIR, `salarydata_${label}.xls`);
-    const [dl] = await Promise.all([page.waitForEvent('download', { timeout: 35000 }), page.click('#MainContent_Button10')]);
+    const dl = await downloadMonthly(page, fmt(first), fmt(to), 'summary');
     await dl.saveAs(file);
 
     const emps = parseSummary(file);
