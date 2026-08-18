@@ -40,6 +40,18 @@
   <button class="big out" id="btnOut" disabled>बाहर गया · OUT</button>
   <div class="toast" id="toast"></div>
   <div class="hint">Tap IN when you arrive, OUT when you leave. Recorded automatically.</div>
+
+  <!-- 💸 self-reported advance → goes to the OWNER'S accept queue (Hisab advances screen);
+       nothing touches salary until the owner taps Accept there. (owner 2026-08-12) -->
+  <div style="margin-top:18px;border-top:2px solid #eee;padding-top:14px">
+    <div style="font-weight:700;font-size:18px;margin-bottom:8px">💸 एडवांस लिया? यहाँ भेजो</div>
+    <input id="advAmt" type="number" inputmode="numeric" placeholder="₹ रकम"
+      style="width:100%;font-size:22px;padding:12px;border:2px solid #ccc;border-radius:12px;box-sizing:border-box;text-align:center">
+    <button class="big" id="btnAdv" disabled
+      style="background:#b45309;margin-top:8px">एडवांस भेजो · SEND ADVANCE</button>
+    <div class="toast" id="advToast"></div>
+    <div class="hint">मालिक APPROVE करेंगे तब हिसाब में जुड़ेगा।</div>
+  </div>
 </div>
 
 <script type="module">
@@ -99,6 +111,29 @@ if (!code || !token) {
   }
   $('btnIn').onclick = () => punch('in');
   $('btnOut').onclick = () => punch('out');
+
+  // 💸 advance request → hisab_advance_outbox (pending) — owner approves in the app's
+  // "Hisab advances — accept" screen; a forged/typo entry can never add money by itself.
+  let myName = '';
+  onSnapshot(doc(db, 'att_punch', code), (snap) => { if (snap.exists()) myName = snap.data().name || ''; });
+  $('btnAdv').disabled = false;
+  $('btnAdv').onclick = async () => {
+    const amt = Number($('advAmt').value);
+    if (!amt || amt <= 0 || amt > 50000) { $('advToast').innerHTML = '<span class="err">सही रकम लिखो (1–50,000)</span>'; return; }
+    $('btnAdv').disabled = true;
+    $('advToast').textContent = 'Saving…';
+    try {
+      await addDoc(collection(db, 'hisab_advance_outbox'), {
+        target: 'salary', status: 'pending', code, name: myName, amount: amt,
+        date: istToday(), note: 'self (punch page)', source: 'punch', token, ts: serverTimestamp(),
+      });
+      $('advToast').innerHTML = '<span class="ok">✓ भेज दिया — मालिक approve करेंगे</span>';
+      $('advAmt').value = '';
+    } catch (e) {
+      $('advToast').innerHTML = '<span class="err">नहीं गया — internet देखो, फिर try करो।</span>';
+    }
+    setTimeout(() => { $('btnAdv').disabled = false; }, 1500);
+  };
 }
 </script>
 </body>
