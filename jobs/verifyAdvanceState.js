@@ -88,8 +88,8 @@ function oldBasis(e, cur) {
   console.log(`  → fix is SAFE only while those workers' July is UNLOCKED; if any shows LOCKED ⚠, do NOT run it — ask first.`);
 
   // 4. regression: locked workers must be identical on both bases
-  console.log(`\n--- 4. REGRESSION: locked workers must be IDENTICAL old vs new basis ---`);
-  let same = 0, diff = 0; const diffs = [];
+  console.log(`\n--- 4. REGRESSION: old vs new balance basis ---`);
+  let same = 0, expected = 0, unexplained = 0; const exp = [], odd = [];
   for (const [c, e] of Object.entries(emps)) {
     if (e.active === false) continue;
     const st = statement(e);
@@ -97,11 +97,25 @@ function oldBasis(e, cur) {
     const old = oldBasis(e, cur);
     const prevLocked = !!((e.months || {})[st.bfMonth] || {}).locked
       && st.bfMonth === Object.keys(e.months || {}).filter((m) => m < cur).sort().pop();
-    if (prevLocked) { nu === old ? same++ : (diff++, diffs.push([c, e.name, old, nu])); }
+    if (!prevLocked) continue;
+    if (nu === old) { same++; continue; }
+    // A difference is EXPECTED — and is the whole point of the fix — when the worker has advances
+    // DATED in the running month but ATTRIBUTED (mk) to the month that is already locked. Those were
+    // settled inside that lock; the old date-based basis counted them a second time here. That double
+    // count is exactly what the owner reported as "old month advance still shown in new month".
+    const settledButLaterDated = (e.advances || [])
+      .filter((a) => advMk(a) <= st.bfMonth && String(a.date || '').slice(0, 7) === cur)
+      .reduce((t, a) => t + Number(a.amount || 0), 0);
+    if (settledButLaterDated > 0 && Math.round(old - nu) === Math.round(settledButLaterDated)) {
+      expected++; exp.push([c, e.name, old, nu, settledButLaterDated]);
+    } else { unexplained++; odd.push([c, e.name, old, nu]); }
   }
-  console.log(`  settled-through-last-month workers: ${same} identical, ${diff} different`);
-  diffs.forEach(([c, n, o, nu]) => console.log(`    ⚠ ${c} ${n}: old ${inr(o)} vs new ${inr(nu)}`));
-  console.log(diff === 0 ? '  ✓ no settled worker moved — owner\'s verification intact' : '  ⚠ INVESTIGATE before trusting the tab');
+  console.log(`  settled-through-last-month workers: ${same} identical · ${expected} corrected · ${unexplained} unexplained`);
+  exp.forEach(([c, n, o, nu, amt]) => console.log(`    ✓ ${c} ${n}: ${inr(o)} → ${inr(nu)} (drops ${inr(amt)} already settled in the ${'lock'})`));
+  odd.forEach(([c, n, o, nu]) => console.log(`    ⚠ ${c} ${n}: old ${inr(o)} vs new ${inr(nu)} — NOT explained by already-settled advances`));
+  console.log(unexplained === 0
+    ? '  ✓ every difference is a corrected double-count; no settled worker moved unexpectedly'
+    : '  ⚠ INVESTIGATE the unexplained rows before trusting the tab');
 
   // 5. mirror freshness (the collapsed row figures come from here)
   console.log(`\n--- 5. MIRROR (att_meta/advance_balances) ---`);
