@@ -173,7 +173,53 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
     // Owner-editable: maps a machine file name to its real size (Fix-sizes screen).
     match /laser_size_map/{id}   { allow read: if laserUser(); allow write: if laserUser(); }
     // Daily meter readings entered in-app by staff/owner (the only client-writable laser data).
-    match /laser_meter/{id}      { allow read: if laserUser(); allow write: if laserUser(); }
+    // These readings drive laser_days.kWh -> cost per minute -> every margin in the app, so a
+    // reading is CREATE-ONLY: staff record a missing date and nobody overwrites or deletes one.
+    // The owner corrects a reading through an update that must also name who and when; the app
+    // pairs that update with an immutable laser_meter_corrections record in the same batch.
+    function meterNumbersOk(d) {
+      return d.meterA is number && d.meterA >= 0 && d.meterA <= 100000000
+          && d.meterB is number && d.meterB >= 0 && d.meterB <= 100000000
+          && d.total is number && d.total == d.meterA + d.meterB
+          && d.note is string && d.note.size() <= 300;
+    }
+    match /laser_meter/{id} {
+      allow read: if laserUser();
+      // Create: exact shape, id bound to card+date, author is the caller, time is the server's.
+      allow create: if laserUser()
+        && request.resource.data.keys().hasOnly(['cardId','date','meterA','meterB','total','note','enteredBy','createdAt','schemaVersion'])
+        && request.resource.data.keys().hasAll(['cardId','date','meterA','meterB','total','enteredBy','createdAt','schemaVersion'])
+        && request.resource.data.cardId is string
+        && request.resource.data.date is string
+        && request.resource.data.date.matches('[0-9]{8}')
+        && id == request.resource.data.cardId + '_' + request.resource.data.date
+        && meterNumbersOk(request.resource.data)
+        && request.resource.data.schemaVersion == 2
+        && request.resource.data.enteredBy == tEmail()
+        && request.resource.data.createdAt == request.time;
+      // Correction: owner only. Card and date are immutable; legacy docs (no enteredBy /
+      // createdAt, older enteredAt) stay correctable, which is why those keys are permitted.
+      allow update: if laserOwner()
+        && request.resource.data.keys().hasOnly(['cardId','date','meterA','meterB','total','note','enteredBy','createdAt','enteredAt','schemaVersion','correctedBy','correctedAt','correctionId'])
+        && request.resource.data.cardId == resource.data.cardId
+        && request.resource.data.date == resource.data.date
+        && meterNumbersOk(request.resource.data)
+        && request.resource.data.correctedBy == tEmail()
+        && request.resource.data.correctedAt == request.time
+        && request.resource.data.correctionId is string;
+      allow delete: if false;
+    }
+    // Immutable evidence of every meter correction: what it was, what it became, and why.
+    match /laser_meter_corrections/{id} {
+      allow read: if laserOwner();
+      allow create: if laserOwner()
+        && request.resource.data.correctedBy == tEmail()
+        && request.resource.data.correctedAt == request.time
+        && request.resource.data.reason is string
+        && request.resource.data.reason.size() > 0
+        && request.resource.data.reason.size() <= 500;
+      allow update, delete: if false;
+    }
     // Job catalog (name + photo, optional file link) — staff/owner add for recall.
     match /laser_job_catalog/{id} { allow read: if laserUser(); allow write: if laserUser(); }
     // Allowlist: any signed-in user may READ (to resolve their own access at login); owner writes.
@@ -294,7 +340,23 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
     // Hisab pushes a worker advance into this outbox; the owner ACCEPTS it in the
     // destination app (Welder ledger / Salary advances). Owner-only both ways —
     // single owner records in Hisab and accepts in welder/salary.
-    match /hisab_advance_outbox/{id}       { allow read, write: if nonAnon() && bootstrapOwner(); }
+    match /hisab_advance_outbox/{id}       {
+      allow read, write: if nonAnon() && bootstrapOwner();
+      // 💸 Self-reported advances from the login-free punch page (2026-08-12): CREATE-only,
+      // pending-only, strict shape + ₹50k cap. NOTHING reaches salary until the owner taps
+      // Accept in the app's "Hisab advances" screen — a forged entry can only sit in the queue.
+      allow create: if request.resource.data.keys().hasOnly(['target','status','code','name','amount','date','note','source','token','ts'])
+        && request.resource.data.target == 'salary'
+        && request.resource.data.status == 'pending'
+        && request.resource.data.source == 'punch'
+        && request.resource.data.amount is number
+        && request.resource.data.amount > 0 && request.resource.data.amount <= 50000
+        && request.resource.data.code is string && request.resource.data.code.size() <= 20
+        && request.resource.data.name is string && request.resource.data.name.size() <= 60
+        && request.resource.data.note is string && request.resource.data.note.size() <= 60
+        && request.resource.data.token is string && request.resource.data.token.size() <= 30
+        && request.resource.data.date is string && request.resource.data.date.size() == 10;
+    }
 
     // Read-meter telemetry (usage_reads/{YYYY-MM-DD}): every app instance batches
     // increments into totals.<app>. Write-only for any signed-in user (incl. anon
