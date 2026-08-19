@@ -1,0 +1,6 @@
+{
+  "_note": "Values BEFORE the 2026-08-20 fill-in of names/dept/salary (owner-supplied). Captured from the dry run; the script's own backup write failed on a relative path, since fixed.",
+  "00000107": {"code":"00000107","shift":"GEN","name":"00000107","dept":"DEMO"},
+  "00000109": {"code":"00000109","shift":"GEN","name":"00000109","dept":"DEMO"},
+  "00000113": {"code":"00000113","shift":"GEN","name":"00000113","dept":"DEMO"}
+}
