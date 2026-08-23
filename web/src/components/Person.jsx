@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { loadEmployee, loadAllAttendance, loadPunchDoc, saveEmployee, saveMonth, addAdvance, deleteAdvanceAt, addIncrement, settleAndResign, checkActionPassword, queueJob, queueLock, queueUnlock, lockMonthDirect, unlockMonthDirect, editNameDept, istMonth, removeWorker, restoreWorker, deleteWorkerHard, workerEverPaid, attributeAdvanceMk } from '../lib/data';
+import { loadEmployee, loadAllAttendance, loadPunchDoc, saveEmployee, saveMonth, addAdvance, deleteAdvanceAt, addIncrement, settleAndResign, checkActionPassword, queueJob, queueLock, queueUnlock, lockMonthDirect, unlockMonthDirect, editNameDept, istMonth, removeWorker, restoreWorker, deleteWorkerHard, workerEverPaid, attributeAdvanceMk, settleCashClash, settleClashMessage } from '../lib/data';
 import { monthCtx, payFor, rupee, paymentBreakdown } from '../lib/paycalc';
 import { payslipOnePdf, sharePdf } from '../lib/salaryPdf';
 import { graceDeltaDays } from '../lib/attendanceEngine';
@@ -32,6 +32,9 @@ export default function Person({ code, mk, user, onBack }) {
   // worker's attendance (~66 docs) after each advance, which is exactly what made entry slow.
   async function addAdvanceFast(f) {
     if (monthSealed(f.date)) { alert('That month is already paid & locked — advance not allowed. Date it in an open month.'); return; }
+    // Warn (never block) if this looks like the cash already handed over at a settle the same day.
+    const clash = settleCashClash(emp, f.date, f.amount, f.mode);
+    if (clash && !window.confirm(settleClashMessage(clash, f.amount, emp.name))) return;
     const a = { id: 'adv-' + f.date + '-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7), date: f.date, mode: f.mode, amount: Number(f.amount), remark: f.remark || '', paidBy: user.email, mk: attributeAdvanceMk(emp, f.date) };
     setEmp((prev) => ({ ...prev, advances: [...(prev.advances || []), a] }));   // instant
     try {

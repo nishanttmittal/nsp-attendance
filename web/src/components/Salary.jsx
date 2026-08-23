@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { advanceStatement, isContractorPaid, loadEmployees, loadAllAttendance, loadAllPunches, loadEmployee, saveEmployee, loadPayout, loadAdvanceBalances, queueAdvance, addAdvanceDirect, loadRoster, loadAttendanceReview, addMonthFine, saveMonth, istMonth, queueJob, lockMonthDirect, unlockMonthDirect, queueLock, queueUnlock, addManualWorker, pushWorkerProfile, advanceMonth, attributeAdvanceMk, MACHINE_DEPTS, MACHINE_SHIFTS, MACHINE_GENDERS, DEPT_DEFAULT_SHIFT } from '../lib/data';
+import { advanceStatement, isContractorPaid, loadEmployees, loadAllAttendance, loadAllPunches, loadEmployee, saveEmployee, loadPayout, loadAdvanceBalances, queueAdvance, addAdvanceDirect, loadRoster, loadAttendanceReview, addMonthFine, saveMonth, istMonth, queueJob, lockMonthDirect, unlockMonthDirect, queueLock, queueUnlock, addManualWorker, pushWorkerProfile, advanceMonth, attributeAdvanceMk, settleCashClash, settleClashMessage, MACHINE_DEPTS, MACHINE_SHIFTS, MACHINE_GENDERS, DEPT_DEFAULT_SHIFT } from '../lib/data';
 import { monthOptions, monthCtx, payFor, rupee, paymentBreakdown } from '../lib/paycalc';
 import { SHIFT_HOURS } from '../lib/payroll';
 import Person from './Person.jsx';
@@ -479,6 +479,9 @@ function OwnerRow({ r, mk, busy, justPaidMode, user, onName, onPay, onUndo, onAd
     const months = emp.months || {};
     const sealed = months[advMk]?.locked || months[advMk]?.payment || Object.keys(months).some((m) => m > advMk && (months[m]?.locked || months[m]?.payment));
     if (sealed) { setAdv({ ...adv, st: 'That month is already paid & locked — advance not allowed.' }); return; }
+    // Warn (never block) if this looks like the cash already handed over at a settle the same day.
+    const clash = settleCashClash(emp, adv.date, adv.amount, adv.mode);
+    if (clash && !window.confirm(settleClashMessage(clash, adv.amount, emp.name))) { setAdv({ ...adv, st: 'Not saved.' }); return; }
     // Mint the id HERE so the direct write and the network-blip fallback share ONE id — a write that
     // lands but times out is then deduped by the worker on retry (never records the advance twice).
     const advance = { id: 'adv-' + adv.date + '-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7), date: adv.date, mode: adv.mode, amount: Number(adv.amount), remark: '', paidBy: user.email, mk: attributeAdvanceMk(emp, adv.date) };
@@ -844,6 +847,15 @@ export function AdvanceCard({ user, extra = [], onSaved, balances = null, extraO
   async function go() {
     if (!f.code) { setSt('Pick a person (type the name).'); return; }
     if (!Number(f.amount) || !f.date) { setSt('Fill date and amount.'); return; }
+    // Warn (never block) if this looks like the cash already handed over at a settle the same day.
+    // Owner only — a manager cannot read att_salary, and a read failure must never stop a real advance.
+    if (user.role === 'admin') {
+      try {
+        const empDoc = await loadEmployee(f.code);
+        const clash = settleCashClash(empDoc, f.date, f.amount, f.mode);
+        if (clash && !window.confirm(settleClashMessage(clash, f.amount, empDoc.name || f.name))) { setSt(''); return; }
+      } catch { /* best-effort warning only */ }
+    }
     setSt('saving');
     // one shared id so the direct write + any fallback queue dedupe on retry (no double advance).
     const advance = { id: 'adv-' + f.date + '-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7), date: f.date, mode: f.mode, amount: Number(f.amount), remark: f.remark || '', paidBy: user.email };

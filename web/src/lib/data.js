@@ -162,6 +162,52 @@ export function attributeAdvanceMk(emp, ymd) {
 }
 export function advanceMonth(a) { return (a && a.mk) || String((a && a.date) || '').slice(0, 7); }
 
+// SETTLE-CASH DOUBLE-ENTRY GUARD (owner 2026-08-23). Cash handed over AT a settle is ALREADY recorded
+// as that lock's `cash` leg — logging the same notes a second time as an advance invents a debt the
+// worker never took. It happened to radhey shyam press 00000024: ₹4,500 cash entered as an advance at
+// 13:43 on 13-08-2026, then the same ₹4,500 recorded as the cash half of his July lock at 16:40 the
+// same day → a phantom ₹4,500 advance sitting in August. Nothing in the app connected the two entries.
+// Returns the settlement this advance looks like a duplicate of, or null. WARN ONLY — never block: an
+// extra advance on settle day is perfectly legal, the owner just has to confirm the cash moved twice.
+export function settleCashClash(emp, ymd, amount, mode) {
+  const amt = Math.round(Number(amount) || 0);
+  const day = String(ymd || '').slice(0, 10);
+  if (!amt || !/^\d{4}-\d{2}-\d{2}$/.test(day)) return null;
+  // Compare against the leg the money actually went out through: cash advance vs the settle's cash
+  // half, bank transfer vs its account half. Either leg can be double-entered.
+  const leg = String(mode || 'cash') === 'account' ? 'account' : 'cash';
+  const months = (emp && emp.months) || {};
+  for (const mk of Object.keys(months)) {
+    const md = months[mk] || {};
+    const p = md.payment;
+    if (!p) continue;
+    if (String(p.date || md.lockedAt || '').slice(0, 10) !== day) continue;   // settled on THIS day
+    if (Math.round(Number(p[leg]) || 0) !== amt) continue;                    // ...for THIS amount, same leg
+    return { month: mk, leg, cash: Math.round(Number(p.cash) || 0), account: Math.round(Number(p.account) || 0), net: Math.round(Number(p.net) || 0) };
+  }
+  return null;
+}
+const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+export function monthLabel(mk) {
+  const [y, m] = String(mk || '').split('-').map(Number);
+  return MONTH_NAMES[m - 1] ? MONTH_NAMES[m - 1] + ' ' + y : String(mk || '');
+}
+// ONE wording for all three entry screens, so the owner reads the same sentence wherever he is.
+export function settleClashMessage(clash, amount, name) {
+  const rs = (n) => '₹' + Math.round(Number(n) || 0).toLocaleString('en-IN');
+  const who = name || 'this worker';
+  const split = clash.account > 0 ? `${rs(clash.cash)} cash + ${rs(clash.account)} account` : `${rs(clash.cash)} cash`;
+  return `⚠ SAME MONEY TWICE?
+
+You settled ${who}'s ${monthLabel(clash.month)} salary on this same day and paid ${split}.
+
+This advance is also ${rs(amount)} ${clash.leg === 'account' ? 'BY ACCOUNT' : 'CASH'} on the same day — it looks like the very same notes.
+
+If it IS the same money, press Cancel. It is already recorded as salary paid, and saving it here would show him owing ${rs(amount)} he never took.
+
+Press OK only if you gave him ${rs(amount)} EXTRA on top of that salary.`;
+}
+
 // CONTRACTOR-PAID (owner rule 2026-08-19): welders are paid PER PIECE through the welder app by
 // contractors Naveen / Jitender — this app never pays them. Their attendance is kept only for
 // contractor-earning visibility and floor discipline, so they must stay OUT of the Salary tab's

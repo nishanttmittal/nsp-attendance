@@ -6,7 +6,7 @@
 import { useEffect, useState } from 'react';
 import { collection, onSnapshot, query, where, doc, updateDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import { addAdvance, loadEmployees } from '../lib/data';
+import { addAdvance, loadEmployees, settleCashClash, settleClashMessage } from '../lib/data';
 
 const money = (n) => '₹' + (Math.round(Number(n) || 0)).toLocaleString('en-IN');
 
@@ -30,6 +30,10 @@ export default function IncomingAdvances({ user }) {
     const emp = empOf(r);
     if (!emp) { setMsg(`No salary worker matches "${r.name}" (code ${r.code || '—'}). Add them first.`); return; }
     if (!window.confirm(`Accept advance of ${money(r.amount)} for ${emp.name}?\nIt will be added to his salary advances.`)) return;
+    // Warn (never block) if this looks like cash already handed over at a settle the same day.
+    const advDate = r.date || new Date().toISOString().slice(0, 10);
+    const clash = settleCashClash(emp, advDate, r.amount, 'cash');
+    if (clash && !window.confirm(settleClashMessage(clash, r.amount, emp.name))) return;
     setBusy(r.id); setMsg('');
     try {
       await addAdvance(emp.code, { date: r.date || new Date().toISOString().slice(0, 10), mode: 'Cash',

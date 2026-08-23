@@ -347,12 +347,25 @@ async function handle(type, p) {
       await sendTelegram(`🚫 Advance ₹${p.advance.amount} to ${(snap.exists && snap.data().name) || p.code} NOT saved — a LATER month (${laterLocked[0]}) is already paid & locked, so this advance could never be deducted. Date it in the current month instead. (by ${p.advance.paidBy || '?'})`);
       return `REJECTED — later month ${laterLocked[0]} is locked; advance not recorded`;
     }
+    // SETTLE-CASH DOUBLE-ENTRY WARNING (owner 2026-08-23) — mirrors data.js settleCashClash. Cash paid
+    // AT a settle is already the lock's cash leg; recorded again as an advance it becomes a debt the
+    // worker never took (radhey shyam press, ₹4,500, 13-08-2026). Flag it on the alert; never reject.
+    const advDay = String(p.advance.date || '').slice(0, 10);
+    const advLeg = String(p.advance.mode || 'cash') === 'account' ? 'account' : 'cash';
+    const clashMk = Object.keys(allMonths).find((m) => {
+      const pay = (allMonths[m] || {}).payment;
+      return pay && String(pay.date || allMonths[m].lockedAt || '').slice(0, 10) === advDay
+        && Math.round(Number(pay[advLeg]) || 0) === Math.round(Number(p.advance.amount) || 0);
+    });
+    const clashWarn = clashMk
+      ? `\n⚠ CHECK THIS: ${clashMk} salary was settled the SAME DAY paying ₹${Math.round(Number((allMonths[clashMk].payment || {})[advLeg]) || 0)} by ${advLeg}. If this advance is that same money, delete it — otherwise he will show owing money he never took.`
+      : '';
     const advances = (snap.exists && snap.data().advances) || [];
     const already = p.advance.id && advances.some((a) => a.id === p.advance.id);
     // notifyOnly (2026-07-22): the OWNER app already wrote this advance directly (addAdvanceDirect)
     // for instant display; this job exists only to fire the Telegram alert in the background.
     if (p.notifyOnly) {
-      await sendTelegram(`💸 Advance ₹${p.advance.amount} to ${p.code} (${p.advance.mode}) by ${p.advance.paidBy || '?'}.`);
+      await sendTelegram(`💸 Advance ₹${p.advance.amount} to ${p.code} (${p.advance.mode}) by ${p.advance.paidBy || '?'}.${clashWarn}`);
       return already ? 'advance already applied — notified' : 'advance notified';
     }
     // DEDUPE (fix 2026-07-18): a stale-recovery re-run (runner killed after the write, before
@@ -362,7 +375,7 @@ async function handle(type, p) {
     }
     advances.push(p.advance);
     await ref.set({ advances }, { merge: true });
-    await sendTelegram(`💸 Advance ₹${p.advance.amount} to ${p.code} (${p.advance.mode}) by ${p.advance.paidBy || '?'}.`);
+    await sendTelegram(`💸 Advance ₹${p.advance.amount} to ${p.code} (${p.advance.mode}) by ${p.advance.paidBy || '?'}.${clashWarn}`);
     return 'advance added';
   }
   if (type === 'monthly_download') {
