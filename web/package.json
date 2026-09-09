@@ -8,7 +8,9 @@
     "build": "vite build",
     "preview": "vite preview",
     "predeploy": "PWA_BASE=/nsp-attendance/ npm run build",
-    "deploy": "gh-pages -d dist --dotfiles --nojekyll"
+    "deploy": "npm run deploy:hosting && npm run deploy:gh",
+    "deploy:gh": "gh-pages -d dist --dotfiles --nojekyll -r git@github.com:nishanttmittal/nsp-attendance.git",
+    "deploy:hosting": "bash /home/nishel/unico-tools/deploy-hosting.sh attendance"
   },
   "dependencies": {
     "firebase": "^12.14.0",
