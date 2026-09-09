@@ -15,7 +15,7 @@
 //      then RE-READ after save and FAIL LOUDLY (exit 2) if any requested field didn't stick.
 const path = require('path');
 const fs = require('fs');
-const { session, findEmployeeRowId } = require('./lib/realtime');
+const { session, findEmployeeEdit } = require('./lib/realtime');
 
 const OUT_DIR = path.resolve(__dirname, 'downloads');
 const CARD = process.env.PE_CARD || '';
@@ -42,6 +42,19 @@ function bad(m) { console.error('ERROR: ' + m); process.exit(1); }
 // caused the manual-worker OT bug. (`pick()` also refuses to save an option the portal doesn't have.)
 const POLICY_FOR_SHIFT = { GEN: 'GEN', '10H': '10H', '12H': '12H', DSG: 'DSG', LOD: 'LOD', WIR: 'amarjeet' };
 
+// The OLD portal wrapped the form in an ASP.NET ContentPlaceHolder ("MainContent_Txtempname");
+// V26's ERP_Employee.aspx uses the SAME field names with NO prefix ("Txtempname"). Resolve it once
+// per page load instead of hard-coding either — hard-coding the old prefix is what made every V26
+// push die on `locator('#MainContent_Txtempname')` timeout after the RowId lookup had succeeded.
+let PFX = null;
+async function resolvePrefix(page) {
+  PFX = await page.evaluate(() => (document.getElementById('MainContent_Txtempname') ? 'MainContent_' : ''));
+  const ok = await page.locator('#' + PFX + 'Txtempname').count();
+  if (!ok) bad('employee edit form has no Txtempname field on either prefix — the portal returned a page this script does not understand. Nothing saved.');
+  return PFX;
+}
+const S = (id) => '#' + PFX + id;
+
 // Find the option whose text matches `wanted` case-insensitively and select it by its EXACT
 // portal label (so ASP.NET postbacks still fire via Playwright's selectOption).
 async function pick(page, sel, wanted) {
@@ -49,7 +62,11 @@ async function pick(page, sel, wanted) {
   const exact = opts.find(o => o.toLowerCase() === String(wanted).trim().toLowerCase());
   if (!exact) return { ok: false, have: opts };
   await page.selectOption(sel, { label: exact });
-  await page.waitForTimeout(400); // let any autopostback settle
+  // Shift/policy/dept selects fire ASP.NET AutoPostBacks that REPLACE the page. 400 ms was not
+  // enough on 2026-09-09 (context destroyed mid-fill on 00000117) — wait for the postback to land.
+  await page.waitForTimeout(400);
+  await page.waitForLoadState('domcontentloaded', { timeout: 15000 }).catch(() => {});
+  await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
   return { ok: true, text: exact };
 }
 const readSel = (page, sel) => page.locator(sel).evaluate(e => e.options[e.selectedIndex]?.text.trim() || '');
@@ -71,41 +88,59 @@ const killModal = (page) => page.evaluate(() => {
   const { browser, page } = await session();
   const dialogs = []; page.on('dialog', d => { dialogs.push(d.message()); d.accept().catch(() => {}); });
   try {
-    const rowid = await findEmployeeRowId(page, CARD);
-    if (!rowid) bad(`worker ${CARD} not found on machine`);
-    const editUrl = 'https://onlinerealsoft.com/Employee.aspx?RowId=' + rowid;
+    // The edit URL differs per portal (Employee.aspx vs ERP_Employee.aspx) — findEmployeeEdit
+    // returns the one that actually rendered, so this works on whichever portal the vendor is on.
+    const hit = await findEmployeeEdit(page, CARD);
+    if (!hit) bad(`worker ${CARD} not found on machine`);
+    const editUrl = hit.editUrl;
+    console.log(`portal: ${hit.portal}  rowid: ${hit.rowid}`);
     const readAll = async () => ({
-      name: await page.locator('#MainContent_Txtempname').inputValue(),
-      dept: await readSel(page, '#MainContent_cbodeptname'),
-      shift: await readSel(page, '#MainContent_cboshiftname'),
-      gender: await readSel(page, '#MainContent_CboGender'),
-      policy: await readSel(page, '#MainContent_cboofficetimepolicy'),
+      name: await page.locator(S('Txtempname')).inputValue(),
+      dept: await readSel(page, S('cbodeptname')),
+      shift: await readSel(page, S('cboshiftname')),
+      gender: await readSel(page, S('CboGender')),
+      policy: await readSel(page, S('cboofficetimepolicy')),
     });
     // Navigate to the edit form and fill every requested field. Returns the pre-fill snapshot,
     // any unmatched-label warnings, and the gender now selected.
     async function loadAndFill() {
       await page.goto(editUrl, { waitUntil: 'domcontentloaded' });
       await page.waitForTimeout(1500);
+      await resolvePrefix(page);
       const before = await readAll();
       const warn = [];
-      if (NAME) await page.fill('#MainContent_Txtempname', NAME);
-      if (DEPT) { const r = await pick(page, '#MainContent_cbodeptname', DEPT); if (!r.ok) warn.push(`DEPT "${DEPT}" not an option (have: ${r.have.join(', ')})`); }
+      if (NAME) await page.fill(S('Txtempname'), NAME);
+      if (DEPT) { const r = await pick(page, S('cbodeptname'), DEPT); if (!r.ok) warn.push(`DEPT "${DEPT}" not an option (have: ${r.have.join(', ')})`); }
       if (SHIFT) {
-        const r = await pick(page, '#MainContent_cboshiftname', SHIFT); if (!r.ok) warn.push(`SHIFT "${SHIFT}" not an option (have: ${r.have.join(', ')})`);
-        const p = await pick(page, '#MainContent_cboofficetimepolicy', POLICY); if (!p.ok) warn.push(`POLICY "${POLICY}" not an option (have: ${p.have.join(', ')})`);
+        const r = await pick(page, S('cboshiftname'), SHIFT); if (!r.ok) warn.push(`SHIFT "${SHIFT}" not an option (have: ${r.have.join(', ')})`);
+        const p = await pick(page, S('cboofficetimepolicy'), POLICY); if (!p.ok) warn.push(`POLICY "${POLICY}" not an option (have: ${p.have.join(', ')})`);
       }
-      if (GENDER) { const r = await pick(page, '#MainContent_CboGender', GENDER); if (!r.ok) warn.push(`GENDER "${GENDER}" not an option (have: ${r.have.join(', ')})`); }
-      const genderNow = await readSel(page, '#MainContent_CboGender');
+      if (GENDER) { const r = await pick(page, S('CboGender'), GENDER); if (!r.ok) warn.push(`GENDER "${GENDER}" not an option (have: ${r.have.join(', ')})`); }
+      // Setting SHIFT + POLICY fires two ASP.NET autopostbacks. pick() only waits 400 ms, so on a
+      // slow round-trip the postback response lands AFTER the gender select and replaces the DOM,
+      // silently dropping it — which is how the LOD worker (00000117) failed with "Gender is blank"
+      // despite GENDER being passed. Let the postbacks settle, then re-assert gender if it was lost.
+      let genderNow = await readSel(page, S('CboGender'));
+      if (GENDER && (!genderNow || /select gender/i.test(genderNow))) {
+        await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+        const r2 = await pick(page, S('CboGender'), GENDER);
+        if (!r2.ok) warn.push(`GENDER "${GENDER}" not an option on retry (have: ${r2.have.join(', ')})`);
+        genderNow = await readSel(page, S('CboGender'));
+        if (genderNow && !/select gender/i.test(genderNow)) console.log(`note: gender was cleared by a shift/policy postback and re-applied (${genderNow})`);
+      }
       return { before, warn, genderNow };
     }
     // Click Save (killing the renewal modal that can intercept it) then re-open + read what persisted.
     async function saveThenRead() {
       await killModal(page);
-      await Promise.all([page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {}), page.click('#MainContent_cmdsave')]);
+      await Promise.all([page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {}), page.click(S('cmdsave'))]);
       await page.waitForTimeout(2000);
-      const rid2 = await findEmployeeRowId(page, CARD);
-      await page.goto('https://onlinerealsoft.com/Employee.aspx?RowId=' + rid2, { waitUntil: 'domcontentloaded' });
+      // Re-find rather than reuse editUrl: the portal can re-issue a RowId after a save.
+      const hit2 = await findEmployeeEdit(page, CARD);
+      if (!hit2) bad(`worker ${CARD} vanished from the employee list after saving — verify by hand before assuming the save worked.`);
+      await page.goto(hit2.editUrl, { waitUntil: 'domcontentloaded' });
       await page.waitForTimeout(1200);
+      await resolvePrefix(page);
       return readAll();
     }
     const mismatches = (a) => {
