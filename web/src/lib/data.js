@@ -3,7 +3,8 @@
 import { isConfigured, db } from './firebase';
 import { doc, setDoc, collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { getDoc, getDocs } from './readmeter';   // metered reads → usage_reads/{date} (quota diagnosis)
-import { cacheGet, cachePut, cacheDrop } from './cache';   // 20-min IndexedDB window on heavy immutable-ish reads
+import { cacheGet, cachePut, cacheDrop } from './cache';
+import { setHolidays } from './attendanceEngine';   // 20-min IndexedDB window on heavy immutable-ish reads
 
 const MOCK = {
   at: new Date().toISOString(),
@@ -71,6 +72,13 @@ export function dailyAtt(emp, month) {
   const hoursTotal = log.reduce((s, d) => s + Number(d.hours || 0), 0);
   const equivalentDays = log.reduce((s, d) => s + Math.min(Number(d.hours || 0), DAILY_STD) / DAILY_STD, 0);
   return { presentDays: log.length, equivalentDays: Math.round(equivalentDays * 100) / 100, hoursTotal, otHrs: 0, lateHrs: 0, earlyHrs: 0, absentDays: 0 };
+}
+// Factory holidays (att_meta/holidays { dates: {ymd: name} }) → attendance engine. Written only by
+// jobs/setHoliday.js (admin SDK). Any signed-in role may read att_meta. Safe no-op when missing.
+export async function loadHolidays() {
+  if (!isConfigured || !db) { setHolidays({}); return {}; }
+  try { const s = await getDoc(doc(db, 'att_meta', 'holidays')); const m = s.exists() ? (s.data().dates || {}) : {}; setHolidays(m); return m; }
+  catch { setHolidays({}); return {}; }
 }
 // Salary-free roster (att_meta/roster) — readable by managers for name pickers.
 export async function loadRoster() {

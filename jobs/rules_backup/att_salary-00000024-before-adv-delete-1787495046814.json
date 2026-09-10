@@ -1,0 +1,137 @@
+{
+ "code": "00000024",
+ "shift": "GEN",
+ "name": "radhey shyam press",
+ "dept": "PRESS",
+ "amount": 16500,
+ "active": true,
+ "type": "monthly",
+ "advancesClearedAt": "2026-07-10T06:12:12.269Z",
+ "advances": [
+  {
+   "id": "adv-2026-07-22-1784729337794-odke1",
+   "date": "2026-07-22",
+   "mode": "account",
+   "amount": 4000,
+   "remark": "",
+   "paidBy": "nspenterprises24@gmail.com"
+  },
+  {
+   "id": "adv-2026-07-22-1784729351355-hpj40",
+   "date": "2026-07-22",
+   "mode": "cash",
+   "amount": 1000,
+   "remark": "",
+   "paidBy": "nspenterprises24@gmail.com"
+  },
+  {
+   "id": "adv-2026-08-13-1786608813925-cmf4i",
+   "date": "2026-08-13",
+   "mode": "cash",
+   "amount": 4500,
+   "remark": "",
+   "paidBy": "nspenterprises24@gmail.com"
+  }
+ ],
+ "months": {
+  "2026-06": {
+   "lockedAt": "2026-07-15T17:52:28.810Z",
+   "payment": {
+    "mode": "lock",
+    "reason": "Salary 2026-06",
+    "closing": 66.38,
+    "payable": 3466.38,
+    "by": "nspenterprises24@gmail.com",
+    "breakdown": {
+     "perfectBonus": 0,
+     "graceDays": 0,
+     "presentDays": 5,
+     "bonus": 0,
+     "restoreSaturdayPay": 0,
+     "absentDays": 25,
+     "otPay": 716.38,
+     "fines": 0,
+     "gracePay": 0,
+     "otHrsNet": 10.42,
+     "net": 3466.38,
+     "openingBalance": 0,
+     "restoreSaturdayDays": 0,
+     "advanceDue": 0,
+     "advanceRecovered": 0,
+     "base": 2750
+    },
+    "prevNextOpening": 0,
+    "net": 3400,
+    "prevNextAdvance": 0,
+    "cash": 3400,
+    "account": 0
+   },
+   "locked": true
+  },
+  "2026-07": {
+   "advanceBalanceIn": 0,
+   "openingBalance": 66.38,
+   "lockedAt": "2026-08-13T11:10:05.976Z",
+   "payment": {
+    "date": "2026-08-13",
+    "mode": "lock",
+    "reason": "Salary 2026-07",
+    "closing": -244.43,
+    "payable": 14277.57,
+    "by": "nspenterprises24@gmail.com",
+    "breakdown": {
+     "perfectBonus": 0,
+     "graceDays": 0,
+     "presentDays": 26,
+     "bonus": 0,
+     "restoreSaturdayPay": 0,
+     "absentDays": 1,
+     "otPay": 3243.45,
+     "fines": 0,
+     "gracePay": 0,
+     "otHrsNet": 48.75,
+     "net": 14211.19,
+     "openingBalance": 66.38,
+     "restoreSaturdayDays": 0,
+     "advanceDue": 5000,
+     "advanceRecovered": 5000,
+     "base": 15967.74
+    },
+    "prevNextOpening": 0,
+    "net": 14522,
+    "prevNextAdvance": 0,
+    "cash": 4500,
+    "account": 10022
+   },
+   "locked": true
+  },
+  "2026-08": {
+   "advanceBalanceIn": 0,
+   "openingBalance": -244.43
+  }
+ },
+ "decisions": [
+  {
+   "at": "2026-07-15T17:52:28.810Z",
+   "to": "paid ₹3400 (cash 3400+acct 0); carry ₹66.38",
+   "reason": "Salary 2026-06",
+   "by": "nspenterprises24@gmail.com",
+   "name": "radhey shyam press",
+   "from": "payable ₹3466.38",
+   "field": "lock",
+   "code": "00000024",
+   "month": "2026-06"
+  },
+  {
+   "at": "2026-08-13T11:10:05.976Z",
+   "by": "nspenterprises24@gmail.com",
+   "code": "00000024",
+   "name": "radhey shyam press",
+   "month": "2026-07",
+   "field": "lock",
+   "from": "payable ₹14277.57",
+   "to": "paid ₹14522 (cash 4500+acct 10022); carry ₹-244.43",
+   "reason": "Salary 2026-07"
+  }
+ ]
+}

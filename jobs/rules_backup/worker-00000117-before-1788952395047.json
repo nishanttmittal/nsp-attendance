@@ -1,0 +1,14 @@
+{
+ "code": "00000117",
+ "joinDate": "2026-08-24",
+ "gender": "Male",
+ "stdHours": 10,
+ "shift": "LOD",
+ "name": "dinesh loading",
+ "nameLocked": true,
+ "active": true,
+ "dept": "LOADING",
+ "type": "daily",
+ "deptLocked": true,
+ "wage": 700
+}

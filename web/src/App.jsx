@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useAuth, canSee, signOut } from './lib/auth';
-import { loadEmployees } from './lib/data';
+import { loadEmployees, loadHolidays } from './lib/data';
 import Login from './components/Login.jsx';
 import Dashboard from './components/Dashboard.jsx';
 import Salary, { ManagerAdvances } from './components/Salary.jsx';
@@ -32,6 +32,7 @@ export default function App() {
 
   useEffect(() => {
     if (!user?.role) return;
+    loadHolidays().catch(() => {});   // holiday list → engine (owner rule: holidays are never "absent")
     (async () => {
       try {
         // Problems badge now counts pending resign prompts (missed punches moved to the Shadow tab).

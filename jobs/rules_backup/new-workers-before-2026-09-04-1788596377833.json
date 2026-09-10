@@ -1,0 +1,53 @@
+{
+  "00000124": {
+    "code": "00000124",
+    "shift": "GEN",
+    "amount": 8500,
+    "joinDate": "2026-09-04",
+    "gender": "Female",
+    "name": "payal powder",
+    "nameLocked": true,
+    "active": true,
+    "dept": "POWDER",
+    "type": "monthly",
+    "deptLocked": true
+  },
+  "00000125": {
+    "code": "00000125",
+    "shift": "GEN",
+    "amount": 10500,
+    "joinDate": "2026-09-04",
+    "name": "shokin fitting",
+    "nameLocked": true,
+    "active": true,
+    "dept": "FITTING",
+    "type": "monthly",
+    "deptLocked": true
+  },
+  "00000127": {
+    "code": "00000127",
+    "shift": "GEN",
+    "amount": 16000,
+    "joinDate": "2026-09-04",
+    "gender": "Male",
+    "name": "kushal jitender welder",
+    "nameLocked": true,
+    "active": true,
+    "dept": "WELDING",
+    "type": "monthly",
+    "deptLocked": true
+  },
+  "00000128": {
+    "code": "00000128",
+    "shift": "GEN",
+    "amount": 8500,
+    "joinDate": "2026-09-04",
+    "gender": "Female",
+    "name": "jenam powder",
+    "nameLocked": true,
+    "active": true,
+    "dept": "POWDER",
+    "type": "monthly",
+    "deptLocked": true
+  }
+}

@@ -20,6 +20,14 @@ export const WEEKLY_OFF_NEEDS = 3;   // owner changed 4->3 on 2026-06-15 (portal
 // counts in full. Threshold, not a per-day deduction.
 const OT_MIN = 0.25;
 
+// FACTORY HOLIDAYS (owner rule 2026-09-10: a holiday must count as HOLIDAY, never as absent).
+// Source of truth = Firestore att_meta/holidays { dates: { 'YYYY-MM-DD': 'name' } } — only days the
+// factory was actually CLOSED (a portal-listed holiday that was worked, e.g. Janmashtami 04-Sep-2026,
+// is not here). Loaded once at app start (data.loadHolidays → setHolidays). Empty until loaded.
+let HOLIDAYS = {};
+export function setHolidays(map) { HOLIDAYS = map && typeof map === 'object' ? { ...map } : {}; }
+export function holidayName(ymd) { return HOLIDAYS[ymd] || null; }
+
 const hoursOf = (hhmm) => { if (!hhmm || !/^\d/.test(hhmm)) return null; const [h, m] = String(hhmm).split(':').map(Number); return h + (m || 0) / 60; };
 export const hhmmOf = (h) => (h == null ? null : `${String(Math.floor(h)).padStart(2, '0')}:${String(Math.round((h - Math.floor(h)) * 60)).padStart(2, '0')}`);
 const median = (a) => { if (!a.length) return null; const s = [...a].sort((x, y) => x - y); const m = Math.floor(s.length / 2); return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
@@ -61,12 +69,16 @@ export function computeMonth(shift, punchesByDate, window, opts = {}) {
   const weeks = {};
   for (const ymd of dates) (weeks[wkKey(ymd)] = weeks[wkKey(ymd)] || []).push(ymd);
 
-  let present = 0, absent = 0, half = 0, weeklyOff = 0, weeklyOffPresent = 0, otHrs = 0;
+  let present = 0, absent = 0, half = 0, weeklyOff = 0, weeklyOffPresent = 0, otHrs = 0, holiday = 0;
   const detail = [];
+  const joinDate = opts.joinDate || null;                  // no holiday credit before the worker joined
+  // a weekday that is a closed-factory holiday AND has no punch → HOLIDAY (never absent)
+  const isHolidayOff = (ymd, rec) => !!HOLIDAYS[ymd] && !(rec && (rec.i || rec.o)) && !(joinDate && ymd < joinDate);
   for (const wk of Object.keys(weeks)) {
     let wdPresent = 0;                                      // full-week weekday presence -> earning
     for (const ymd of weeks[wk]) {
       if (new Date(ymd + 'T00:00:00').getDay() === 6) continue;
+      if (isHolidayOff(ymd, punchesByDate[ymd])) { wdPresent += 1; continue; }   // a holiday never costs the weekly-off
       const c = classifyDay(shift, punchesByDate[ymd], grace);
       if (c.status === 'full') wdPresent += 1; else if (c.status === 'half') wdPresent += 0.5;
     }
@@ -93,6 +105,9 @@ export function computeMonth(shift, punchesByDate, window, opts = {}) {
         }
         else if (earned) { weeklyOff += 1; detail.push({ ymd, ...io, kind: 'weekly-off' }); }
         else { absent += 1; detail.push({ ymd, ...io, kind: 'sat-absent' }); }
+      } else if (isHolidayOff(ymd, rec)) {
+        holiday += 1;
+        detail.push({ ymd, ...io, kind: 'holiday', name: HOLIDAYS[ymd], worked: 0, ot: 0, missing: null, otIfFixed: 0 });
       } else {
         const c = classifyDay(shift, rec, grace);
         if (c.status === 'full') present += 1;
@@ -110,7 +125,7 @@ export function computeMonth(shift, punchesByDate, window, opts = {}) {
       }
     }
   }
-  return { present: r2(present), absent: r2(absent), half, weeklyOff, weeklyOffPresent, otHrs: r2(otHrs), detail: detail.sort((a, b) => a.ymd.localeCompare(b.ymd)) };
+  return { present: r2(present), absent: r2(absent), half, weeklyOff, weeklyOffPresent, holiday, otHrs: r2(otHrs), detail: detail.sort((a, b) => a.ymd.localeCompare(b.ymd)) };
 }
 
 // App-side OT for a month from an att_punches doc (worked − shift hours; worked Saturdays = all hours).
@@ -120,10 +135,10 @@ export function monthOt(shift, punchDoc, mk, curMonth) {
   return computeMonth(shift || 'GEN', pbd, win, { grace: true }).otHrs;
 }
 // Full per-day detail for a month (in/out/worked/ot + missing-punch flag with otIfFixed estimate).
-export function monthDetail(shift, punchDoc, mk, curMonth) {
-  if (!punchDoc) return { otHrs: 0, detail: [] };
+export function monthDetail(shift, punchDoc, mk, curMonth, opts = {}) {
+  if (!punchDoc) return { otHrs: 0, holiday: 0, detail: [] };
   const pbd = punchesByDateFor(punchDoc, mk), win = monthWindow(mk, curMonth);
-  return computeMonth(shift || 'GEN', pbd, win, { grace: true });
+  return computeMonth(shift || 'GEN', pbd, win, { grace: true, ...opts });
 }
 
 // Broken-punch LATE correction. On a day with only a single EVENING punch (missing morning IN — e.g.

@@ -581,6 +581,15 @@ function DaysOtCard({ detail, overrides = {}, otCredits = {}, presentAdjust = 0,
                 </div>
               );
             }
+            if (d.kind === 'holiday') return (
+              <div key={d.ymd} className="text-xs px-2 py-1 rounded bg-green-50">
+                <div className="flex items-center gap-2">
+                  <span className="w-16 text-green-700">{lbl(d.ymd)}</span>
+                  <span className="flex-1 text-green-700">holiday{d.name ? ' · ' + d.name : ''} (paid)</span>
+                  <span className="w-12 text-right text-gray-300">—</span>
+                </div>
+              </div>
+            );
             const hasPunch = !!(d.in || d.out);
             const cur = overrides[d.ymd] || dayDefault(d);
             const overridden = !!overrides[d.ymd];

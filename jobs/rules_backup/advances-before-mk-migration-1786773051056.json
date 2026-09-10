@@ -1,0 +1,224 @@
+{
+  "00000004": [
+    {
+      "id": "adv-2026-07-14-1784722363660-o3q4b",
+      "date": "2026-07-14",
+      "mode": "cash",
+      "amount": 130,
+      "remark": "",
+      "paidBy": "nspenterprises24@gmail.com"
+    },
+    {
+      "id": "adv-2026-07-22-1784730819637-rvrkv",
+      "date": "2026-07-22",
+      "mode": "cash",
+      "amount": 5000,
+      "remark": "",
+      "paidBy": "nspenterprises24@gmail.com"
+    },
+    {
+      "id": "adv-2026-07-22-1784730837421-56huf",
+      "date": "2026-07-22",
+      "mode": "account",
+      "amount": 5000,
+      "remark": "",
+      "paidBy": "nspenterprises24@gmail.com"
+    },
+    {
+      "id": "adv-2026-08-03-1785768372689-xtyw6",
+      "date": "2026-07-31",
+      "mode": "cash",
+      "amount": 1000,
+      "remark": "given 2026-08-03, counted in July settle",
+      "paidBy": "nspenterprises24@gmail.com"
+    },
+    {
+      "id": "adv-2026-08-12-1786540864627-820cr",
+      "date": "2026-08-12",
+      "mode": "cash",
+      "amount": 6000,
+      "remark": "",
+      "paidBy": "nspenterprises24@gmail.com"
+    }
+  ],
+  "00000071": [
+    {
+      "id": "adv-2026-08-12-1786543164518-fzsmp",
+      "date": "2026-08-12",
+      "mode": "cash",
+      "amount": 1000,
+      "remark": "",
+      "paidBy": "nspenterprises24@gmail.com"
+    }
+  ],
+  "00000073": [
+    {
+      "id": "adv-2026-08-12-1786543206956-2fvly",
+      "date": "2026-08-12",
+      "mode": "cash",
+      "amount": 1000,
+      "remark": "",
+      "paidBy": "nspenterprises24@gmail.com"
+    }
+  ],
+  "00000076": [
+    {
+      "id": "adv-2026-07-22-1784729281379-ix58k",
+      "date": "2026-07-22",
+      "mode": "account",
+      "amount": 8000,
+      "remark": "",
+      "paidBy": "nspenterprises24@gmail.com"
+    },
+    {
+      "id": "adv-2026-07-22-1784729301769-85f94",
+      "date": "2026-07-22",
+      "mode": "cash",
+      "amount": 2000,
+      "remark": "",
+      "paidBy": "nspenterprises24@gmail.com"
+    },
+    {
+      "id": "adv-2026-08-10-1786455832764-lw1mi",
+      "date": "2026-07-31",
+      "mode": "cash",
+      "amount": 100,
+      "remark": "given 2026-08-10, counted in July settle",
+      "paidBy": "nspenterprises24@gmail.com"
+    },
+    {
+      "id": "adv-2026-08-12-1786537760608-0sjjb",
+      "date": "2026-08-12",
+      "mode": "cash",
+      "amount": 3500,
+      "remark": "",
+      "paidBy": "nspenterprises24@gmail.com"
+    }
+  ],
+  "00000082": [
+    {
+      "id": "adv-2026-08-10-1786455824454-6g18f",
+      "date": "2026-08-10",
+      "mode": "cash",
+      "amount": 500,
+      "remark": "",
+      "paidBy": "nspenterprises24@gmail.com"
+    },
+    {
+      "id": "adv-2026-08-12-1786543436490-x40i8",
+      "date": "2026-08-12",
+      "mode": "cash",
+      "amount": 1000,
+      "remark": "",
+      "paidBy": "nspenterprises24@gmail.com"
+    }
+  ],
+  "00000102": [
+    {
+      "id": "adv-2026-08-13-1786624535586-gt5ji",
+      "date": "2026-08-13",
+      "mode": "cash",
+      "amount": 2000,
+      "remark": "",
+      "paidBy": "nspenterprises24@gmail.com"
+    }
+  ],
+  "00000103": [
+    {
+      "id": "adv-2026-08-12-1786543216982-pemgf",
+      "date": "2026-08-12",
+      "mode": "cash",
+      "amount": 1000,
+      "remark": "",
+      "paidBy": "nspenterprises24@gmail.com"
+    }
+  ],
+  "00000104": [
+    {
+      "id": "adv-2026-08-13-1786624641083-cgjka",
+      "date": "2026-08-13",
+      "mode": "cash",
+      "amount": 1000,
+      "remark": "",
+      "paidBy": "nspenterprises24@gmail.com"
+    }
+  ],
+  "00000168": [
+    {
+      "id": "adv-2026-07-22-1784729509158-94pvy",
+      "date": "2026-07-22",
+      "mode": "account",
+      "amount": 4000,
+      "remark": "",
+      "paidBy": "nspenterprises24@gmail.com"
+    },
+    {
+      "id": "adv-2026-07-22-1784729519589-52rf4",
+      "date": "2026-07-22",
+      "mode": "cash",
+      "amount": 3000,
+      "remark": "",
+      "paidBy": "nspenterprises24@gmail.com"
+    },
+    {
+      "id": "adv-2026-08-11-1786457076713-iyqmq",
+      "date": "2026-07-31",
+      "mode": "cash",
+      "amount": 1000,
+      "remark": "given 2026-08-11, counted in July settle",
+      "paidBy": "nspenterprises24@gmail.com"
+    },
+    {
+      "id": "adv-2026-08-12-1786537687293-mpwhl",
+      "date": "2026-08-12",
+      "mode": "cash",
+      "amount": 3000,
+      "remark": "",
+      "paidBy": "nspenterprises24@gmail.com"
+    }
+  ],
+  "00000172": [
+    {
+      "id": "adv-2026-07-22-1784729179953-g8k0c",
+      "date": "2026-07-22",
+      "mode": "cash",
+      "amount": 4000,
+      "remark": "",
+      "paidBy": "nspenterprises24@gmail.com"
+    },
+    {
+      "id": "adv-2026-08-12-1786538952132-ia6yb",
+      "date": "2026-08-12",
+      "mode": "cash",
+      "amount": 500,
+      "remark": "",
+      "paidBy": "nspenterprises24@gmail.com"
+    }
+  ],
+  "00000307": [
+    {
+      "id": "adv-2026-07-22-1784729439864-zfgca",
+      "date": "2026-07-22",
+      "mode": "account",
+      "amount": 4000,
+      "remark": "",
+      "paidBy": "nspenterprises24@gmail.com"
+    },
+    {
+      "id": "adv-2026-07-22-1784729459819-54w97",
+      "date": "2026-07-22",
+      "mode": "cash",
+      "amount": 4000,
+      "remark": "",
+      "paidBy": "nspenterprises24@gmail.com"
+    },
+    {
+      "id": "adv-2026-08-12-1786537962449-nl5m9",
+      "date": "2026-08-12",
+      "mode": "cash",
+      "amount": 5000,
+      "remark": "",
+      "paidBy": "nspenterprises24@gmail.com"
+    }
+  ]
+}

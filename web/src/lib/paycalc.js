@@ -12,7 +12,7 @@ export function presentAdjustFrom(detail, overrides) {
   let adj = 0;
   for (const d of detail) {
     const ov = overrides[d.ymd];
-    if (!ov || ['weekly-off', 'sat-worked', 'sat-absent'].includes(d.kind)) continue;  // weekdays only
+    if (!ov || ['weekly-off', 'sat-worked', 'sat-absent', 'holiday'].includes(d.kind)) continue;  // weekdays only (holidays are fixed)
     const def = d.kind === 'half' ? 0.5 : d.kind === 'absent' ? 0 : 1;                  // single-punch counts as full
     adj += (DAYVAL[ov] ?? def) - def;
   }
@@ -102,7 +102,7 @@ export function payFor(emp, attMap, mk, ctx, graceDelta = 0, punchDoc = null) {
   // worker via md.otSource; app-OT is already net (worked − shift), so no late/early re-deduction.
   const portalOt = Number(att.otHrs || 0);
   // OT from raw punches (a missing/single punch earns 0 OT by default — NOT auto-restored).
-  const det = punchDoc && !att.noRecord ? monthDetail(emp.shift, punchDoc, mk, istMonth()) : { otHrs: 0, detail: [] };
+  const det = punchDoc && !att.noRecord ? monthDetail(emp.shift, punchDoc, mk, istMonth(), { joinDate: emp.joinDate || null }) : { otHrs: 0, holiday: 0, detail: [] };
   const appOt = det.otHrs;
   const otSource = md.otSource === 'app' ? 'app' : 'portal';
   // Owner's MANUAL per-day OT credit for flaky-machine days (md.otCredits {ymd:hours}) — his tap only,
@@ -124,10 +124,16 @@ export function payFor(emp, attMap, mk, ctx, graceDelta = 0, punchDoc = null) {
   const presentAdjust = presentAdjustFrom(det.detail, md.dayOverrides);
   const satAdjust = saturdayAdjustFrom(det.detail, md.dayOverrides);
   const otPart = otSource === 'app' ? { otHrs: effOt, lateHrs: 0, earlyHrs: 0 } : { otHrs: effOt, lateHrs: correctedLate };
+  // HOLIDAY reconciliation (owner rule 2026-09-10): the app's own holiday list is authoritative. The
+  // portal credited Rakhi 28-Aug-2026 to only 43/78 workers; any closed-factory holiday the app sees
+  // in the punch record but the portal did not credit is moved from absent → holiday (paid for monthly
+  // staff; daily wagers are unaffected — holidays are unpaid for them). Only ever ADDS credit.
+  const holidayFix = Math.max(0, (det.holiday || 0) - (att.holiday || 0));
   const otAtt = { ...att, ...otPart,
     presentDays: (att.presentDays || 0) + presentAdjust,
     weeklyOff: Math.max(0, (att.weeklyOff || 0) + satAdjust),
-    absentDays: Math.max(0, (att.absentDays || 0) - presentAdjust - satAdjust) };
+    holiday: (att.holiday || 0) + holidayFix,
+    absentDays: Math.max(0, (att.absentDays || 0) - presentAdjust - satAdjust - holidayFix) };
   // OWNER MANUAL OVERRIDE (any worker): md.override = { days, ot } fixes the paid days + net OT for the
   // month and WINS over the punch/portal figures. base = perDay × days, OT = ot hours. Used for manual
   // workers (Radhey/Dinesh) and to correct any worker's month. Clear it to fall back to auto figures.

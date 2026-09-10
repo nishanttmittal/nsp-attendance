@@ -1,0 +1,22 @@
+{
+ "at": "2026-09-10T12:06:22.004Z",
+ "before": {
+  "name": "00000130",
+  "card": "00000130",
+  "gender": "Select Gender",
+  "dept": "DEMO",
+  "shift": "GEN",
+  "policy": "GEN",
+  "doj": "01/01/2025"
+ },
+ "after": {
+  "name": "kamruddin ansari",
+  "card": "00000130",
+  "gender": "Male",
+  "dept": "Frame",
+  "shift": "GEN",
+  "policy": "GEN",
+  "doj": "10/09/2026"
+ },
+ "dialogs": []
+}

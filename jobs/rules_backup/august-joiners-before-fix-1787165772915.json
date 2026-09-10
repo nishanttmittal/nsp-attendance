@@ -1,0 +1,185 @@
+{
+  "00000071": {
+    "code": "00000071",
+    "shift": "GEN",
+    "name": "ranjan devi",
+    "dept": "POWDER",
+    "resignPrompt": {
+      "flaggedAt": "2026-08-11T13:39:34.945Z",
+      "month": "2026-07",
+      "status": "pending"
+    },
+    "amount": 8500,
+    "active": true,
+    "type": "monthly",
+    "advances": [
+      {
+        "id": "adv-2026-08-12-1786543164518-fzsmp",
+        "date": "2026-08-12",
+        "mode": "cash",
+        "amount": 1000,
+        "remark": "",
+        "paidBy": "nspenterprises24@gmail.com",
+        "mk": "2026-07"
+      }
+    ]
+  },
+  "00000073": {
+    "code": "00000073",
+    "shift": "GEN",
+    "name": "raj vanti powder",
+    "dept": "POWDER",
+    "resignPrompt": {
+      "flaggedAt": "2026-08-11T13:39:34.884Z",
+      "month": "2026-07",
+      "status": "pending"
+    },
+    "amount": 8500,
+    "active": true,
+    "type": "monthly",
+    "advances": [
+      {
+        "id": "adv-2026-08-12-1786543206956-2fvly",
+        "date": "2026-08-12",
+        "mode": "cash",
+        "amount": 1000,
+        "remark": "",
+        "paidBy": "nspenterprises24@gmail.com",
+        "mk": "2026-07"
+      }
+    ]
+  },
+  "00000082": {
+    "code": "00000082",
+    "shift": "GEN",
+    "gender": "Female",
+    "nameLocked": true,
+    "dept": "FITTING",
+    "deptLocked": true,
+    "name": "mamta devi fitting",
+    "resignPrompt": {
+      "flaggedAt": "2026-08-11T13:39:34.860Z",
+      "month": "2026-07",
+      "status": "pending"
+    },
+    "amount": 8500,
+    "active": true,
+    "type": "monthly",
+    "advances": [
+      {
+        "id": "adv-2026-08-10-1786455824454-6g18f",
+        "date": "2026-08-10",
+        "mode": "cash",
+        "amount": 500,
+        "remark": "",
+        "paidBy": "nspenterprises24@gmail.com",
+        "mk": "2026-07"
+      },
+      {
+        "id": "adv-2026-08-12-1786543436490-x40i8",
+        "date": "2026-08-12",
+        "mode": "cash",
+        "amount": 1000,
+        "remark": "",
+        "paidBy": "nspenterprises24@gmail.com",
+        "mk": "2026-07"
+      },
+      {
+        "id": "adv-2026-08-18-1787062982766-69l1n",
+        "date": "2026-08-18",
+        "mode": "cash",
+        "amount": 1500,
+        "remark": "",
+        "paidBy": "nspenterprises24@gmail.com",
+        "mk": "2026-07"
+      }
+    ]
+  },
+  "00000102": {
+    "code": "00000102",
+    "shift": "GEN",
+    "name": "ranjit press",
+    "dept": "PRESS",
+    "resignPrompt": {
+      "flaggedAt": "2026-08-11T13:39:35.016Z",
+      "month": "2026-07",
+      "status": "pending"
+    },
+    "amount": 16000,
+    "active": true,
+    "type": "monthly",
+    "advances": [
+      {
+        "id": "adv-2026-08-13-1786624535586-gt5ji",
+        "date": "2026-08-13",
+        "mode": "cash",
+        "amount": 2000,
+        "remark": "",
+        "paidBy": "nspenterprises24@gmail.com",
+        "mk": "2026-07"
+      }
+    ]
+  },
+  "00000103": {
+    "code": "00000103",
+    "shift": "GEN",
+    "name": "sonkali fitting",
+    "resignPrompt": {
+      "flaggedAt": "2026-08-11T13:39:34.969Z",
+      "month": "2026-07",
+      "status": "pending"
+    },
+    "amount": 8500,
+    "active": true,
+    "type": "monthly",
+    "dept": "FITTING",
+    "months": {
+      "2026-08": {
+        "fine": 0,
+        "loanInstallment": 0,
+        "otCredits": {
+          "2026-08-06": 2.12
+        },
+        "advanceBalanceIn": 0,
+        "locked": false,
+        "advanceRecover": 0
+      }
+    },
+    "advances": [
+      {
+        "id": "adv-2026-08-12-1786543216982-pemgf",
+        "date": "2026-08-12",
+        "mode": "cash",
+        "amount": 1000,
+        "remark": "",
+        "paidBy": "nspenterprises24@gmail.com",
+        "mk": "2026-07"
+      }
+    ]
+  },
+  "00000104": {
+    "code": "00000104",
+    "shift": "GEN",
+    "name": "nagina powder",
+    "dept": "POWDER",
+    "resignPrompt": {
+      "flaggedAt": "2026-08-11T13:39:34.992Z",
+      "month": "2026-07",
+      "status": "pending"
+    },
+    "amount": 8500,
+    "active": true,
+    "type": "monthly",
+    "advances": [
+      {
+        "id": "adv-2026-08-13-1786624641083-cgjka",
+        "date": "2026-08-13",
+        "mode": "cash",
+        "amount": 1000,
+        "remark": "",
+        "paidBy": "nspenterprises24@gmail.com",
+        "mk": "2026-07"
+      }
+    ]
+  }
+}

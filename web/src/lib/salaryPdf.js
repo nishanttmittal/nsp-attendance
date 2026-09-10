@@ -19,7 +19,7 @@ export function advanceSplit(advances = []) {
 
 // Monthly attendance detail (in/out per day) — hand a worker their full month's timings.
 const DOW_PDF = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-const RESULT_PDF = { full: 'Full', half: 'Half', absent: 'Absent', 'weekly-off': 'Weekly-off', 'sat-worked': 'Sat worked (OT)', 'sat-absent': 'Sat cut' };
+const RESULT_PDF = { full: 'Full', half: 'Half', absent: 'Absent', 'weekly-off': 'Weekly-off', 'sat-worked': 'Sat worked (OT)', 'sat-absent': 'Sat cut', holiday: 'Holiday' };
 export function attendanceDetailPdf(emp, monthLabel, app, grace) {
   const doc = new jsPDF();
   doc.setFontSize(16); doc.text('NSP ENTERPRISES', 14, 18);

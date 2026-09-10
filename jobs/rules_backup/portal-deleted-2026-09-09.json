@@ -1,0 +1,216 @@
+{
+ "savedAt": "2026-09-09T05:51:49.569Z",
+ "reason": "Deleted from Realtime portal 2026-09-09 to get under the 80-user licence (83 enrolled). Re-enrol later.",
+ "workers": {
+  "00000124": {
+   "portalRow": {
+    "name": "00000124",
+    "cardNo": "00000124",
+    "empCode": "00000124",
+    "dept": "DEMO",
+    "designation": "DEMO",
+    "password": "00000124",
+    "branch": "BAWANA"
+   },
+   "app": {
+    "code": "00000124",
+    "shift": "GEN",
+    "amount": 8500,
+    "joinDate": "2026-09-04",
+    "gender": "Female",
+    "name": "payal powder",
+    "nameLocked": true,
+    "active": true,
+    "dept": "POWDER",
+    "type": "monthly",
+    "deptLocked": true
+   },
+   "septPunchesBeforeDelete": "NOT EXTRACTED — deleted in batch 1 before the wall lifted; report no longer lists deleted employees"
+  },
+  "00000125": {
+   "portalRow": {
+    "name": "00000125",
+    "cardNo": "00000125",
+    "empCode": "00000125",
+    "dept": "DEMO",
+    "designation": "DEMO",
+    "password": "00000125",
+    "branch": "BAWANA"
+   },
+   "app": {
+    "code": "00000125",
+    "shift": "GEN",
+    "amount": 10500,
+    "joinDate": "2026-09-04",
+    "name": "shokin fitting",
+    "nameLocked": true,
+    "active": true,
+    "dept": "FITTING",
+    "type": "monthly",
+    "deptLocked": true
+   },
+   "septPunchesBeforeDelete": "NOT EXTRACTED — deleted in batch 1 before the wall lifted; report no longer lists deleted employees"
+  },
+  "00000127": {
+   "portalRow": {
+    "name": "00000127",
+    "cardNo": "00000127",
+    "empCode": "00000127",
+    "dept": "DEMO",
+    "designation": "DEMO",
+    "password": "00000127",
+    "branch": "BAWANA"
+   },
+   "app": {
+    "code": "00000127",
+    "shift": "GEN",
+    "amount": 16000,
+    "joinDate": "2026-09-04",
+    "gender": "Male",
+    "name": "kushal jitender welder",
+    "nameLocked": true,
+    "active": true,
+    "dept": "WELDING",
+    "type": "monthly",
+    "deptLocked": true
+   },
+   "septPunchesBeforeDelete": [
+    {
+     "date": "01-09-2026",
+     "in": "09:12",
+     "out": "19:28"
+    },
+    {
+     "date": "02-09-2026",
+     "in": "08:58",
+     "out": "19:28"
+    },
+    {
+     "date": "03-09-2026",
+     "in": "19:30",
+     "out": "NA"
+    },
+    {
+     "date": "04-09-2026",
+     "in": "09:00",
+     "out": "16:35"
+    },
+    {
+     "date": "05-09-2026",
+     "in": "NA",
+     "out": "NA"
+    },
+    {
+     "date": "06-09-2026",
+     "in": "09:00",
+     "out": "19:29"
+    },
+    {
+     "date": "07-09-2026",
+     "in": "08:56",
+     "out": "19:30"
+    },
+    {
+     "date": "08-09-2026",
+     "in": "19:30",
+     "out": "NA"
+    },
+    {
+     "date": "09-09-2026",
+     "in": "08:56",
+     "out": "NA"
+    }
+   ]
+  },
+  "00000128": {
+   "portalRow": {
+    "name": "00000128",
+    "cardNo": "00000128",
+    "empCode": "00000128",
+    "dept": "DEMO",
+    "designation": "DEMO",
+    "password": "00000128",
+    "branch": "BAWANA"
+   },
+   "app": {
+    "code": "00000128",
+    "shift": "GEN",
+    "amount": 8500,
+    "joinDate": "2026-09-04",
+    "gender": "Female",
+    "name": "jenam powder",
+    "nameLocked": true,
+    "active": true,
+    "dept": "POWDER",
+    "type": "monthly",
+    "deptLocked": true
+   },
+   "septPunchesBeforeDelete": [
+    {
+     "date": "01-09-2026",
+     "in": "NA",
+     "out": "NA"
+    },
+    {
+     "date": "02-09-2026",
+     "in": "NA",
+     "out": "NA"
+    },
+    {
+     "date": "03-09-2026",
+     "in": "NA",
+     "out": "NA"
+    },
+    {
+     "date": "04-09-2026",
+     "in": "16:36",
+     "out": "NA"
+    },
+    {
+     "date": "05-09-2026",
+     "in": "NA",
+     "out": "NA"
+    },
+    {
+     "date": "06-09-2026",
+     "in": "19:31",
+     "out": "NA"
+    },
+    {
+     "date": "07-09-2026",
+     "in": "08:59",
+     "out": "19:31"
+    },
+    {
+     "date": "08-09-2026",
+     "in": "08:54",
+     "out": "19:32"
+    },
+    {
+     "date": "09-09-2026",
+     "in": "08:57",
+     "out": "NA"
+    }
+   ]
+  },
+  "00000067": {
+   "portalRow": {
+    "name": "virender welder",
+    "cardNo": "00000067",
+    "empCode": "00000067",
+    "dept": "WELDING",
+    "designation": "DEMO",
+    "password": "00000067",
+    "branch": "BAWANA"
+   },
+   "app": {
+    "code": "00000067",
+    "name": "virender welder",
+    "dept": "WELDING",
+    "active": false,
+    "exitDate": "2026-08-13",
+    "note": "Full & final done 13-08-2026; still enrolled = dead slot. Not to be re-added."
+   }
+  }
+ }
+}
