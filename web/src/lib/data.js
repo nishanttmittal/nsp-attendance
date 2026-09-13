@@ -290,6 +290,24 @@ export async function addAdvanceDirect(code, advance, by) {
   return adv;
 }
 
+// LOADING HISAB clearances (owner 13-09-2026) — appended/removed atomically so a concurrent advance
+// or settle on the same worker is never clobbered (a merge setDoc would rewrite the whole array).
+// A clear records WHEN the loader's account was settled; it never locks a month or changes payable.
+export async function addHisabClear(code, entry) {
+  if (!isConfigured || !db) return entry;
+  const { updateDoc, arrayUnion } = await import('firebase/firestore');
+  const ref = doc(db, 'att_salary', code);
+  const snap = await getDoc(ref);
+  if (((snap.exists() && snap.data().hisabClears) || []).some((c) => c && c.id === entry.id)) return entry;   // retry-safe
+  await updateDoc(ref, { hisabClears: arrayUnion(entry) });
+  return entry;
+}
+export async function removeHisabClear(code, entry) {
+  if (!isConfigured || !db) return;
+  const { updateDoc, arrayRemove } = await import('firebase/firestore');
+  await updateDoc(doc(db, 'att_salary', code), { hisabClears: arrayRemove(entry) });
+}
+
 // QUOTA SAVER (13-08-2026): attendance + punches change only when the portal sync jobs run, yet the
 // Salary screen and EVERY Person page were re-reading all ~70 workers' docs on each open — the main
 // eater of the shared 50k-reads/day free quota (a settle day burned tens of thousands). A 20-min

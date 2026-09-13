@@ -10,6 +10,7 @@ import Settings from './components/Settings.jsx';
 import Shadow from './components/Shadow.jsx';
 import Welders from './components/Welders.jsx';
 import Archive from './components/Archive.jsx';
+import LoadingHisab from './components/LoadingHisab.jsx';
 
 // Daily tabs stay on the bar; occasional screens live under ⋯ More (owner 2026-08-11: "app is
 // confusing" — six same-weight tabs, three of them advance-related). Keys are unchanged.
@@ -21,6 +22,7 @@ const TABS = [
   { key: 'incoming', label: 'Hisab advances — accept', feature: 'salary' },
   { key: 'shadow', label: 'Day check (shadow)', feature: 'shadow' },
   { key: 'welders', label: 'Welders (contractor-paid)', feature: 'salary' },
+  { key: 'loading', label: '🚚 Loading hisab', feature: 'salary' },
   { key: 'archive', label: 'Removed staff records', feature: 'archive' },
 ];
 
@@ -121,6 +123,7 @@ export default function App() {
             {active === 'salary' && canSee(user.role, 'salary') && <Salary user={user} />}
             {active === 'incoming' && canSee(user.role, 'salary') && <IncomingAdvances user={user} />}
             {active === 'welders' && canSee(user.role, 'salary') && <Welders />}
+            {active === 'loading' && canSee(user.role, 'salary') && <LoadingHisab user={user} />}
             {active === 'archive' && canSee(user.role, 'archive') && <Archive />}
             {active === 'problems' && canSee(user.role, 'problems') && <Problems user={user} />}
             {active === 'shadow' && canSee(user.role, 'shadow') && <Shadow />}
