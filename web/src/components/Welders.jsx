@@ -151,6 +151,65 @@ export default function Welders() {
   );
 }
 
+// Day-by-day for one welder: date · in → out · hours worked · OT · day status. Read-only (owner ask
+// 13-09-2026: "not able to see days and hours day by day wise for welder"). Uses the same punch
+// detail payFor already computed, so it adds no Firestore reads and cannot move any figure.
+const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const hm = (h) => { const m = Math.round((Number(h) || 0) * 60); return `${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')}`; };
+const DAY_TAG = {
+  full: ['Full', 'text-slate-600'], half: ['½ day', 'text-amber-700'], absent: ['Absent', 'text-red-500'],
+  'sat-worked': ['Sat (all OT)', 'text-blue-700'], 'weekly-off': ['Weekly off', 'text-slate-400'],
+  'sat-absent': ['Sat — not earned', 'text-slate-400'], holiday: ['Holiday', 'text-green-700'],
+};
+function WelderDays({ detail }) {
+  const [open, setOpen] = useState(false);
+  if (!detail.length) return null;
+  const totHrs = detail.reduce((s, d) => s + (Number(d.worked) || 0), 0);
+  const totOt = detail.reduce((s, d) => s + (Number(d.ot) || 0), 0);
+  const missing = detail.filter((d) => d.missing).length;
+  return (
+    <div className="bg-white border border-slate-200 rounded-lg p-2 mt-1">
+      <button onClick={() => setOpen(!open)} className="w-full flex justify-between items-center text-[12px] font-semibold text-slate-700">
+        <span>📅 Day-by-day hours{missing ? <span className="text-amber-600 font-normal"> · {missing} missing punch</span> : ''}</span>
+        <span className="font-normal text-slate-500">{hm(totHrs)} h · OT {hm(totOt)} {open ? '▲' : '▼'}</span>
+      </button>
+      {open && (
+        <table className="w-full mt-1 text-[11.5px]">
+          <thead>
+            <tr className="text-slate-400 text-left">
+              <th className="font-normal py-0.5">Date</th><th className="font-normal">In → Out</th>
+              <th className="font-normal text-right">Hours</th><th className="font-normal text-right">OT</th>
+            </tr>
+          </thead>
+          <tbody>
+            {detail.map((d) => {
+              const [tag, cls] = DAY_TAG[d.kind] || [d.kind, 'text-slate-500'];
+              const hasPunch = !!(d.in || d.out);
+              return (
+                <tr key={d.ymd} className={`border-t border-slate-100 ${d.missing ? 'bg-amber-50' : ''}`}>
+                  <td className="py-0.5 whitespace-nowrap text-slate-600">{d.ymd.slice(8, 10)}/{d.ymd.slice(5, 7)} {DOW[new Date(d.ymd + 'T00:00:00').getDay()]}</td>
+                  <td className={cls}>
+                    {hasPunch ? `${d.in || '—'} → ${d.out || '—'}` : ''}
+                    {d.missing ? <span className="text-amber-700"> ⚠ no {d.missing === 'in' ? 'IN' : 'OUT'}</span>
+                      : <span className={hasPunch ? 'text-slate-400' : ''}>{hasPunch ? ` · ${tag}` : tag}{d.kind === 'holiday' && d.name ? ` · ${d.name}` : ''}</span>}
+                  </td>
+                  <td className="text-right text-slate-700">{d.worked != null && d.worked > 0 ? hm(d.worked) : '—'}</td>
+                  <td className={`text-right ${d.ot > 0 ? 'text-slate-800 font-semibold' : 'text-slate-300'}`}>{d.ot > 0 ? hm(d.ot) : '—'}</td>
+                </tr>
+              );
+            })}
+            <tr className="border-t-2 border-slate-200 font-bold">
+              <td colSpan={2} className="py-0.5">Total</td>
+              <td className="text-right">{hm(totHrs)}</td><td className="text-right">{hm(totOt)}</td>
+            </tr>
+          </tbody>
+        </table>
+      )}
+      <p className="text-[10px] text-slate-400 mt-0.5">Hours = in to out from the machine. Missing-punch days count 0 hours.</p>
+    </div>
+  );
+}
+
 // One welder: headline pay + the SAME detail block the regular Salary tab shows (WorkerSummary) —
 // present/absent/half/missed-punch dates, late, Saturdays, fine, advances, carried balance.
 // Everything the regular row gives EXCEPT any way to settle, lock or pay.
@@ -187,6 +246,7 @@ function WelderRow({ w, mk, open, onToggle }) {
             <span className="text-right font-bold border-t border-slate-100 pt-0.5">{rupee(w.earned)}</span>
           </div>
           <WorkerSummary r={w.r} mk={mk} />
+          <WelderDays detail={w.r.detail || []} />
           <p className="text-[10px] text-slate-400 px-1 pt-0.5">Not settled here — paid per piece by the contractor.</p>
         </div>
       )}
