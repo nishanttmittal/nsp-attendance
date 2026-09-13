@@ -222,6 +222,12 @@ Press OK only if you gave him ${rs(amount)} EXTRA on top of that salary.`;
 // payable totals, the "to pay" queue and the salary register; otherwise the app shows money it does
 // not owe, and settling them to clear the list records cash that never moved (that is exactly how
 // ₹4.15L of June+July "payments" got recorded). Their own screen is the Welders tab.
+// Manual (app-only) staff such as Radhey (driver) / Dinesh (guard) have no machine punches — their month
+// only has pay once the owner types the days. Owner 13-09-2026: Dinesh's August got locked at 0 days by a
+// one-tap Cash, so paying/locking such a month is blocked until days are entered.
+export const needsManualDays = (emp, mk) => !!(emp && emp.appOnly)
+  && !(((emp.months || {})[mk] || {}).override && emp.months[mk].override.days != null)
+  && !(((emp.attendanceLog || {})[mk]) || []).length;
 export const isContractorPaid = (e) => String((e && e.dept) || '').toUpperCase() === 'WELDING';
 
 // ONE worker's advance statement as the owner wants to read it (rule 19-08-2026): "once the old month

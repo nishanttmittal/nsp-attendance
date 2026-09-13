@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { loadEmployee, loadAllAttendance, loadPunchDoc, saveEmployee, saveMonth, addAdvance, deleteAdvanceAt, addIncrement, settleAndResign, checkActionPassword, queueJob, queueLock, queueUnlock, lockMonthDirect, unlockMonthDirect, editNameDept, istMonth, removeWorker, restoreWorker, deleteWorkerHard, workerEverPaid, attributeAdvanceMk, settleCashClash, settleClashMessage } from '../lib/data';
+import { needsManualDays, loadEmployee, loadAllAttendance, loadPunchDoc, saveEmployee, saveMonth, addAdvance, deleteAdvanceAt, addIncrement, settleAndResign, checkActionPassword, queueJob, queueLock, queueUnlock, lockMonthDirect, unlockMonthDirect, editNameDept, istMonth, removeWorker, restoreWorker, deleteWorkerHard, workerEverPaid, attributeAdvanceMk, settleCashClash, settleClashMessage } from '../lib/data';
 import { monthCtx, payFor, rupee, paymentBreakdown } from '../lib/paycalc';
 import { payslipOnePdf, sharePdf } from '../lib/salaryPdf';
 import { graceDeltaDays } from '../lib/attendanceEngine';
@@ -123,6 +123,7 @@ export default function Person({ code, mk, user, onBack }) {
     act(() => saveMonth(code, mk, { otCredits: next }));
   };
   const doLock = (cash, account, reason) => act(async () => {
+    if (needsManualDays(emp, mk)) { alert(`Enter ${emp.name}'s days first (Adjust this month → Override days / OT) — locking now would close the month at 0 days.`); return; }
     // Snapshot the salary breakdown AT LOCK so the paid month always shows these exact figures, immune
     // to any later rule change. advanceCarry is always 0 now (advance folds fully into the balance).
     const breakdown = paymentBreakdown(pay);

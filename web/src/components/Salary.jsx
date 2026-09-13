@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { advanceStatement, isContractorPaid, loadEmployees, loadAllAttendance, loadAllPunches, loadEmployee, saveEmployee, loadPayout, loadAdvanceBalances, queueAdvance, addAdvanceDirect, loadRoster, loadAttendanceReview, addMonthFine, saveMonth, istMonth, queueJob, lockMonthDirect, unlockMonthDirect, queueLock, queueUnlock, addManualWorker, pushWorkerProfile, advanceMonth, attributeAdvanceMk, settleCashClash, settleClashMessage, MACHINE_DEPTS, MACHINE_SHIFTS, MACHINE_GENDERS, DEPT_DEFAULT_SHIFT } from '../lib/data';
+import { advanceStatement, isContractorPaid, needsManualDays, loadEmployees, loadAllAttendance, loadAllPunches, loadEmployee, saveEmployee, loadPayout, loadAdvanceBalances, queueAdvance, addAdvanceDirect, loadRoster, loadAttendanceReview, addMonthFine, saveMonth, istMonth, queueJob, lockMonthDirect, unlockMonthDirect, queueLock, queueUnlock, addManualWorker, pushWorkerProfile, advanceMonth, attributeAdvanceMk, settleCashClash, settleClashMessage, MACHINE_DEPTS, MACHINE_SHIFTS, MACHINE_GENDERS, DEPT_DEFAULT_SHIFT } from '../lib/data';
 import { monthOptions, monthCtx, payFor, rupee, paymentBreakdown } from '../lib/paycalc';
 import { SHIFT_HOURS } from '../lib/payroll';
 import Person from './Person.jsx';
@@ -148,6 +148,7 @@ function OwnerSalary({ user }) {
   // workers (full month, zero absent), amount included in the prefill; owner unticks to refuse.
   // Skipped when the bonus is already in payable via md.perfectBonusPaid (would double it).
   const payNow = (r, mode) => {
+    if (needsManualDays(r.emp, mk)) { alert(`Enter ${r.emp.name}'s days for this month first — paying now would lock the month at 0 days.`); return; }
     const bonus = !!r.pay.perfectEligible && !(r.pay.perfectBonus > 0) && (r.pay.perDay || 0) > 0;
     const full = String(Math.max(0, Math.round(((r.pay.payable || 0) + (bonus ? r.pay.perDay : 0)) * 100) / 100));
     setPayC({ r, cash: mode === 'account' ? '0' : full, account: mode === 'account' ? full : '0', bonusDay: bonus });
@@ -265,7 +266,8 @@ function OwnerSalary({ user }) {
             onPay={(mode) => payNow(r, mode)}
             onAdvanceSaved={onAdvanceSaved}
             onAdvanceRevert={onAdvanceRevert}
-            onUndo={() => undoPay(r)} />
+            onUndo={() => undoPay(r)}
+            onDaysSaved={reload} />
         ))}
       </div>
 
@@ -464,8 +466,9 @@ function FastPaySheet({ payC, busy, onChange, onCancel, onConfirm }) {
   );
 }
 
-function OwnerRow({ r, mk, busy, justPaidMode, user, onName, onPay, onUndo, onAdvanceSaved, onAdvanceRevert }) {
+function OwnerRow({ r, mk, busy, justPaidMode, user, onName, onPay, onUndo, onAdvanceSaved, onAdvanceRevert, onDaysSaved }) {
   const { emp, md, pay } = r;
+  const noDays = needsManualDays(emp, mk);
   const [showDays, setShowDays] = useState(false);
   // 💸 inline advance box (null = closed). Owner writes the advance DIRECTLY (addAdvanceDirect) so
   // it shows INSTANTLY — no 5-min queue wait — then reflects in this row + the money totals at once.
@@ -558,9 +561,10 @@ function OwnerRow({ r, mk, busy, justPaidMode, user, onName, onPay, onUndo, onAd
         </div>
       )}
       {/* not settled → ONE-TAP pay (full amount, that method, locks instantly) + 💸 Advance */}
+      {!isLocked && emp.appOnly && <ManualDaysBox emp={emp} md={md} mk={mk} missing={noDays} onSaved={onDaysSaved} />}
       {!isLocked && (
         <div className="mt-3 space-y-2">
-          <div className="flex gap-2">
+          <div className={`flex gap-2 ${noDays ? 'opacity-40 pointer-events-none' : ''}`}>
             {owes ? (
               <button disabled={busy} onClick={() => onPay('cash')} className="flex-1 bg-slate-800 text-white rounded-2xl py-4 font-bold text-sm disabled:opacity-50 active:scale-95 transition-all">Settle &amp; lock <span className="font-normal opacity-80">(carries {rupee(Math.abs(payable))})</span></button>
             ) : (
@@ -611,6 +615,55 @@ function OwnerRow({ r, mk, busy, justPaidMode, user, onName, onPay, onUndo, onAd
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+// Days + OT for a manual (app-only) worker, right on the Salary row (owner 13-09-2026). Before this the
+// only place was the full page's "Override days / OT", so the row's one-tap Cash could lock the month
+// at 0 days. Saves the same month override the full page writes; Cash/Account stay disabled until set.
+function ManualDaysBox({ emp, md, mk, missing, onSaved }) {
+  const ov = (md && md.override) || {};
+  const [edit, setEdit] = useState(false);
+  const [days, setDays] = useState(ov.days ?? '');
+  const [ot, setOt] = useState(ov.ot ?? '');
+  const [st, setSt] = useState('');
+  useEffect(() => { setDays(ov.days ?? ''); setOt(ov.ot ?? ''); }, [ov.days, ov.ot]);
+  if (!missing && !edit) return (
+    <div className="mt-2 text-xs text-slate-500 flex items-center gap-2">
+      <span>✍️ <b className="text-slate-700">{ov.days} days</b>{ov.ot ? ` · OT ${ov.ot}h` : ''} entered</span>
+      <button onClick={() => setEdit(true)} className="text-blue-700 underline underline-offset-2">change</button>
+    </div>
+  );
+  async function save() {
+    const d = Number(days);
+    if (days === '' || !(d >= 0) || d > 40) { setSt('Enter days (0–40).'); return; }
+    const o = ot === '' ? null : Number(ot);
+    if (o != null && !(o >= 0 && o <= 300)) { setSt('OT hours look wrong.'); return; }
+    setSt('saving');
+    try {
+      await saveMonth(emp.code, mk, { override: { days: d, ot: o } });
+      setEdit(false); setSt('');
+      await onSaved?.();
+    } catch { setSt('Could not save — try again.'); }
+  }
+  return (
+    <div className="mt-2 rounded-2xl border-2 border-amber-300 bg-amber-50 p-3 space-y-2">
+      <div className="text-sm font-bold text-amber-900">✍️ {missing ? 'Enter days for this month first' : 'Change days'} <span className="font-normal text-amber-700 text-xs">(not on machine)</span></div>
+      <div className="grid grid-cols-2 gap-2">
+        <label className="text-[11px] text-slate-500">Days worked
+          <input type="number" inputMode="decimal" value={days} onChange={(e) => setDays(e.target.value)}
+            className="mt-0.5 w-full border-2 border-amber-200 rounded-xl px-3 py-2.5 text-lg text-center font-bold bg-white" /></label>
+        <label className="text-[11px] text-slate-500">OT hours (optional)
+          <input type="number" inputMode="decimal" value={ot} onChange={(e) => setOt(e.target.value)}
+            className="mt-0.5 w-full border-2 border-amber-200 rounded-xl px-3 py-2.5 text-lg text-center font-bold bg-white" /></label>
+      </div>
+      {st && st !== 'saving' && <p className="text-xs text-rose-600 font-medium">{st}</p>}
+      <div className="flex gap-2">
+        {!missing && <button onClick={() => setEdit(false)} className="flex-1 border-2 border-slate-200 rounded-xl py-3 font-semibold text-slate-600 bg-white">Cancel</button>}
+        <button disabled={st === 'saving'} onClick={save} className="flex-[2] bg-amber-600 text-white rounded-xl py-3 font-bold disabled:opacity-50">{st === 'saving' ? 'Saving…' : 'Save days'}</button>
+      </div>
+      {missing && <p className="text-[11px] text-amber-800">💵 Cash / 🏦 Account unlock after the days are saved.</p>}
     </div>
   );
 }
