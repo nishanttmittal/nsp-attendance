@@ -60,8 +60,10 @@ export default function Welders() {
   const groups = useMemo(() => {
     if (!emps) return [];
     const rows = emps.filter(isWelder).map((e) => {
-      // keep the WHOLE payFor row — WorkerSummary renders the same detail as the regular Salary tab
-      const r = payFor(e, attMap, mk, ctx, 0, punches[e.code]);
+      // keep the WHOLE payFor row — WorkerSummary renders the same detail as the regular Salary tab.
+      // payFor() does not return the employee; the row and WorkerSummary read r.emp, so attach it here
+      // (without it every "details" tap crashed the whole app — found 13-09-2026).
+      const r = { ...payFor(e, attMap, mk, ctx, 0, punches[e.code]), emp: e };
       return {
         r, code: e.code, name: e.name || e.code, active: e.active !== false,
         contractor: contractorOn(e, mk), days: r.pay.paidDays || 0,
