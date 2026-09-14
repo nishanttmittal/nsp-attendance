@@ -503,7 +503,10 @@ function OwnerRow({ r, mk, busy, justPaidMode, user, onName, onPay, onUndo, onAd
   }
   // this worker's advances already given ON OR BEFORE the box's date (newest first) + total
   const advDate = adv?.date || advToday;
-  const priorAdvs = adv ? (emp.advances || []).filter((a) => a.date && a.date <= advDate).sort((a, b) => (b.date || '').localeCompare(a.date || '')) : [];
+  // Owner rule (14-09-2026): once a month is closed (locked), its advances belong to THAT month's hisab
+  // only — list just the advances of months still open (after the last lock), same basis as advanceStatement.
+  const advBfMonth = advanceStatement(emp).bfMonth;
+  const priorAdvs = adv ? (emp.advances || []).filter((a) => a.date && a.date <= advDate && (!advBfMonth || advanceMonth(a) > advBfMonth)).sort((a, b) => (b.date || '').localeCompare(a.date || '')) : [];
   const priorTotal = priorAdvs.reduce((t, a) => t + Number(a.amount || 0), 0);
   const isLocked = !!md.locked || !!md.payment;                  // settled & frozen via Lock
   const payable = pay.payable || 0;
@@ -585,7 +588,7 @@ function OwnerRow({ r, mk, busy, justPaidMode, user, onName, onPay, onUndo, onAd
               {/* advances already given to this worker up to the chosen date */}
               <div className="rounded-xl bg-white border-2 border-amber-200 p-2 text-xs">
                 <div className="flex justify-between font-bold text-slate-700 mb-0.5">
-                  <span>Advances till {advDate.slice(8)}/{advDate.slice(5, 7)}</span>
+                  <span>Advances till {advDate.slice(8)}/{advDate.slice(5, 7)}{advBfMonth ? ` · after ${shortMonth(advBfMonth)} hisab` : ''}</span>
                   <span className="text-amber-700">{rupee(priorTotal)}{priorAdvs.length ? ` · ${priorAdvs.length}` : ''}</span>
                 </div>
                 {priorAdvs.length === 0

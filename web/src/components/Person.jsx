@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { needsManualDays, loadEmployee, loadAllAttendance, loadPunchDoc, saveEmployee, saveMonth, addAdvance, deleteAdvanceAt, addIncrement, settleAndResign, checkActionPassword, queueJob, queueLock, queueUnlock, lockMonthDirect, unlockMonthDirect, editNameDept, istMonth, removeWorker, restoreWorker, deleteWorkerHard, workerEverPaid, attributeAdvanceMk, settleCashClash, settleClashMessage } from '../lib/data';
+import { needsManualDays, loadEmployee, loadAllAttendance, loadPunchDoc, saveEmployee, saveMonth, addAdvance, deleteAdvanceAt, addIncrement, settleAndResign, checkActionPassword, queueJob, queueLock, queueUnlock, lockMonthDirect, unlockMonthDirect, editNameDept, istMonth, removeWorker, restoreWorker, deleteWorkerHard, workerEverPaid, attributeAdvanceMk, advanceMonth, settleCashClash, settleClashMessage } from '../lib/data';
 import { monthCtx, payFor, rupee, paymentBreakdown } from '../lib/paycalc';
 import { payslipOnePdf, sharePdf } from '../lib/salaryPdf';
 import { graceDeltaDays } from '../lib/attendanceEngine';
@@ -28,6 +28,16 @@ export default function Person({ code, mk, user, onBack }) {
     if (months[m2]?.locked || months[m2]?.payment) return true;
     return Object.keys(months).some((m) => m > m2 && (months[m]?.locked || months[m]?.payment));
   };
+  // Owner rule (14-09-2026): a closed (locked) month's advances show ONLY in that month's hisab. Viewing a
+  // locked month → its own advances; viewing an open month → advances of the open months up to it.
+  const lastLockedMk = () => Object.keys(emp?.months || {}).filter((m) => emp.months[m]?.locked || emp.months[m]?.payment).sort().pop() || '';
+  const viewedLocked = () => !!(emp?.months?.[mk]?.locked || emp?.months?.[mk]?.payment);
+  const showAdvInThisMonth = (a) => {
+    const am = advanceMonth(a);
+    return viewedLocked() ? am === mk : am > lastLockedMk() && am <= mk;
+  };
+  const MON3 = (m) => ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][Number(String(m).slice(5, 7)) - 1] || m;
+  const shownAdvLabel = viewedLocked() || !lastLockedMk() ? MON3(mk) : `after ${MON3(lastLockedMk())} hisab`;
   // Advance add/delete are OPTIMISTIC and do NOT reload all attendance — the old act() re-read every
   // worker's attendance (~66 docs) after each advance, which is exactly what made entry slow.
   async function addAdvanceFast(f) {
@@ -295,8 +305,8 @@ export default function Person({ code, mk, user, onBack }) {
         </div>
       )}
 
-      <Ledger title="💸 Advances" withMode
-        items={(emp.advances || []).map((a, idx) => ({
+      <Ledger title={`💸 Advances · ${shownAdvLabel}`} withMode
+        items={(emp.advances || []).map((a, idx) => ({ a, idx })).filter(({ a }) => showAdvInThisMonth(a)).map(({ a, idx }) => ({
           d: a.date, t: `${a.mode}${a.remark ? ' · ' + a.remark : ''}${a.paidBy ? ' · by ' + String(a.paidBy).split('@')[0] : ''}`,
           v: rupee(a.amount), idx, canDel: !monthSealed(a.date),
           sig: { date: a.date, amount: a.amount, mode: a.mode, id: a.id },
