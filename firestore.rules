@@ -108,12 +108,21 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
     // wUser = any active allowlisted user (staff/manager/owner) or bootstrap owner.
     function wUser() { return signedIn() && (bootstrapOwner() || (wExists() && wData().active == true)); }
     // entry + stock (staff allowed to read; write where the entry/floor flow needs it)
-    match /apps/welder/dispatches/{id}      { allow read, write: if wUser(); }
+    // >>> POWDER WELDER GRANT (managed by powder-coating/rules/compose.mjs)
+    // powder app (read only): LIST only powder-finish lines dated from its go-live; GET a physical powder line
+    // or any line it has already accepted (so a changed/voided line can still be watched). Pay data lives in
+    // rates/ledger/settlements/payments, which powder never reads.
+    match /apps/welder/dispatches/{id} {
+      allow write: if wUser();
+      allow get: if wUser() || (pwUser() && (pwWdPhysical(resource.data) || exists(/databases/$(database)/documents/apps/powdercoating/acceptance/$(id))));
+      allow list: if wUser() || (pwUser() && resource.data.finish == 'powder' && resource.data.date >= pwGoLive());
+    }
+    match /apps/welder/products/{id}        { allow read: if wUser() || pwUser(); allow write: if wManager(); }
+    // <<< POWDER WELDER GRANT
     match /apps/welder/plating_outbox/{id}  { allow read, write: if wUser(); }
     match /apps/welder/logs/{id}            { allow read, write: if wUser(); }
     match /apps/welder/meta/{id}            { allow read, write: if wUser(); }
     match /apps/welder/parties/{id}         { allow read, write: if wUser(); }
-    match /apps/welder/products/{id}        { allow read: if wUser(); allow write: if wManager(); }
     match /apps/welder/welders/{id}         { allow read: if wUser(); allow write: if wManager(); }
     match /apps/welder/components/{id}      { allow read: if wUser(); allow write: if wManager(); }
     match /apps/welder/receipts/{id}        { allow read: if wUser(); allow write: if wManager(); }
@@ -358,6 +367,295 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
         && request.resource.data.date is string && request.resource.data.date.size() == 10;
     }
 
+    // >>> POWDER BLOCK (managed by powder-coating/rules/compose.mjs — do not edit by hand)
+    // ---- Powder Coating (apps/powdercoating) — design v4.6, 21-Sep-2026 ----
+    // Roles from apps/powdercoating/users/{email}: role 'owner' | 'user1' | 'worker', active == true.
+    function pwPath() { return /databases/$(database)/documents/apps/powdercoating/users/$(tEmail()); }
+    function pwExists() { return tEmail() != '' && exists(pwPath()); }
+    function pwOwner() { return signedIn() && (bootstrapOwner() || (pwExists() && get(pwPath()).data.role == 'owner' && get(pwPath()).data.active == true)); }
+    function pwUser() { return signedIn() && (bootstrapOwner() || (pwExists() && get(pwPath()).data.active == true)); }
+    function pwRole() { return bootstrapOwner() ? 'owner' : get(pwPath()).data.get('role', 'worker'); }
+    // 'YYYY-MM-DD' → the moment that day STARTS in India (00:00 IST = previous day 18:30 UTC).
+    function pwDayStartIST(d) { return timestamp.date(int(d[0:4]), int(d[5:7]), int(d[8:10])) - duration.value(330, 'm'); }
+    // A REAL calendar date: shape, month 01-12, day within that month's length, leap years (÷4, not ÷100 unless ÷400).
+    function pwLeap(y) { return y % 4 == 0 && (y % 100 != 0 || y % 400 == 0); }
+    function pwDaysIn(y, m) { return m == 2 ? (pwLeap(y) ? 29 : 28) : (m in [4, 6, 9, 11] ? 30 : 31); }
+    function pwIsDate(d) {
+      return d is string && d.size() == 10 && d.matches('^20[0-9][0-9]-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$')
+        && int(d[8:10]) <= pwDaysIn(int(d[0:4]), int(d[5:7]));
+    }
+    // Edit window: the day has started in India (no tomorrow) and it started at most 3 days ago (today, yesterday, day before).
+    function pwRecent(d) { return pwDayStartIST(d) <= request.time && pwDayStartIST(d) >= request.time - duration.value(3, 'd'); }
+    function pwPeriodPath(p) { return /databases/$(database)/documents/apps/powdercoating/periods/$(p); }
+    function pwPeriodOpen(p) { return !exists(pwPeriodPath(p)) || !(get(pwPeriodPath(p)).data.get('status', 'open') in ['closed', 'closing']); }
+    function pwConfigPath() { return /databases/$(database)/documents/apps/powdercoating/meta/config; }
+    function pwGoLive() { return get(pwConfigPath()).data.goLiveDate; }
+    function pwWdPath(id) { return /databases/$(database)/documents/apps/welder/dispatches/$(id); }
+    function pwWd(id) { return get(pwWdPath(id)).data; }
+    // a welder line the powder dept physically receives: finish powder, qty > 0, not a pay-only row, dated from go-live
+    function pwWdPhysical(d) { return d.finish == 'powder' && d.qty is number && d.qty > 0 && d.get('payBasis', '') != 'final-dispatch'; }
+    function pwWdMatchesSnapshot(id, snap) {
+      return exists(pwWdPath(id)) && pwWdPhysical(pwWd(id))
+        && pwWd(id).qty == snap.qty && pwWd(id).get('date', '') == snap.date && pwWd(id).finish == snap.finish
+        && pwWd(id).get('productName', '') == snap.productName && pwWd(id).get('welderChallan', '') == snap.welderChallan
+        && pwWd(id).get('welder', '') == snap.welder && snap.date >= pwGoLive();
+    }
+    function pwMvPath(m) { return /databases/$(database)/documents/apps/powdercoating/movements/$(m); }
+    function pwMvBefore(m) { return get(pwMvPath(m)).data; }
+    function pwMvAfter(m) { return getAfter(pwMvPath(m)).data; }
+    function pwAccPath(id) { return /databases/$(database)/documents/apps/powdercoating/acceptance/$(id); }
+    function pwMv() { return request.resource.data; }
+    function pwQtyOk() { return pwMv().qty is int && pwMv().qty >= 1 && pwMv().qty <= 100000; }
+    function pwBase(id) {
+      return pwMv().keys().hasOnly(['id','type','date','period','productId','productName','qty','source','welder','welderDispatchId','welderChallan','qtySent','reason','note','reverses','opId','createdBy','createdByRole','deviceId','createdAt','clientAt','schemaVersion'])
+        && pwMv().id == id
+        && pwMv().createdBy == tEmail()
+        && pwMv().createdAt == request.time
+        && pwIsDate(pwMv().date)
+        && pwMv().period == pwMv().date[0:7]
+        && pwMv().productId is string && pwMv().productId.size() > 0 && pwMv().productId.size() <= 120
+        && pwMv().productName is string && pwMv().productName.size() <= 120
+        && pwMv().opId is string && pwMv().opId.size() > 0 && pwMv().opId.size() <= 80
+        && pwMv().deviceId is string && pwMv().deviceId.size() <= 40
+        && pwMv().createdByRole in ['worker','user1','owner'] && pwMv().createdByRole == pwRole()
+        && pwMv().clientAt is string && pwMv().clientAt.size() <= 40
+        && pwMv().schemaVersion is int && pwMv().schemaVersion >= 1;
+    }
+    function pwIsWelderReceive() { return pwMv().type == 'receive' && 'welderDispatchId' in pwMv() && pwMv().welderDispatchId is string && pwMv().welderDispatchId != ''; }
+    // direct receipt (no welder line): workers may book press / laser / other; 'welder' is NEVER a direct source;
+    // pre-go-live material from a welder without an app challan is owner-only (sources naveen / jitender).
+    function pwDirectSourceOk() {
+      return pwMv().source is string && pwMv().source != 'welder'
+        && (pwMv().source in ['press','laser','other'] || (pwOwner() && pwMv().source in ['naveen','jitender']));
+    }
+    // A welder receipt is only valid together with the acceptance transition written in the SAME operation:
+    // the acceptance (after) points at this movement, and the movement's key fields equal the acceptance's stored snapshot.
+    function pwWelderReceiveLinked(id) {
+      return existsAfter(pwAccPath(pwMv().welderDispatchId))
+        && ((id.matches('^rcv_.*') && getAfter(pwAccPath(pwMv().welderDispatchId)).data.lastOp.kind == 'receive' && getAfter(pwAccPath(pwMv().welderDispatchId)).data.lastOp.movementId == id)
+            || (id.matches('^fix_.*') && getAfter(pwAccPath(pwMv().welderDispatchId)).data.lastOp.kind == 'fix' && 'fix_' + getAfter(pwAccPath(pwMv().welderDispatchId)).data.lastOp.movementId == id))
+        && getAfter(pwAccPath(pwMv().welderDispatchId)).data.lastOp.opId == pwMv().opId
+        && pwMv().productId == getAfter(pwAccPath(pwMv().welderDispatchId)).data.productId
+        && pwMv().qtySent == getAfter(pwAccPath(pwMv().welderDispatchId)).data.snapshot.qty
+        && pwMv().welderChallan == getAfter(pwAccPath(pwMv().welderDispatchId)).data.snapshot.welderChallan
+        && pwMv().source == 'welder';
+    }
+    // Worker/User1 entry types. Owner may backdate; others only within the window. Period must be open for everyone.
+    function pwEntry(id) {
+      return pwMv().type in ['receive','coat_ok','rework','scrap'] && pwQtyOk()
+        && pwPeriodOpen(pwMv().period)
+        && (pwOwner() || pwRecent(pwMv().date))
+        && (pwMv().type != 'receive' || pwIsWelderReceive() || pwDirectSourceOk())
+        && (!pwIsWelderReceive() || (id.matches('^(fix_)*rcv_' + pwMv().welderDispatchId + '_[0-9]+$') && pwWelderReceiveLinked(id)))
+        && (pwMv().type != 'scrap' || (pwMv().reason is string && pwMv().reason.size() > 0));
+    }
+    function pwOpening(id) {
+      return pwMv().type == 'opening' && pwOwner() && pwMv().qty is int && pwMv().qty >= 0 && pwMv().qty <= 1000000
+        && id == 'opn_' + pwMv().productId
+        && pwPeriodOpen(pwMv().period)
+        && exists(pwConfigPath()) && pwMv().date == pwGoLive();
+    }
+    // Adjustment: owner, open period, and the period doc written in the same operation must point at it as the
+    // ONE effective adjustment for the product; if a previous pointer existed, that adjustment is reversed in the same write.
+    function pwAdjustment(id) {
+      return pwMv().type == 'adjustment' && pwOwner() && pwPeriodOpen(pwMv().period)
+        && pwMv().qty is int && pwMv().qty != 0 && pwMv().qty >= -100000 && pwMv().qty <= 100000
+        && pwMv().reason is string && pwMv().reason.size() > 0
+        && id.matches('^adj_' + pwMv().period + '_' + pwMv().productId + '_[0-9]+$')
+        && existsAfter(pwPeriodPath(pwMv().period))
+        && getAfter(pwPeriodPath(pwMv().period)).data.effAdj[pwMv().productId] == id
+        && (!exists(pwPeriodPath(pwMv().period))
+            || !('effAdj' in get(pwPeriodPath(pwMv().period)).data)
+            || !(pwMv().productId in get(pwPeriodPath(pwMv().period)).data.effAdj)
+            || existsAfter(pwMvPath('rev_' + get(pwPeriodPath(pwMv().period)).data.effAdj[pwMv().productId]))
+            || exists(pwMvPath('rev_' + get(pwPeriodPath(pwMv().period)).data.effAdj[pwMv().productId])));
+    }
+    function pwOrigPath() { return pwMvPath(request.resource.data.reverses); }
+    function pwOrig() { return get(pwOrigPath()).data; }
+    // Reversal: rev_<orig>; orig exists, is not a reversal and not an opening; copies the original's
+    // date/period/product/qty; the ORIGINAL's period must be open (owner reopens first, logged);
+    // owner any age, else own entry within 2 days of the ORIGINAL's createdAt.
+    function pwReversal(id) {
+      return pwMv().type == 'reversal' && pwMv().reverses is string && id == 'rev_' + pwMv().reverses
+        && exists(pwOrigPath()) && pwOrig().type != 'reversal' && pwOrig().type != 'opening'
+        && pwMv().productId == pwOrig().productId && pwMv().qty == pwOrig().qty
+        && pwMv().date == pwOrig().date && pwMv().period == pwOrig().period
+        && pwPeriodOpen(pwOrig().period)
+        && (pwOwner() || (pwOrig().type in ['receive','coat_ok','rework','scrap']
+            && pwOrig().createdBy == tEmail()
+            && request.time - pwOrig().createdAt <= duration.value(2, 'd')));
+    }
+    match /apps/powdercoating/movements/{id} {
+      allow read: if pwUser();
+      allow update, delete: if false;
+      allow create: if pwUser() && pwBase(id) && (pwEntry(id) || pwOpening(id) || pwAdjustment(id) || pwReversal(id));
+    }
+
+    // acceptance/{welderDispatchId}: only meaningful together with the ledger, so every write must be
+    // consistent with movements written in the SAME operation, and those movements must be NEW in this
+    // operation (not existing before it) so a transition can never be replayed against old documents.
+    //   receive → seq+1, rcv_<id>_<seq> is new, is a welder receive for this dispatch/product/opId/creator,
+    //             and receivedTotal grew by exactly its qty
+    //   fix     → rev_<orig> and fix_<orig> are new and linked; delta = fix.qty − orig.qty
+    //   cancel  → rev_<orig> is new and linked; delta = −orig.qty; status back to open
+    //   close   → nothing changes but the status (open → short-closed)
+    // The welder snapshot, productId and dispatch id never change after the first write.
+    function pwAcc() { return request.resource.data; }
+    function pwAccPrev() { return resource.data; }
+    function pwNewMv(m) { return !exists(pwMvPath(m)) && existsAfter(pwMvPath(m)); }
+    function pwAccShape(id) {
+      return pwAcc().welderDispatchId == id && pwAcc().receivedTotal is int && pwAcc().receivedTotal >= 0
+        && pwAcc().seq is int && pwAcc().seq >= 0
+        && pwAcc().status in ['open','complete','short-closed']
+        && pwAcc().lastOp is map && pwAcc().lastOp.kind in ['receive','fix','cancel','close']
+        && pwAcc().lastOp.by == tEmail() && pwAcc().lastOp.opId is string && pwAcc().lastOp.opId.size() > 0
+        && pwAcc().snapshot is map && pwAcc().snapshot.qty is number
+        && pwAcc().productId is string && pwAcc().productId.size() > 0;
+    }
+    function pwAccStatusOk() {
+      return (pwAcc().status == 'short-closed' && pwAcc().lastOp.kind in ['close','fix'])
+        || (pwAcc().status == 'complete' && pwAcc().receivedTotal >= pwAcc().snapshot.qty)
+        || (pwAcc().status == 'open' && pwAcc().receivedTotal < pwAcc().snapshot.qty);
+    }
+    // the ORIGINAL movement a fix/cancel refers to must be THIS acceptance's own welder receipt
+    function pwAccOrigBelongs(id) {
+      return pwMvBefore(pwAcc().lastOp.movementId).type == 'receive' && pwMvBefore(pwAcc().lastOp.movementId).source == 'welder'
+        && pwMvBefore(pwAcc().lastOp.movementId).welderDispatchId == id
+        && pwMvBefore(pwAcc().lastOp.movementId).productId == pwAcc().productId
+        && pwMvBefore(pwAcc().lastOp.movementId).qtySent == pwAcc().snapshot.qty
+        && pwMvBefore(pwAcc().lastOp.movementId).welderChallan == pwAcc().snapshot.welderChallan;
+    }
+    function pwAccMvLinked(m, id) {
+      return pwMvAfter(m).type == 'receive' && pwMvAfter(m).welderDispatchId == id
+        && pwMvAfter(m).productId == pwAcc().productId && pwMvAfter(m).opId == pwAcc().lastOp.opId
+        && pwMvAfter(m).createdBy == tEmail();
+    }
+    function pwAccReceive(id, prevTotal, prevSeq) {
+      return pwAcc().lastOp.kind == 'receive' && pwAcc().seq == prevSeq + 1
+        && pwAcc().lastOp.movementId == 'rcv_' + id + '_' + string(pwAcc().seq)
+        && pwNewMv(pwAcc().lastOp.movementId) && pwAccMvLinked(pwAcc().lastOp.movementId, id)
+        && pwAcc().receivedTotal == prevTotal + pwMvAfter(pwAcc().lastOp.movementId).qty;
+    }
+    function pwAccFix(id, prevTotal) {
+      return pwAcc().lastOp.kind == 'fix' && pwAcc().seq == pwAccPrev().seq
+        && exists(pwMvPath(pwAcc().lastOp.movementId)) && pwAccOrigBelongs(id)
+        && pwNewMv('rev_' + pwAcc().lastOp.movementId) && pwNewMv('fix_' + pwAcc().lastOp.movementId)
+        && pwMvAfter('rev_' + pwAcc().lastOp.movementId).reverses == pwAcc().lastOp.movementId
+        && pwMvAfter('rev_' + pwAcc().lastOp.movementId).opId == pwAcc().lastOp.opId
+        && pwAccMvLinked('fix_' + pwAcc().lastOp.movementId, id)
+        && pwAcc().receivedTotal == prevTotal - pwMvBefore(pwAcc().lastOp.movementId).qty + pwMvAfter('fix_' + pwAcc().lastOp.movementId).qty;
+    }
+    function pwAccCancel(id, prevTotal) {
+      return pwAcc().lastOp.kind == 'cancel' && pwAcc().seq == pwAccPrev().seq && pwAcc().status == 'open'
+        && exists(pwMvPath(pwAcc().lastOp.movementId)) && pwAccOrigBelongs(id)
+        && pwNewMv('rev_' + pwAcc().lastOp.movementId)
+        && pwMvAfter('rev_' + pwAcc().lastOp.movementId).reverses == pwAcc().lastOp.movementId
+        && pwMvAfter('rev_' + pwAcc().lastOp.movementId).opId == pwAcc().lastOp.opId
+        && pwAcc().receivedTotal == prevTotal - pwMvBefore(pwAcc().lastOp.movementId).qty;
+    }
+    function pwAccClose() {
+      return pwAcc().lastOp.kind == 'close' && pwAcc().seq == pwAccPrev().seq && pwAcc().status == 'short-closed'
+        && pwAcc().receivedTotal == pwAccPrev().receivedTotal && pwAccPrev().status == 'open';
+    }
+    match /apps/powdercoating/acceptance/{id} {
+      allow read: if pwUser();
+      allow delete: if false;
+      // first acceptance: the snapshot must equal the REAL welder dispatch (server-side, not trusted from the client)
+      allow create: if pwUser() && pwAccShape(id) && pwAccStatusOk() && pwAccReceive(id, 0, 0)
+        && pwWdMatchesSnapshot(id, pwAcc().snapshot);
+      // more material on a partial line: the live welder dispatch must still agree with the stored snapshot (the freeze, enforced)
+      allow update: if pwUser() && pwAccShape(id) && pwAccStatusOk()
+        && pwAcc().snapshot == pwAccPrev().snapshot && pwAcc().productId == pwAccPrev().productId
+        && ((pwAccReceive(id, pwAccPrev().receivedTotal, pwAccPrev().seq) && pwAccPrev().status == 'open' && pwWdMatchesSnapshot(id, pwAccPrev().snapshot))
+            || pwAccFix(id, pwAccPrev().receivedTotal) || pwAccCancel(id, pwAccPrev().receivedTotal) || pwAccClose());
+    }
+    // daily/{date}: shape-locked; rev advances by exactly one; attributed to the caller; non-negative numbers.
+    function pwDay() { return request.resource.data; }
+    function pwDayShape(date) {
+      return pwDay().keys().hasOnly(['id','date','period','noProduction','meterReading','meterAt','freshKg','reclaimedKg','notes','rev','updatedBy','updatedAt','updatedAtClient','createdBy','createdAt','history'])
+        && pwDay().id == date && pwDay().date == date && pwDay().period == date[0:7]
+        && pwDay().noProduction is bool
+        && (pwDay().meterReading == null || (pwDay().meterReading is number && pwDay().meterReading >= 0))
+        && (pwDay().freshKg == null || (pwDay().freshKg is number && pwDay().freshKg >= 0 && pwDay().freshKg <= 10000))
+        && (pwDay().reclaimedKg == null || (pwDay().reclaimedKg is number && pwDay().reclaimedKg >= 0 && pwDay().reclaimedKg <= 10000))
+        && pwDay().notes is string && pwDay().notes.size() <= 500
+        && pwDay().updatedBy == tEmail() && pwDay().updatedAt == request.time && pwDay().rev is int
+        && pwDay().history is list && pwDay().history.size() <= 20;
+    }
+    // history = previous entries + exactly one new summary (of the doc being replaced), capped at 20 (oldest dropped)
+    function pwDayHistoryAppended() {
+      return pwDay().history is list && resource.data.history is list
+        && ((resource.data.history.size() < 20 && pwDay().history.size() == resource.data.history.size() + 1
+             && (resource.data.history.size() == 0 || pwDay().history[0:resource.data.history.size()] == resource.data.history))
+            || (resource.data.history.size() == 20 && pwDay().history.size() == 20 && pwDay().history[0:19] == resource.data.history[1:20]))
+        && pwDay().history[pwDay().history.size() - 1] is map
+        && pwDay().history[pwDay().history.size() - 1].get('by', '') == resource.data.updatedBy;
+    }
+    match /apps/powdercoating/daily/{date} {
+      allow read: if pwUser();
+      allow delete: if false;
+      allow create: if pwUser() && pwIsDate(date) && pwDayShape(date) && pwDay().rev == 1 && pwDay().createdBy == tEmail() && pwDay().history.size() == 0
+        && pwPeriodOpen(date[0:7]) && (pwOwner() || pwRecent(date));
+      allow update: if pwUser() && pwIsDate(date) && pwDayShape(date) && pwDay().rev == resource.data.rev + 1
+        && pwDay().createdBy == resource.data.createdBy && pwDay().createdAt == resource.data.createdAt
+        && pwDayHistoryAppended()
+        && pwPeriodOpen(date[0:7]) && (pwOwner() || pwRecent(date));
+    }
+    // periods/{YYYY-MM}: owner-only, explicit state machine  open → closing → closed → open (reopen with reason).
+    //   open/absent → open: count, adjSeq, effAdj may change
+    //   open → closing: closingToken set; nothing else changes
+    //   closing → closed | open: only by the operation holding closingToken; count unchanged
+    //   closed → open: reopenReason required; count unchanged
+    function pwPer() { return request.resource.data; }
+    function pwPerStatus(d) { return d.get('status', 'open'); }
+    function pwPerKeys() { return pwPer().keys().hasOnly(['id','status','countByProduct','countedAt','countedBy','adjSeq','effAdj','closingToken','closeOpToken','closingAt','closingAtTs','closingBy','closedAt','closedBy','bookAtClose','reopenedAt','reopenedBy','reopenReason','recoveredAt','recoveredBy','updatedAt']); }
+    match /apps/powdercoating/periods/{id} {
+      allow read: if pwUser();
+      allow delete: if false;
+      allow create: if pwOwner() && pwPerKeys() && pwPer().id == id && pwPerStatus(pwPer()) == 'open';
+      allow update: if pwOwner() && pwPerKeys() && pwPer().id == id && (
+        (pwPerStatus(resource.data) == 'open' && pwPerStatus(pwPer()) == 'open')
+        || (pwPerStatus(resource.data) == 'open' && pwPerStatus(pwPer()) == 'closing'
+            && pwPer().closingToken is string && pwPer().closingToken.size() > 0 && pwPer().closingAtTs == request.time
+            && pwPer().get('countByProduct', {}) == resource.data.get('countByProduct', {}))
+        // the finishing write must PRESENT the token in closeOpToken (a merge would silently inherit closingToken itself)
+        || (pwPerStatus(resource.data) == 'closing' && pwPerStatus(pwPer()) in ['closed', 'open']
+            && pwPer().get('closeOpToken', '') == resource.data.closingToken
+            && pwPer().get('countByProduct', {}) == resource.data.get('countByProduct', {}))
+        // stranded closing (connection died mid-handshake): owner may release it back to open after 10 minutes
+        || (pwPerStatus(resource.data) == 'closing' && pwPerStatus(pwPer()) == 'open'
+            && resource.data.closingAtTs is timestamp && request.time - resource.data.closingAtTs > duration.value(10, 'm')
+            && pwPer().get('countByProduct', {}) == resource.data.get('countByProduct', {}))
+        || (pwPerStatus(resource.data) == 'closed' && pwPerStatus(pwPer()) == 'open'
+            && pwPer().reopenReason is string && pwPer().reopenReason.size() > 0
+            && pwPer().get('countByProduct', {}) == resource.data.get('countByProduct', {})));
+    }
+    // meta/config: the go-live date is written ONCE (create only), never updated or deleted — it anchors the welder
+    // queue, the opening date and the rules; changing it later would move three accounting boundaries at once.
+    match /apps/powdercoating/meta/config {
+      allow read: if pwUser();
+      allow update, delete: if false;
+      allow create: if pwOwner()
+        && request.resource.data.keys().hasOnly(['goLiveDate','setBy','setAt'])
+        && pwIsDate(request.resource.data.goLiveDate)
+        && request.resource.data.setBy == tEmail() && request.resource.data.setAt == request.time;
+    }
+    match /apps/powdercoating/meta/{id}    { allow read: if pwUser(); allow write: if pwOwner() && id != 'config'; }
+    // logs: OWNER actions only, fixed action set, shape-locked; create-only. Never an audit source of truth
+    // (movements / periods / config carry their own createdBy / closedBy / setBy).
+    match /apps/powdercoating/logs/{id} {
+      allow read: if pwUser();
+      allow update, delete: if false;
+      allow create: if pwOwner() && request.resource.data.by == tEmail() && request.resource.data.role == 'owner'
+        && request.resource.data.keys().hasOnly(['id','ts','createdAt','action','detail','by','role'])
+        && request.resource.data.id == id && request.resource.data.ts is string && request.resource.data.detail is map
+        && request.resource.data.action in ['MONTH_COUNT','PERIOD_CLOSE_REFUSED','PERIOD_CLOSING_RECOVERED','PERIOD_REOPEN','USER_SET','PRODUCT_ALIAS']
+        && request.resource.data.createdAt == request.time;
+    }
+    // users allowlist: any signed-in device may READ (to resolve role at login); only owner WRITES
+    // users: a signed-in Google account may read ITS OWN doc (to resolve its role); only the owner lists/writes
+    match /apps/powdercoating/users/{id}   { allow get: if nonAnon() && (id == tEmail() || pwOwner()); allow list: if pwOwner(); allow write: if pwOwner(); }
+    // <<< POWDER BLOCK
     // Read-meter telemetry (usage_reads/{YYYY-MM-DD}): every app instance batches
     // increments into totals.<app>. Write-only for any signed-in user (incl. anon
     // workers) so ALL apps can report; shape-locked to counters, no client reads.
