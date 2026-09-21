@@ -180,7 +180,7 @@ function LoaderCard({ emp, h, open, onToggle, onClear, onUndo }) {
                 <div key={c.id} className="flex items-center justify-between gap-2 border-t border-slate-100 py-1">
                   <span className="text-slate-600">
                     till <b>{fmt(c.till)}</b>{c.seed ? <span className="text-slate-400"> · opening</span>
-                      : <span className="text-slate-400"> · {c.hours}h · earned {rupee(c.earned)} · paid {rupee(c.paid)}{c.carry ? ` · left ${rupee(c.carry)}` : ''}</span>}
+                      : <span className="text-slate-400"> · {c.hours}h{c.adjHours ? <span className="text-amber-700"> (machine {c.machineHours ?? '—'}h, {c.adjHours > 0 ? '+' : ''}{c.adjHours}h: {c.adjReason})</span> : ''} · earned {rupee(c.earned)} · paid {rupee(c.paid)}{c.carry ? ` · left ${rupee(c.carry)}` : ''}</span>}
                   </span>
                   {i === 0 && !c.seed && <button onClick={() => onUndo(c)} className="text-[11px] text-slate-500 underline shrink-0">Undo</button>}
                 </div>
@@ -196,10 +196,16 @@ function LoaderCard({ emp, h, open, onToggle, onClear, onUndo }) {
 function ClearSheet({ emp, punchDoc, maxTill, user, onClose, onDone }) {
   const [till, setTill] = useState(maxTill);
   const [casualDays, setCasualDays] = useState('');
+  // Owner 21-09-2026 "add override": hours can be adjusted ± with a reason. The machine hours stay as
+  // they are; the adjustment and its reason are stored inside the clear entry (adjHours / adjReason).
+  const [adj, setAdj] = useState('');
+  const [adjReason, setAdjReason] = useState('');
   const h = useMemo(() => openHisab(emp, punchDoc, till), [emp, punchDoc, till]);
   const casual = !!emp.appOnly;
   const extraHours = casual ? r2((Number(casualDays) || 0) * h.std) : 0;
-  const earned = r2(h.earned + (casual ? (Number(casualDays) || 0) * h.wage : 0));
+  const adjHours = r2(Number(adj) || 0);
+  const totalHours = r2(h.hours + extraHours + adjHours);
+  const earned = r2((totalHours * h.wage) / h.std);
   const due = r2(h.carryIn + earned - h.paid);
   const [cash, setCash] = useState(() => String(Math.max(0, Math.round(due))));
   const [mode, setMode] = useState('cash');
@@ -216,6 +222,8 @@ function ClearSheet({ emp, punchDoc, maxTill, user, onClose, onDone }) {
   async function go() {
     if (till < h.from) { alert(`Pick a date on or after ${fmt(h.from)}.`); return; }
     if (casual && !(Number(casualDays) >= 0 && casualDays !== '')) { alert('Enter how many days the casual loaders worked (0 if none).'); return; }
+    if (adjHours !== 0 && !adjReason.trim()) { alert('Write the reason for adjusting the hours (e.g. "left early 16/9, no out punch").'); return; }
+    if (totalHours < 0) { alert('Adjusted hours cannot go below zero.'); return; }
     setBusy(true);
     try {
       const advIds = h.cash.filter((c) => c.kind === 'adv').map((c) => c.key);
@@ -226,8 +234,9 @@ function ClearSheet({ emp, punchDoc, maxTill, user, onClose, onDone }) {
         advIds.push(ids.adv);
       }
       await addHisabClear(emp.code, {
-        id: ids.clear, from: h.from, till, hours: r2(h.hours + extraHours), earned,
+        id: ids.clear, from: h.from, till, hours: totalHours, machineHours: h.hours, earned,
         ...(casual ? { casualDays: Number(casualDays) || 0 } : {}),
+        ...(adjHours !== 0 ? { adjHours, adjReason: adjReason.trim() } : {}),
         carryIn: h.carryIn, paid: r2(h.paid + cashNow), cashNow, mode, carry: left,
         advIds, payKeys, by: user.email, at: new Date().toISOString(),
       });
@@ -252,8 +261,20 @@ function ClearSheet({ emp, punchDoc, maxTill, user, onClose, onDone }) {
             <input type="number" inputMode="decimal" value={casualDays} onChange={(e) => setCasualDays(e.target.value)}
               className="mt-1 w-full border-2 border-slate-200 rounded-xl px-3 py-2.5 text-base text-center font-semibold" /></label>
         )}
+        <div className="grid grid-cols-[1fr_auto] gap-2 items-end">
+          <label className="block text-sm text-slate-600">Adjust hours (± , optional)
+            <input type="number" inputMode="decimal" step="1" value={adj} placeholder="0" onChange={(e) => setAdj(e.target.value)}
+              className="mt-1 w-full border-2 border-slate-200 rounded-xl px-3 py-2.5 text-base text-center font-semibold" /></label>
+          <div className="text-xs text-slate-500 pb-3 whitespace-nowrap">machine {h.hours}h → <b className="text-slate-800">{totalHours}h</b></div>
+        </div>
+        {adjHours !== 0 && (
+          <label className="block text-sm text-slate-600">Reason (required)
+            <input type="text" value={adjReason} placeholder="e.g. 16/9 left early, no out punch" onChange={(e) => setAdjReason(e.target.value)}
+              className="mt-1 w-full border-2 border-amber-300 rounded-xl px-3 py-2.5 text-base" /></label>
+        )}
         <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-sm bg-slate-50 rounded-lg p-2">
           <span className="text-slate-500">{fmt(h.from)} → {fmt(till)}</span><span className="text-right">{casual ? `${casualDays || 0} din` : `${h.hours}h = ${dinGhante(h.hours, h.std)}`}</span>
+          {adjHours !== 0 && (<><span className="text-amber-700">Adjusted {adjHours > 0 ? '+' : ''}{adjHours}h</span><span className="text-right text-amber-700">{totalHours}h = {dinGhante(totalHours, h.std)}</span></>)}
           {h.carryIn !== 0 && (<><span className="text-slate-500">From last hisab</span><span className="text-right">{rupee(h.carryIn)}</span></>)}
           <span className="text-slate-500">Earned</span><span className="text-right font-semibold">{rupee(earned)}</span>
           <span className="text-slate-500">Already given</span><span className="text-right font-semibold">− {rupee(h.paid)}</span>
