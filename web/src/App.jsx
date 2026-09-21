@@ -22,7 +22,7 @@ const TABS = [
   { key: 'incoming', label: 'Hisab advances — accept', feature: 'salary' },
   { key: 'shadow', label: 'Day check (shadow)', feature: 'shadow' },
   { key: 'welders', label: 'Welders (contractor-paid)', feature: 'salary' },
-  { key: 'loading', label: '🚚 Loading hisab', feature: 'salary' },
+  { key: 'loading', label: '🚚 Loading', feature: 'salary', primary: true },   // owner 21-09-2026: on the bar, not under More
   { key: 'archive', label: 'Removed staff records', feature: 'archive' },
 ];
 

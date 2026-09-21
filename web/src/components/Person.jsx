@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { isLoader } from '../lib/loadingHisab';
 import { needsManualDays, loadEmployee, loadAllAttendance, loadPunchDoc, saveEmployee, saveMonth, addAdvance, deleteAdvanceAt, addIncrement, settleAndResign, checkActionPassword, queueJob, queueLock, queueUnlock, lockMonthDirect, unlockMonthDirect, editNameDept, istMonth, removeWorker, restoreWorker, deleteWorkerHard, workerEverPaid, attributeAdvanceMk, advanceMonth, settleCashClash, settleClashMessage } from '../lib/data';
 import { monthCtx, payFor, rupee, paymentBreakdown } from '../lib/paycalc';
 import { payslipOnePdf, sharePdf } from '../lib/salaryPdf';
@@ -134,6 +135,7 @@ export default function Person({ code, mk, user, onBack }) {
   };
   const doLock = (cash, account, reason) => act(async () => {
     if (needsManualDays(emp, mk)) { alert(`Enter ${emp.name}'s days first (Adjust this month → Override days / OT) — locking now would close the month at 0 days.`); return; }
+    if (isLoader(emp) && !window.confirm(`${emp.name} is a loader — he is paid on hisab dates in the 🚚 Loading tab, not month-wise.\n\nLock this month anyway (only for closing the register)?`)) return;
     // Snapshot the salary breakdown AT LOCK so the paid month always shows these exact figures, immune
     // to any later rule change. advanceCarry is always 0 now (advance folds fully into the balance).
     const breakdown = paymentBreakdown(pay);

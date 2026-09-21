@@ -5,6 +5,7 @@ import { SHIFT_HOURS } from '../lib/payroll';
 import Person from './Person.jsx';
 import SelfPunchCard from './SelfPunchCard.jsx';
 import NamePick from './NamePick.jsx';
+import { isLoader } from '../lib/loadingHisab';
 import { payslipAllPdf, lockedRegisterPdf, sharePdf, advanceSplit, advancesPdf, checkSheetPdf, giveSalaryRegisterPdf } from '../lib/salaryPdf';
 import { shareCheckSheet, shareSalaryRegisterXlsx } from '../lib/checksheet';
 import WorkerSummary from './WorkerSummary.jsx';
@@ -32,6 +33,9 @@ function OwnerSalary({ user }) {
   // Contractor-paid welders are OUT of this screen by default (owner rule 2026-08-19) — they are paid
   // per piece in the welder app, so counting them here shows money this app does not owe. Toggle to peek.
   const [showWelders, setShowWelders] = useState(false);
+  // Loaders are paid on irregular hisabs via the 🚚 Loading hisab tab (owner 21-09-2026: "they are seen
+  // with normal staff with pending payment") — hidden here by default, like contractor-paid welders.
+  const [showLoaders, setShowLoaders] = useState(false);
   const [filter, setFilter] = useState('all');       // all | topay | paid — chips above the list
   const [showMoney, setShowMoney] = useState(false); // 💸 total box tapped open → cash/account detail
   const [showTools, setShowTools] = useState(false); // 🧰 rare tools folded away (owner 2026-08-11: screen too busy)
@@ -70,6 +74,7 @@ function OwnerSalary({ user }) {
     if (!emps) return [];
     const allRows = emps.filter((e) => e.amount || e.wage)
       .filter((e) => showWelders || !isContractorPaid(e))
+      .filter((e) => showLoaders || !isLoader(e))
       .map((e) => ({ emp: e, ...payFor(e, attMap, mk, ctx, 0, punches[e.code]) }));
     // PAST months hide no-activity rows (owner 2026-08-11): a worker whose days/hours are only in the
     // CURRENT month (new joiner) must not appear in earlier months — with a salary set, a zero-attendance
@@ -83,7 +88,7 @@ function OwnerSalary({ user }) {
         || (r.emp.advances || []).some((ad) => advanceMonth(ad) === mk);
     };
     return mk === istMonth() ? allRows : allRows.filter(rowRelevant);
-  }, [emps, attMap, punches, mk, ctx, showWelders]);
+  }, [emps, attMap, punches, mk, ctx, showWelders, showLoaders]);
 
   if (openCode) return <Person code={openCode} mk={mk} user={user} onBack={() => { setOpenCode(''); reload(); }} />;
   if (emps === null) return <p className="text-gray-500">Loading…</p>;
@@ -149,6 +154,7 @@ function OwnerSalary({ user }) {
   // Skipped when the bonus is already in payable via md.perfectBonusPaid (would double it).
   const payNow = (r, mode) => {
     if (needsManualDays(r.emp, mk)) { alert(`Enter ${r.emp.name}'s days for this month first — paying now would lock the month at 0 days.`); return; }
+    if (isLoader(r.emp)) { alert(`${r.emp.name} is a loader — pay him from the 🚚 Loading hisab tab (cleared-till dates), not here.`); return; }
     const bonus = !!r.pay.perfectEligible && !(r.pay.perfectBonus > 0) && (r.pay.perDay || 0) > 0;
     const full = String(Math.max(0, Math.round(((r.pay.payable || 0) + (bonus ? r.pay.perDay : 0)) * 100) / 100));
     setPayC({ r, cash: mode === 'account' ? '0' : full, account: mode === 'account' ? full : '0', bonusDay: bonus });
@@ -288,6 +294,7 @@ function OwnerSalary({ user }) {
           {mk === istMonth() && <SelfPunchCard />}
           <label className="flex items-center gap-2 text-xs text-slate-500 px-1"><input type="checkbox" className="w-5 h-5 accent-slate-700" checked={showRemoved} onChange={(e) => setShowRemoved(e.target.checked)} /> Show removed/resigned staff (kept in the sheet for costing)</label>
           <label className="flex items-center gap-2 text-xs text-slate-500 px-1"><input type="checkbox" className="w-5 h-5 accent-slate-700" checked={showWelders} onChange={(e) => setShowWelders(e.target.checked)} /> Include contractor-paid welders <span className="text-slate-400">(they are paid per piece in the welder app — see the Welders tab; including them here adds them to totals and the register)</span></label>
+          <label className="flex items-center gap-2 text-xs text-slate-500 px-1"><input type="checkbox" className="w-5 h-5 accent-slate-700" checked={showLoaders} onChange={(e) => setShowLoaders(e.target.checked)} /> Include loading/unloading staff <span className="text-slate-400">(paid on hisab dates in the 🚚 Loading hisab tab, not month-wise; shown here only for the register)</span></label>
           <p className="text-[11px] text-slate-500 px-1">Tap 💵 Cash or 🏦 Account → a box opens: split across <b>Cash + Account</b>, tick <b>🎯 Bonus day</b> on top if giving one, then <b>Pay &amp; lock</b> (Undo if you mis-tap). Tap the <b>name</b> for OT / details. <span className="text-slate-400">(pay v6)</span></p>
         </div>
       )}
@@ -469,6 +476,7 @@ function FastPaySheet({ payC, busy, onChange, onCancel, onConfirm }) {
 function OwnerRow({ r, mk, busy, justPaidMode, user, onName, onPay, onUndo, onAdvanceSaved, onAdvanceRevert, onDaysSaved }) {
   const { emp, md, pay } = r;
   const noDays = needsManualDays(emp, mk);
+  const loader = isLoader(emp);
   const [showDays, setShowDays] = useState(false);
   // 💸 inline advance box (null = closed). Owner writes the advance DIRECTLY (addAdvanceDirect) so
   // it shows INSTANTLY — no 5-min queue wait — then reflects in this row + the money totals at once.
@@ -565,10 +573,13 @@ function OwnerRow({ r, mk, busy, justPaidMode, user, onName, onPay, onUndo, onAd
       )}
       {/* not settled → ONE-TAP pay (full amount, that method, locks instantly) + 💸 Advance */}
       {!isLocked && emp.appOnly && <ManualDaysBox emp={emp} md={md} mk={mk} missing={noDays} onSaved={onDaysSaved} />}
+      {!isLocked && loader && (
+        <p className="mt-2 bg-sky-50 border border-sky-200 rounded-xl px-3 py-2 text-[12px] text-sky-900">🚚 Paid on hisab dates in the <b>Loading hisab</b> tab — not month-wise here. This figure is for the register only.</p>
+      )}
       {!isLocked && (
         <div className="mt-3 space-y-2">
           <div className={`flex gap-2 ${noDays ? 'opacity-40 pointer-events-none' : ''}`}>
-            {owes ? (
+            {loader ? null : owes ? (
               <button disabled={busy} onClick={() => onPay('cash')} className="flex-1 bg-slate-800 text-white rounded-2xl py-4 font-bold text-sm disabled:opacity-50 active:scale-95 transition-all">Settle &amp; lock <span className="font-normal opacity-80">(carries {rupee(Math.abs(payable))})</span></button>
             ) : (
               <>
