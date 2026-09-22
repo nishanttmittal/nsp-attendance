@@ -665,6 +665,16 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
         && request.resource.data.keys().hasOnly(['totals', 'updatedAt']);
     }
 
+    // 2026-09-22: Oracle WhatsApp sender (send-only VM) — scoped email/password login, NO service key
+    // on that box. May list/claim/mark alert-queue docs and enqueue new ones; nothing else is visible.
+    function isWaSender() { return request.auth != null && request.auth.uid == 'h9CtDCooxzSr3C0CCxjo3cPF0w63'; }
+    match /wa_outbox/{id} {
+      allow read: if isWaSender();
+      allow create: if isWaSender() && request.resource.data.status == 'pending' && request.resource.data.text is string;
+      allow update: if isWaSender() && request.resource.data.diff(resource.data).affectedKeys()
+        .hasOnly(['status', 'claimedAt', 'claimedBy', 'sentAt', 'sentBy', 'error', 'erroredAt', 'expiredAt', 'skipOracle']);
+    }
+
     // Lock everything else.
     match /{document=**} { allow read, write: if false; }
   }

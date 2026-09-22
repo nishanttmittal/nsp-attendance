@@ -142,10 +142,10 @@ async function gatherState(page) {
     deptRatio[d] = { present, total, pct: total ? Math.round((present / total) * 100) : 0 };
   }
 
-  // dinner headcount = present staff who stayed past 17:30 (out-time after 17:30, or still in),
+  // dinner headcount = present staff who stayed past 17:45 (out-time after 17:45, or still in),
   // excluding welders. Robust whether the job runs at 17:45 or later in the evening.
   const toMin = t => { const m = String(t || '').match(/(\d{1,2}):(\d{2})/); return m ? (+m[1]) * 60 + (+m[2]) : null; };
-  const CUTOFF = 17 * 60 + 30; // 17:30
+  const CUTOFF = 17 * 60 + 45; // 17:45 — samosa served 18:00; punched out by 17:45 = not counted (owner 22-09-2026, aligned with the Oracle samosa post)
   const stayedPastShift = r => { const o = toMin(r.outT); return o === null || o > CUTOFF; };
   const stillIn = present.rows.filter(r => !r.outT || !r.outT.trim());
   const mealRows = present.rows.filter(r => stayedPastShift(r) && (r.dept || '').toUpperCase() !== MEAL_EXCLUDE_DEPT);
