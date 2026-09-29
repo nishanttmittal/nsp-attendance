@@ -86,7 +86,7 @@ export default function LoadingHisab({ user, readOnly = false }) {
         <p className="text-[11px] text-amber-700 px-1">⚠ Machine data is in only till {fmt(synced)}. Days after that are not counted yet — clear only till {fmt(synced)}.</p>
       )}
 
-      <button onClick={shareSlip} className="w-full bg-green-600 text-white rounded-2xl py-3 font-bold active:scale-95 transition-all">📤 Share slip on WhatsApp</button>
+      {!readOnly && <button onClick={shareSlip} className="w-full bg-green-600 text-white rounded-2xl py-3 font-bold active:scale-95 transition-all">📤 Share slip on WhatsApp</button>}   {/* owner 29-09-2026: no share slip for the manager */}
 
       {!rows.length && <p className="text-sm text-slate-400 text-center py-4">No loading staff found.</p>}
       {rows.map(({ emp, h }) => (
