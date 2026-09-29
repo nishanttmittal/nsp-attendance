@@ -22,7 +22,7 @@ const TABS = [
   { key: 'incoming', label: 'Hisab advances — accept', feature: 'salary' },
   { key: 'shadow', label: 'Day check (shadow)', feature: 'shadow' },
   { key: 'welders', label: 'Welders (contractor-paid)', feature: 'salary' },
-  { key: 'loading', label: '🚚 Loading', feature: 'salary', primary: true },   // owner 21-09-2026: on the bar, not under More
+  { key: 'loading', label: '🚚 Loading', feature: 'loadingView', primary: true },   // manager: view-only (29-09-2026)   // owner 21-09-2026: on the bar, not under More
   { key: 'archive', label: 'Removed staff records', feature: 'archive' },
 ];
 
@@ -123,7 +123,7 @@ export default function App() {
             {active === 'salary' && canSee(user.role, 'salary') && <Salary user={user} />}
             {active === 'incoming' && canSee(user.role, 'salary') && <IncomingAdvances user={user} />}
             {active === 'welders' && canSee(user.role, 'salary') && <Welders />}
-            {active === 'loading' && canSee(user.role, 'salary') && <LoadingHisab user={user} />}
+            {active === 'loading' && canSee(user.role, 'loadingView') && <LoadingHisab user={user} readOnly={!canSee(user.role, 'salary')} />}
             {active === 'archive' && canSee(user.role, 'archive') && <Archive />}
             {active === 'problems' && canSee(user.role, 'problems') && <Problems user={user} />}
             {active === 'shadow' && canSee(user.role, 'shadow') && <Shadow />}

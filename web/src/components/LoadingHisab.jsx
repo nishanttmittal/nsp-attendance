@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { loadEmployees, loadAllPunches, addAdvanceDirect, addHisabClear, removeHisabClear } from '../lib/data';
+import { loadEmployees, loadAllPunches, loadLoadingMirror, addAdvanceDirect, addHisabClear, removeHisabClear } from '../lib/data';
 import { rupee } from '../lib/paycalc';
 import { isLoader, openHisab, punchesSyncedTill, lastPunchDate, addDays, todayIST, dinGhante, r2 } from '../lib/loadingHisab';
 
@@ -13,15 +13,24 @@ const fmt = (ymd) => (ymd ? `${ymd.slice(8, 10)}/${ymd.slice(5, 7)}` : '—');
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const dow = (ymd) => DOW[new Date(ymd + 'T00:00:00').getDay()];
 
-export default function LoadingHisab({ user }) {
+// readOnly (manager, owner 29-09-2026 "no modification just viewing"): figures come from the worker's
+// att_meta/loading_hisab copy (att_salary/att_punches are owner-only), no Clear / Undo buttons.
+export default function LoadingHisab({ user, readOnly = false }) {
   const [emps, setEmps] = useState(null);
   const [punches, setPunches] = useState({});
   const [err, setErr] = useState('');
   const [openCode, setOpenCode] = useState('');
   const [clearing, setClearing] = useState(null);   // code being cleared
+  const [asOf, setAsOf] = useState('');
 
   async function reload() {
     try {
+      if (readOnly) {
+        const m = await loadLoadingMirror();
+        if (!m) { setErr('Loading hisab is not ready yet — try again in 5 minutes.'); setEmps([]); return; }
+        setEmps(m.emps || []); setPunches(m.punches || {}); setAsOf(m.updatedAt || ''); setErr('');
+        return;
+      }
       const [list, pu] = await Promise.all([loadEmployees(true), loadAllPunches()]);
       setEmps(list); setPunches(pu); setErr('');
     } catch (e) { setErr('Could not load — check the internet and try again.'); setEmps((p) => p || []); }
@@ -62,8 +71,9 @@ export default function LoadingHisab({ user }) {
         <div className="font-bold text-sky-900">🚚 Loading hisab — cleared till kab tak?</div>
         <p className="text-[11px] text-sky-800 mt-0.5">
           Each loader shows the date his account was last cleared, hours worked since (from the machine, rounded
-          per day like Anshul's slip, 10 h = 1 day), cash given since, and what is due now. Owner-only.
+          per day like Anshul's slip, 10 h = 1 day), cash given since, and what is due now. {readOnly ? 'View only — the owner clears the hisab.' : 'Owner-only.'}
         </p>
+        {readOnly && asOf && <p className="text-[11px] text-sky-700 mt-0.5">Updated {new Date(asOf).toLocaleString('en-IN', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</p>}
       </div>
       {err && <p className="text-sm text-rose-600 font-medium">{err}</p>}
 
@@ -80,7 +90,7 @@ export default function LoadingHisab({ user }) {
 
       {!rows.length && <p className="text-sm text-slate-400 text-center py-4">No loading staff found.</p>}
       {rows.map(({ emp, h }) => (
-        <LoaderCard key={emp.code} emp={emp} h={h} open={openCode === emp.code}
+        <LoaderCard key={emp.code} emp={emp} h={h} readOnly={readOnly} open={openCode === emp.code}
           onToggle={() => setOpenCode(openCode === emp.code ? '' : emp.code)}
           onClear={() => setClearing(emp.code)}
           onUndo={async (entry) => {
@@ -89,7 +99,7 @@ export default function LoadingHisab({ user }) {
           }} />
       ))}
 
-      {clearing && (() => {
+      {!readOnly && clearing && (() => {
         const r = rows.find((x) => x.emp.code === clearing);
         return r ? <ClearSheet emp={r.emp} punchDoc={punches[r.emp.code]} maxTill={upTo} user={user}
           onClose={() => setClearing(null)} onDone={async () => { setClearing(null); await reload(); }} /> : null;
@@ -107,7 +117,7 @@ function Stat({ label, value, warn, strong }) {
   );
 }
 
-function LoaderCard({ emp, h, open, onToggle, onClear, onUndo }) {
+function LoaderCard({ emp, h, readOnly, open, onToggle, onClear, onUndo }) {
   const casual = !!emp.appOnly;
   return (
     <div className="bg-white rounded-2xl border-2 border-slate-200 p-3">
@@ -171,7 +181,7 @@ function LoaderCard({ emp, h, open, onToggle, onClear, onUndo }) {
             </div>
           )}
 
-          <button onClick={onClear} className="w-full bg-emerald-600 text-white rounded-xl py-3 text-base font-bold active:scale-95 transition-all">✅ Clear hisab</button>
+          {!readOnly && <button onClick={onClear} className="w-full bg-emerald-600 text-white rounded-xl py-3 text-base font-bold active:scale-95 transition-all">✅ Clear hisab</button>}
 
           {h.clears.length > 0 && (
             <div>
@@ -182,7 +192,7 @@ function LoaderCard({ emp, h, open, onToggle, onClear, onUndo }) {
                     till <b>{fmt(c.till)}</b>{c.seed ? <span className="text-slate-400"> · opening</span>
                       : <span className="text-slate-400"> · {c.hours}h{c.adjHours ? <span className="text-amber-700"> (machine {c.machineHours ?? '—'}h, {c.adjHours > 0 ? '+' : ''}{c.adjHours}h: {c.adjReason})</span> : ''} · earned {rupee(c.earned)} · paid {rupee(c.paid)}{c.carry ? ` · left ${rupee(c.carry)}` : ''}</span>}
                   </span>
-                  {i === 0 && !c.seed && <button onClick={() => onUndo(c)} className="text-[11px] text-slate-500 underline shrink-0">Undo</button>}
+                  {!readOnly && i === 0 && !c.seed && <button onClick={() => onUndo(c)} className="text-[11px] text-slate-500 underline shrink-0">Undo</button>}
                 </div>
               ))}
             </div>

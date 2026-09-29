@@ -9,6 +9,7 @@ const { drainSelfPunch } = require('./selfPunch');
 const { captureLate } = require('./lateCapture');
 const { alertLate } = require('./lateAlert');
 const { runDueTasks } = require('./scheduler');
+const { writeLoadingMirror } = require('./loadingMirror');
 
 const DL = path.resolve(__dirname, 'downloads');
 
@@ -565,6 +566,8 @@ async function main() {
       };
     });
     await db().collection('att_meta').doc('advance_balances').set({ month: cur, items: advItems, updatedAt: new Date().toISOString() });
+    // view-only Loading hisab for the manager (owner 29-09-2026) — own try so it can never stop the queue
+    try { await writeLoadingMirror(sal); } catch (e) { console.error('loading mirror failed:', e.message); }
   } catch (e) { console.error('payout/advance sync failed:', e.message); }
 
   // once-a-day: scan the in-out report for missed punches (for the app's Punch tab list)

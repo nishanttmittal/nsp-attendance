@@ -700,6 +700,13 @@ export async function loadAdvanceBalances() {
   const s = await getDoc(doc(db, 'att_meta', 'advance_balances'));
   return s.exists() ? s.data() : { month: istMonth(), items: {} };
 }
+// View-only Loading hisab for the manager (att_meta/loading_hisab, written by the worker every ~5 min):
+// loader fields + loader punches only, so the same loadingHisab.js math runs on it. Returns null if absent.
+export async function loadLoadingMirror() {
+  if (!isConfigured || !db) return null;
+  const s = await getDoc(doc(db, 'att_meta', 'loading_hisab'));
+  return s.exists() ? s.data() : null;
+}
 // Owner finalizes a whole month's hisab: locks every ticked person's month and carries their
 // leftover advance forward to next month (advance carries ONLY at finalize). Worker applies it.
 export async function queueFinalizeHisab(month, by) {

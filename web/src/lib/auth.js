@@ -15,8 +15,9 @@ export const ADMIN_EMAILS = [
 // Manager sees ONLY: Floor (live dashboard) + Advances (give advances + each worker's outstanding
 // balance — NO salary/pay figures). Salary, who's-paid, Problems, Settings stay admin-only.
 // (Owner rule 2026-07-23: manager = floor + advances only.)
-export const MANAGER_FEATURES = ['dashboard', 'advances'];
-export const ALL_FEATURES = ['dashboard', 'advances', 'salary', 'problems', 'settings', 'admin', 'archive'];
+// Owner 29-09-2026: manager may also VIEW the 🚚 Loading hisab ('loadingView', read-only copy, no edits).
+export const MANAGER_FEATURES = ['dashboard', 'advances', 'loadingView'];
+export const ALL_FEATURES = ['dashboard', 'advances', 'loadingView', 'salary', 'problems', 'settings', 'admin', 'archive'];
 
 export function canSee(role, feature) {
   if (role === 'admin') return true;
