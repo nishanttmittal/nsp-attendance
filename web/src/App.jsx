@@ -18,7 +18,7 @@ const TABS = [
   { key: 'floor', label: 'Floor', feature: 'dashboard', primary: true },
   { key: 'salary', label: 'Salary', feature: 'salary', primary: true },
   { key: 'problems', label: 'Problems', feature: 'problems', primary: true },
-  { key: 'advances', label: 'Advances (manager)', feature: 'advances' },
+  { key: 'advances', label: 'Advances', feature: 'advances' },
   { key: 'incoming', label: 'Hisab advances — accept', feature: 'salary' },
   { key: 'shadow', label: 'Day check (shadow)', feature: 'shadow' },
   { key: 'welders', label: 'Welders (contractor-paid)', feature: 'salary' },
@@ -51,7 +51,7 @@ export default function App() {
     <Center>
       <div className="text-center p-6">
         <p className="text-gray-700 font-medium">No access yet</p>
-        <p className="text-sm text-gray-500 mt-1">{user.email}<br />Ask the admin to add you in Settings → Managers.</p>
+        <p className="text-sm text-gray-500 mt-1">{user.email}<br />Ask the owner to add you in Settings → Access.</p>
         <button onClick={signOut} className="mt-4 text-sm bg-gray-200 px-3 py-1.5 rounded">Sign out</button>
       </div>
     </Center>
@@ -65,7 +65,7 @@ export default function App() {
       <header className="bg-red-700 text-white px-4 py-3 flex items-center justify-between sticky top-0 z-10">
         <div>
           <div className="font-bold leading-tight">NSP Attendance</div>
-          <div className="text-xs text-red-200">{user.email} · {user.role}{user.mock ? ' (preview)' : ''}</div>
+          <div className="text-xs text-red-200">{user.email}{user.role === 'admin' ? ' · owner' : ''}{user.mock ? ' (preview)' : ''}</div>
         </div>
         <div className="flex items-center gap-2">
           {canSee(user.role, 'settings') && (

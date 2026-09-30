@@ -33,10 +33,10 @@ function ManagersCard() {
   }
   return (
     <div className="bg-white rounded-xl shadow p-4">
-      <div className="font-semibold text-gray-800 mb-1">Managers &amp; access</div>
-      <p className="text-xs text-gray-500 mb-3">Managers get Telegram alerts and can see Floor / Punch / Staff and record advances — not salary. Add by Google email; chat-id is optional (for alerts).</p>
+      <div className="font-semibold text-gray-800 mb-1">Access (who else can open this app)</div>
+      <p className="text-xs text-gray-500 mb-3">Added people get Telegram alerts and can see Floor / Punch / Staff and record advances — not salary. Add by Google email; chat-id is optional (for alerts).</p>
       <ul className="text-sm divide-y divide-gray-100 mb-2">
-        {list.length === 0 && <li className="text-gray-400 py-1">No managers added.</li>}
+        {list.length === 0 && <li className="text-gray-400 py-1">Nobody added yet.</li>}
         {list.map((m) => (
           <li key={m.email} className="py-1.5 flex items-center justify-between">
             <span>{m.email} <span className="text-gray-400">· {m.role}{m.telegramChatId ? ' · TG' : ''}</span></span>
@@ -45,9 +45,9 @@ function ManagersCard() {
         ))}
       </ul>
       <div className="grid grid-cols-1 gap-2">
-        <input className="border rounded px-3 py-2 text-sm" placeholder="manager@gmail.com" value={f.email} onChange={e => setF({ ...f, email: e.target.value })} />
+        <input className="border rounded px-3 py-2 text-sm" placeholder="name@gmail.com" value={f.email} onChange={e => setF({ ...f, email: e.target.value })} />
         <input className="border rounded px-3 py-2 text-sm" placeholder="Telegram chat id (optional)" value={f.chat} onChange={e => setF({ ...f, chat: e.target.value })} />
-        <button onClick={add} className="bg-gray-800 text-white rounded py-2 text-sm font-medium">Add manager</button>
+        <button onClick={add} className="bg-gray-800 text-white rounded py-2 text-sm font-medium">Add person</button>
       </div>
     </div>
   );
