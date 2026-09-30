@@ -661,6 +661,10 @@ async function main() {
       }
     }
   }
+  // a manager advance just landed → refresh the view-only Loading hisab now, not on the next run
+  if (docs.some(d => d.data().type === 'add_advance')) {
+    try { await writeLoadingMirror(await db().collection('att_salary').get()); } catch (e) { console.error('loading mirror refresh failed:', e.message); }
+  }
 }
 
 // only run the queue loop when executed directly (node worker.js / GitHub Actions);

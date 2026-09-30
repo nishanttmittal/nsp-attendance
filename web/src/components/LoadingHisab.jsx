@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { loadEmployees, loadAllPunches, loadLoadingMirror, addAdvanceDirect, addHisabClear, removeHisabClear } from '../lib/data';
+import { loadEmployees, loadAllPunches, loadLoadingMirror, addAdvanceDirect, queueAdvance, addHisabClear, removeHisabClear } from '../lib/data';
 import { rupee } from '../lib/paycalc';
 import { isLoader, openHisab, punchesSyncedTill, lastPunchDate, addDays, todayIST, dinGhante, r2, stdHoursOf } from '../lib/loadingHisab';
 
@@ -23,6 +23,7 @@ export default function LoadingHisab({ user, readOnly = false }) {
   const [clearing, setClearing] = useState(null);   // code being cleared
   const [asOf, setAsOf] = useState('');
   const [quick, setQuick] = useState('');   // 'adv' | 'casual' — owner quick-entry sheets (29-09-2026)
+  const [queued, setQueued] = useState([]);  // manager advances sent this session, not yet in the copy
 
   async function reload() {
     try {
@@ -72,7 +73,7 @@ export default function LoadingHisab({ user, readOnly = false }) {
         <div className="font-bold text-sky-900">🚚 Loading hisab — cleared till kab tak?</div>
         <p className="text-[11px] text-sky-800 mt-0.5">
           Each loader shows the date his account was last cleared, hours worked since (from the machine, rounded
-          per day like Anshul's slip, 10 h = 1 day), cash given since, and what is due now. {readOnly ? 'View only — the owner clears the hisab.' : 'Owner-only.'}
+          per day like Anshul's slip, 10 h = 1 day), cash given since, and what is due now. {readOnly ? 'View only — the owner clears the hisab. You can give an advance.' : 'Owner-only.'}
         </p>
         {readOnly && asOf && <p className="text-[11px] text-sky-700 mt-0.5">Updated {new Date(asOf).toLocaleString('en-IN', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</p>}
       </div>
@@ -88,10 +89,15 @@ export default function LoadingHisab({ user, readOnly = false }) {
       )}
 
       {!readOnly && <button onClick={shareSlip} className="w-full bg-green-600 text-white rounded-2xl py-3 font-bold active:scale-95 transition-all">📤 Share slip on WhatsApp</button>}   {/* owner 29-09-2026: no share slip for the manager */}
-      {!readOnly && (
-        <div className="grid grid-cols-2 gap-2">
-          <button onClick={() => setQuick('adv')} className="bg-rose-600 text-white rounded-2xl py-3 font-bold active:scale-95 transition-all">💸 Advance to loader</button>
-          <button onClick={() => setQuick('casual')} className="bg-amber-600 text-white rounded-2xl py-3 font-bold active:scale-95 transition-all">👷 Pay casual for a day</button>
+      {/* owner 30-09-2026 "advance pay in loading tab for anshul": manager gets the advance button too (queued) */}
+      <div className={`grid gap-2 ${readOnly ? 'grid-cols-1' : 'grid-cols-2'}`}>
+        <button onClick={() => setQuick('adv')} className="bg-rose-600 text-white rounded-2xl py-3 font-bold active:scale-95 transition-all">💸 Advance to loader</button>
+        {!readOnly && <button onClick={() => setQuick('casual')} className="bg-amber-600 text-white rounded-2xl py-3 font-bold active:scale-95 transition-all">👷 Pay casual for a day</button>}
+      </div>
+      {queued.length > 0 && (
+        <div className="bg-amber-50 border-2 border-amber-200 rounded-2xl p-3 text-sm">
+          <div className="font-semibold text-amber-900">⏳ Advance sent — will show on the card after the next update</div>
+          {queued.map((q) => <div key={q.id} className="text-amber-800">{fmt(q.date)} · {q.name} · {rupee(q.amount)}</div>)}
         </div>
       )}
 
@@ -106,9 +112,9 @@ export default function LoadingHisab({ user, readOnly = false }) {
           }} />
       ))}
 
-      {!readOnly && quick === 'adv' && (
-        <AdvanceSheet loaders={rows.map((r) => r.emp).filter((e) => !e.appOnly && e.active !== false)} user={user}
-          onClose={() => setQuick('')} onDone={async () => { setQuick(''); await reload(); }} />
+      {quick === 'adv' && (
+        <AdvanceSheet loaders={rows.map((r) => r.emp).filter((e) => !e.appOnly && e.active !== false)} user={user} viaQueue={readOnly}
+          onClose={() => setQuick('')} onDone={async (a) => { setQuick(''); if (readOnly && a) setQueued((p) => [...p, a]); else await reload(); }} />
       )}
       {!readOnly && quick === 'casual' && (() => {
         const r = rows.find((x) => x.emp.appOnly);
@@ -330,7 +336,7 @@ function ClearSheet({ emp, punchDoc, maxTill, user, onClose, onDone }) {
 
 // Owner 29-09-2026: "add advance to loader and unloader". A normal dated advance on the loader — the
 // card counts it under "cash given since" and the next ✅ Clear subtracts it (no double counting).
-function AdvanceSheet({ loaders, user, onClose, onDone }) {
+function AdvanceSheet({ loaders, user, viaQueue = false, onClose, onDone }) {
   const [code, setCode] = useState('');
   const [date, setDate] = useState(todayIST());
   const [amount, setAmount] = useState('');
@@ -345,8 +351,11 @@ function AdvanceSheet({ loaders, user, onClose, onDone }) {
     if (!date || date > todayIST()) { alert('Pick the date the cash was given (not a future date).'); return; }
     setBusy(true);
     try {
-      await addAdvanceDirect(code, { id, date, mode, amount: amt, remark: remark.trim() || 'Loading advance', paidBy: user.email }, user.email);
-      await onDone();
+      const adv = { id, date, mode, amount: amt, remark: remark.trim() || 'Loading advance', paidBy: user.email };
+      // manager cannot write att_salary (owner-only rule) → the cloud worker applies it (same as Advances page)
+      if (viaQueue) await queueAdvance(code, adv, user.email);
+      else await addAdvanceDirect(code, adv, user.email);
+      await onDone({ ...adv, name: (loaders.find((e) => e.code === code) || {}).name || code });
     } catch (e) {
       alert(/^LOCKED/.test(String(e?.message || '')) ? 'That month is already paid & locked — advance not saved.' : 'Could not save — check the internet and tap Save again (it will not double).');
       setBusy(false);
