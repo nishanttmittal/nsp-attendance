@@ -65,7 +65,7 @@ export function cashEntries(emp, seedTill) {
   for (const a of emp.advances || []) {
     if (!a || !a.date || !a.id || used.has(a.id)) continue;
     if (seedTill && a.date <= seedTill) continue;
-    list.push({ key: a.id, kind: 'adv', date: a.date, amount: Number(a.amount) || 0, mode: a.mode || 'cash', remark: a.remark || '' });
+    list.push({ key: a.id, kind: 'adv', date: a.date, amount: Number(a.amount) || 0, mode: a.mode || 'cash', remark: a.remark || '', by: a.paidBy || a.by || '' });
   }
   for (const [mk, md] of Object.entries(emp.months || {})) {
     const p = md && md.payment;

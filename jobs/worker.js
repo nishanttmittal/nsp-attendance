@@ -498,6 +498,45 @@ async function selfHealFloor() {
   if (Object.keys(patch).length) await ref.set(patch, { merge: true });
 }
 
+
+// Salary-FREE advance balances for the manager Advances page (att_meta/advance_balances). Written each
+// run AND right after queued advances are applied, so a new advance shows without waiting a whole run.
+async function writeAdvanceBalances(sal, cur) {
+  const advItems = {};
+  sal.forEach(d => {
+    const e = d.data();
+    if (e.active === false) return;
+    // Owner rule 19-08-2026: the account starts at the balance the LAST LOCK carried out, and counts
+    // every advance given SINCE that lock. Keep in step with web/src/lib/data.js advanceStatement().
+    // Was: bf from the running month + advances dated in the running calendar month — that hid an
+    // unlocked month's advances entirely AND lost its carry-in, under-reporting ₹1.09L over 7 workers
+    // (raju showed ₹6,000 against a real ₹61,555). Under-reporting money owed is the dangerous way to
+    // be wrong, so this counts from the last settled point instead of the calendar month.
+    const months = e.months || {};
+    const lockedMks = Object.keys(months).filter(m => (months[m] || {}).locked).sort();
+    const bfMonth = lockedMks.length ? lockedMks[lockedMks.length - 1] : '';
+    const after = bfMonth ? nextMonthKey(bfMonth) : '';
+    const bf = after ? Number((months[after] || {}).openingBalance || 0) : 0;   // − = owes us
+    const advMk = a => a.mk || String(a.date || '').slice(0, 7);
+    const sinceAdv = (e.advances || [])
+      .filter(a => !bfMonth || advMk(a) > bfMonth)
+      .reduce((t, a) => t + Number(a.amount || 0), 0);
+    // date-wise lines since the last lock (owner 30-09-2026: Anshul ji must see every advance he or the
+    // owner entered until the month is finalized) — advance facts only, never a pay figure.
+    const entries = (e.advances || [])
+      .filter(a => !bfMonth || advMk(a) > bfMonth)
+      .map(a => ({ id: a.id || '', date: a.date || '', amount: Number(a.amount || 0), mode: a.mode || 'cash', remark: a.remark || '', by: a.paidBy || '' }))
+      .sort((x, y) => x.date.localeCompare(y.date));
+    advItems[d.id] = {
+      name: e.name || d.id, nickname: e.nickname || '', dept: e.dept || '', entries,
+      bfOwed: Math.round(bf < 0 ? -bf : 0), bfCredit: Math.round(bf > 0 ? bf : 0),
+      thisMonth: Math.round(sinceAdv), totalOwed: Math.round(-bf + sinceAdv),   // + = worker owes; − = credit
+      sinceLock: bfMonth || null,
+    };
+  });
+  await db().collection('att_meta').doc('advance_balances').set({ month: cur, items: advItems, updatedAt: new Date().toISOString() });
+}
+
 async function main() {
   // Keep the live floor fresh even when GitHub's publish-state cron silently dies (self-heal).
   try { await selfHealFloor(); } catch (e) { console.error('self-heal failed:', e.message); }
@@ -539,33 +578,7 @@ async function main() {
     // Salary-FREE advance balances for the manager Advances page. att_meta is staff-readable, so this
     // MUST NOT contain any pay figure — only the advance owed = balance brought forward + this month's
     // advances. The manager can see who owes what without ever reading att_salary (which stays owner-only).
-    const advItems = {};
-    sal.forEach(d => {
-      const e = d.data();
-      if (e.active === false) return;
-      // Owner rule 19-08-2026: the account starts at the balance the LAST LOCK carried out, and counts
-      // every advance given SINCE that lock. Keep in step with web/src/lib/data.js advanceStatement().
-      // Was: bf from the running month + advances dated in the running calendar month — that hid an
-      // unlocked month's advances entirely AND lost its carry-in, under-reporting ₹1.09L over 7 workers
-      // (raju showed ₹6,000 against a real ₹61,555). Under-reporting money owed is the dangerous way to
-      // be wrong, so this counts from the last settled point instead of the calendar month.
-      const months = e.months || {};
-      const lockedMks = Object.keys(months).filter(m => (months[m] || {}).locked).sort();
-      const bfMonth = lockedMks.length ? lockedMks[lockedMks.length - 1] : '';
-      const after = bfMonth ? nextMonthKey(bfMonth) : '';
-      const bf = after ? Number((months[after] || {}).openingBalance || 0) : 0;   // − = owes us
-      const advMk = a => a.mk || String(a.date || '').slice(0, 7);
-      const sinceAdv = (e.advances || [])
-        .filter(a => !bfMonth || advMk(a) > bfMonth)
-        .reduce((t, a) => t + Number(a.amount || 0), 0);
-      advItems[d.id] = {
-        name: e.name || d.id, nickname: e.nickname || '', dept: e.dept || '',
-        bfOwed: Math.round(bf < 0 ? -bf : 0), bfCredit: Math.round(bf > 0 ? bf : 0),
-        thisMonth: Math.round(sinceAdv), totalOwed: Math.round(-bf + sinceAdv),   // + = worker owes; − = credit
-        sinceLock: bfMonth || null,
-      };
-    });
-    await db().collection('att_meta').doc('advance_balances').set({ month: cur, items: advItems, updatedAt: new Date().toISOString() });
+    await writeAdvanceBalances(sal, cur);
     // view-only Loading hisab for the manager (owner 29-09-2026) — own try so it can never stop the queue
     try { await writeLoadingMirror(sal); } catch (e) { console.error('loading mirror failed:', e.message); }
   } catch (e) { console.error('payout/advance sync failed:', e.message); }
@@ -663,7 +676,11 @@ async function main() {
   }
   // a manager advance just landed → refresh the view-only Loading hisab now, not on the next run
   if (docs.some(d => d.data().type === 'add_advance')) {
-    try { await writeLoadingMirror(await db().collection('att_salary').get()); } catch (e) { console.error('loading mirror refresh failed:', e.message); }
+    try {
+      const sal2 = await db().collection('att_salary').get();
+      await writeLoadingMirror(sal2);
+      await writeAdvanceBalances(sal2, new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 7));
+    } catch (e) { console.error('mirror refresh after advances failed:', e.message); }
   }
 }
 

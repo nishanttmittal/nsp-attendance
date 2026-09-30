@@ -124,7 +124,40 @@ export async function queueAdvance(code, advance, by) {
   // Stable id (fix 2026-07-18): the worker dedupes on it, so a cloud run killed after saving and
   // retried can never record the same advance twice (mark_paid already had this via payId).
   const id = advance.id || ('adv-' + (advance.date || '') + '-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7));
-  return queueJob('add_advance', { code, advance: { ...advance, id } }, by);
+  const r = await queueJob('add_advance', { code, advance: { ...advance, id } }, by);
+  addPendingAdvance({ code, ...advance, id });
+  return r;
+}
+
+// PENDING advances on THIS phone (owner 30-09-2026: "should be able to see the advance he or me has
+// entered until we finalize"). A queued advance can wait hours for the cloud worker and the manager
+// cannot read the queue, so each one is kept locally until it shows up in the worker's copy.
+const PENDING_KEY = 'nsp_pending_adv';
+export function pendingAdvances() {
+  try { return JSON.parse(localStorage.getItem(PENDING_KEY) || '[]') || []; } catch { return []; }
+}
+function addPendingAdvance(a) {
+  try {
+    const list = pendingAdvances().filter((x) => x.id !== a.id);
+    list.push({ code: a.code, id: a.id, date: a.date, amount: Number(a.amount) || 0, mode: a.mode || 'cash', remark: a.remark || '', by: a.paidBy || '', at: new Date().toISOString() });
+    localStorage.setItem(PENDING_KEY, JSON.stringify(list));
+  } catch { /* storage blocked — the queue still has it */ }
+}
+// Drop every pending entry whose id is now recorded (seenIds) or that is older than 14 days.
+export function prunePendingAdvances(seenIds) {
+  const cutoff = Date.now() - 14 * 86400000;
+  const keep = pendingAdvances().filter((x) => !seenIds.has(x.id) && Date.parse(x.at || 0) > cutoff);
+  try { localStorage.setItem(PENDING_KEY, JSON.stringify(keep)); } catch { /* ignore */ }
+  return keep;
+}
+// "who entered it" for advance lines
+export function enteredBy(email, me) {
+  const e = String(email || '').toLowerCase();
+  if (!e) return '';
+  if (me && e === String(me).toLowerCase()) return 'you';
+  if (e === 'nspenterprises24@gmail.com' || e === 'claude-for-owner') return 'Nishant ji';
+  if (e.startsWith('anshul')) return 'Anshul ji';
+  return e.split('@')[0];
 }
 
 // OWNER advance → write att_salary DIRECTLY so it shows INSTANTLY (no 5-min queue wait), mirroring

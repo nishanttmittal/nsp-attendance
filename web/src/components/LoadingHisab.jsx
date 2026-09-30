@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { loadEmployees, loadAllPunches, loadLoadingMirror, addAdvanceDirect, queueAdvance, addHisabClear, removeHisabClear } from '../lib/data';
+import { loadEmployees, loadAllPunches, loadLoadingMirror, addAdvanceDirect, queueAdvance, pendingAdvances, prunePendingAdvances, enteredBy, addHisabClear, removeHisabClear } from '../lib/data';
 import { rupee } from '../lib/paycalc';
 import { isLoader, openHisab, punchesSyncedTill, lastPunchDate, addDays, todayIST, dinGhante, r2, stdHoursOf } from '../lib/loadingHisab';
 
@@ -23,7 +23,7 @@ export default function LoadingHisab({ user, readOnly = false }) {
   const [clearing, setClearing] = useState(null);   // code being cleared
   const [asOf, setAsOf] = useState('');
   const [quick, setQuick] = useState('');   // 'adv' | 'casual' — owner quick-entry sheets (29-09-2026)
-  const [queued, setQueued] = useState([]);  // manager advances sent this session, not yet in the copy
+  const [pending, setPending] = useState(() => pendingAdvances());   // queued on this phone, not yet applied
 
   async function reload() {
     try {
@@ -31,10 +31,12 @@ export default function LoadingHisab({ user, readOnly = false }) {
         const m = await loadLoadingMirror();
         if (!m) { setErr('Loading hisab is not ready yet — try again in 5 minutes.'); setEmps([]); return; }
         setEmps(m.emps || []); setPunches(m.punches || {}); setAsOf(m.updatedAt || ''); setErr('');
+        setPending(prunePendingAdvances(new Set((m.emps || []).flatMap((e) => (e.advances || []).map((a) => a.id)))));
         return;
       }
       const [list, pu] = await Promise.all([loadEmployees(true), loadAllPunches()]);
       setEmps(list); setPunches(pu); setErr('');
+      setPending(prunePendingAdvances(new Set(list.flatMap((e) => (e.advances || []).map((x) => x.id)))));
     } catch (e) { setErr('Could not load — check the internet and try again.'); setEmps((p) => p || []); }
   }
   useEffect(() => { reload(); }, []);
@@ -94,16 +96,20 @@ export default function LoadingHisab({ user, readOnly = false }) {
         <button onClick={() => setQuick('adv')} className="bg-rose-600 text-white rounded-2xl py-3 font-bold active:scale-95 transition-all">💸 Advance to loader</button>
         {!readOnly && <button onClick={() => setQuick('casual')} className="bg-amber-600 text-white rounded-2xl py-3 font-bold active:scale-95 transition-all">👷 Pay casual for a day</button>}
       </div>
-      {queued.length > 0 && (
-        <div className="bg-amber-50 border-2 border-amber-200 rounded-2xl p-3 text-sm">
-          <div className="font-semibold text-amber-900">⏳ Advance sent — will show on the card after the next update</div>
-          {queued.map((q) => <div key={q.id} className="text-amber-800">{fmt(q.date)} · {q.name} · {rupee(q.amount)}</div>)}
-        </div>
-      )}
+      {(() => {
+        const names = Object.fromEntries((emps || []).map((e) => [e.code, e.name]));
+        const mine = pending.filter((q) => names[q.code]);
+        return mine.length > 0 && (
+          <div className="bg-amber-50 border-2 border-amber-200 rounded-2xl p-3 text-sm">
+            <div className="font-semibold text-amber-900">⏳ Advance saved — waiting to be applied (then it moves onto the card)</div>
+            {mine.map((q) => <div key={q.id} className="text-amber-800">{fmt(q.date)} · {names[q.code]} · {rupee(q.amount)}{q.remark ? ` · ${q.remark}` : ''}</div>)}
+          </div>
+        );
+      })()}
 
       {!rows.length && <p className="text-sm text-slate-400 text-center py-4">No loading staff found.</p>}
       {rows.map(({ emp, h }) => (
-        <LoaderCard key={emp.code} emp={emp} h={h} readOnly={readOnly} open={openCode === emp.code}
+        <LoaderCard key={emp.code} emp={emp} h={h} readOnly={readOnly} me={user?.email} open={openCode === emp.code}
           onToggle={() => setOpenCode(openCode === emp.code ? '' : emp.code)}
           onClear={() => setClearing(emp.code)}
           onUndo={async (entry) => {
@@ -114,7 +120,7 @@ export default function LoadingHisab({ user, readOnly = false }) {
 
       {quick === 'adv' && (
         <AdvanceSheet loaders={rows.map((r) => r.emp).filter((e) => !e.appOnly && e.active !== false)} user={user} viaQueue={readOnly}
-          onClose={() => setQuick('')} onDone={async (a) => { setQuick(''); if (readOnly && a) setQueued((p) => [...p, a]); else await reload(); }} />
+          onClose={() => setQuick('')} onDone={async () => { setQuick(''); if (readOnly) setPending(pendingAdvances()); else await reload(); }} />
       )}
       {!readOnly && quick === 'casual' && (() => {
         const r = rows.find((x) => x.emp.appOnly);
@@ -139,7 +145,7 @@ function Stat({ label, value, warn, strong }) {
   );
 }
 
-function LoaderCard({ emp, h, readOnly, open, onToggle, onClear, onUndo }) {
+function LoaderCard({ emp, h, readOnly, me, open, onToggle, onClear, onUndo }) {
   const casual = !!emp.appOnly;
   return (
     <div className="bg-white rounded-2xl border-2 border-slate-200 p-3">
@@ -196,7 +202,7 @@ function LoaderCard({ emp, h, readOnly, open, onToggle, onClear, onUndo }) {
               <div className="text-[10px] text-slate-400 uppercase tracking-wide">Cash given since last clear</div>
               {h.cash.map((c) => (
                 <div key={c.key} className="flex justify-between border-t border-slate-100 py-0.5">
-                  <span className="text-slate-600">{fmt(c.date)} · {c.mode}{c.remark ? <span className="text-slate-400"> · {c.remark}</span> : ''}</span>
+                  <span className="text-slate-600">{fmt(c.date)} · {c.mode}{c.remark ? <span className="text-slate-400"> · {c.remark}</span> : ''}{c.by ? <span className="text-slate-400"> · by {enteredBy(c.by, me)}</span> : ''}</span>
                   <b>{rupee(c.amount)}</b>
                 </div>
               ))}

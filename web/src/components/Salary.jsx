@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { advanceStatement, isContractorPaid, needsManualDays, loadEmployees, loadAllAttendance, loadAllPunches, loadEmployee, saveEmployee, loadPayout, loadAdvanceBalances, queueAdvance, addAdvanceDirect, loadRoster, loadAttendanceReview, addMonthFine, saveMonth, istMonth, queueJob, lockMonthDirect, unlockMonthDirect, queueLock, queueUnlock, addManualWorker, pushWorkerProfile, advanceMonth, attributeAdvanceMk, settleCashClash, settleClashMessage, MACHINE_DEPTS, MACHINE_SHIFTS, MACHINE_GENDERS, DEPT_DEFAULT_SHIFT } from '../lib/data';
+import { advanceStatement, isContractorPaid, needsManualDays, loadEmployees, loadAllAttendance, loadAllPunches, loadEmployee, saveEmployee, loadPayout, loadAdvanceBalances, queueAdvance, pendingAdvances, prunePendingAdvances, enteredBy, addAdvanceDirect, loadRoster, loadAttendanceReview, addMonthFine, saveMonth, istMonth, queueJob, lockMonthDirect, unlockMonthDirect, queueLock, queueUnlock, addManualWorker, pushWorkerProfile, advanceMonth, attributeAdvanceMk, settleCashClash, settleClashMessage, MACHINE_DEPTS, MACHINE_SHIFTS, MACHINE_GENDERS, DEPT_DEFAULT_SHIFT } from '../lib/data';
 import { monthOptions, monthCtx, payFor, rupee, paymentBreakdown } from '../lib/paycalc';
 import { SHIFT_HOURS } from '../lib/payroll';
 import Person from './Person.jsx';
@@ -784,23 +784,33 @@ export function ManagerAdvances({ user }) {
   const [q, setQ] = useState('');
   const [openCode, setOpenCode] = useState('');       // row expanded for the date-wise breakdown
   const [detail, setDetail] = useState({});           // code -> { entries[], bfMonth } | { denied:true }
-  useEffect(() => { loadAdvanceBalances().then(setBal); }, []);
+  const [pending, setPending] = useState(() => pendingAdvances());   // queued on this phone, not yet applied
+  useEffect(() => { loadAdvanceBalances().then((b) => {
+    setBal(b);
+    const seen = new Set(Object.values(b?.items || {}).flatMap((v) => (v.entries || []).map((x) => x.id)));
+    setPending(prunePendingAdvances(seen));
+  }); }, []);
   const items = bal?.items || {};
+  const pendingOf = (code) => pending.filter((x) => x.code === code);
+  const pendingSum = (code) => pendingOf(code).reduce((t, x) => t + Number(x.amount || 0), 0);
   // Owner rule (19-08-2026): once the old month is LOCKED, show the carried-forward balance and the
   // advances given AFTER it SEPARATELY — never merged into one figure. `thisMonth` = advances given in
   // the running month; `bf` = whatever the settled months left behind (+ owes us, − credit to him).
   // Mirror basis (att_meta) — all a manager can read, and the ONLY basis the header totals use so a
   // total never shifts just because a row was opened. `extra` = advances saved this session, which the
   // mirror won't carry until the queue worker rewrites it.
-  const mirrorThis = (code) => Math.round((items[code]?.thisMonth || 0) + (extra[code] || 0));
+  const mirrorThis = (code) => Math.round((items[code]?.thisMonth || 0) + (extra[code] || 0) + pendingSum(code));
   const mirrorBf = (code) => Math.round((items[code]?.bfOwed || 0) - (items[code]?.bfCredit || 0));
   // Per-row: once a row is opened, prefer the statement read straight from att_salary (owner-only and
   // authoritative). It ALREADY includes a just-saved advance — adding `extra` here would double it, so
   // `extra` applies to the mirror branch only, and onSaved drops the cached statement to force a refetch.
-  const thisOf = (code) => (detail[code] && !detail[code].denied ? Math.round(detail[code].since) : mirrorThis(code));
-  const bfOf = (code) => (detail[code] && !detail[code].denied ? Math.round(-detail[code].bf) : mirrorBf(code));
+  const real = (code) => detail[code] && !detail[code].denied && !detail[code].mirror;
+  const thisOf = (code) => (real(code) ? Math.round(detail[code].since) : mirrorThis(code));
+  const bfOf = (code) => (real(code) ? Math.round(-detail[code].bf) : mirrorBf(code));
   const onSaved = (code, adv) => {
-    setExtra((p) => ({ ...p, [code]: (p[code] || 0) + Number(adv.amount || 0) }));
+    // a queued (manager) advance is counted via `pending`; only the owner's direct write goes in `extra`
+    if (user.role === 'admin') setExtra((p) => ({ ...p, [code]: (p[code] || 0) + Number(adv.amount || 0) }));
+    else setPending(pendingAdvances());
     setDetail((p) => { const n = { ...p }; delete n[code]; return n; });   // stale now — refetch on next tap
     setOpenCode((c) => (c === code ? '' : c));
   };
@@ -817,10 +827,13 @@ export function ManagerAdvances({ user }) {
     if (openCode === code) { setOpenCode(''); return; }
     setOpenCode(code);
     if (detail[code]) return;
+    // owner reads att_salary (authoritative); everyone else gets the worker's copy of the same lines
+    // (att_meta/advance_balances.entries, owner 30-09-2026) — advance facts only, no pay figure.
+    if (user.role !== 'admin') { setDetail((p) => ({ ...p, [code]: { mirror: true } })); return; }
     try {
       const st = advanceStatement(await loadEmployee(code));
       setDetail((p) => ({ ...p, [code]: st }));
-    } catch { setDetail((p) => ({ ...p, [code]: { denied: true } })); }
+    } catch { setDetail((p) => ({ ...p, [code]: { mirror: true } })); }
   }
 
   return (
@@ -864,8 +877,31 @@ export function ManagerAdvances({ user }) {
                 {isOpen && (
                   <div className="mt-1.5 ml-1 pl-2 border-l-2 border-slate-100 text-[12px] space-y-0.5">
                     {!d && <p className="text-slate-400">Loading…</p>}
-                    {d?.denied && <p className="text-slate-400">Date-wise detail is owner-only.</p>}
-                    {d && !d.denied && (
+                    {d?.mirror && (() => {
+                      const lines = [...(items[v.code]?.entries || []), ...pendingOf(v.code).map((x) => ({ ...x, pending: true }))]
+                        .sort((a, b) => String(a.date).localeCompare(String(b.date)));
+                      return (
+                        <>
+                          {bf !== 0 && (
+                            <div className="flex justify-between text-slate-500">
+                              <span>Carried forward{items[v.code]?.sinceLock ? ` (after ${shortMonth(items[v.code].sinceLock)} lock)` : ''}</span>
+                              <span>{bf > 0 ? rupee(bf) : `${rupee(-bf)} cr`}</span>
+                            </div>
+                          )}
+                          {lines.map((a, i) => (
+                            <div key={a.id || i} className={`flex justify-between ${a.pending ? 'text-amber-700' : 'text-slate-700'}`}>
+                              <span>{a.date ? `${a.date.slice(8, 10)}/${a.date.slice(5, 7)}` : '—'} · {a.mode || 'cash'}{a.remark ? ` · ${a.remark}` : ''}{a.by ? <span className="text-slate-400"> · by {enteredBy(a.by, user.email)}</span> : null}{a.pending ? ' · ⏳ pending' : ''}</span>
+                              <span>{rupee(Number(a.amount || 0))}</span>
+                            </div>
+                          ))}
+                          {!lines.length && <p className="text-slate-400">No advance given since the last lock.</p>}
+                          <div className="flex justify-between font-bold text-slate-800 border-t border-slate-100 pt-0.5">
+                            <span>Total advance</span><span>{rupee(bf + now)}</span>
+                          </div>
+                        </>
+                      );
+                    })()}
+                    {d && !d.denied && !d.mirror && (
                       <>
                         {bf !== 0 && (
                           <div className="flex justify-between text-slate-500">
@@ -875,7 +911,7 @@ export function ManagerAdvances({ user }) {
                         )}
                         {d.entries.map((a, i) => (
                           <div key={a.id || i} className="flex justify-between text-slate-700">
-                            <span>{a.date ? `${a.date.slice(8, 10)}/${a.date.slice(5, 7)}` : '—'} · {a.mode || 'cash'}{a.remark ? ` · ${a.remark}` : ''}</span>
+                            <span>{a.date ? `${a.date.slice(8, 10)}/${a.date.slice(5, 7)}` : '—'} · {a.mode || 'cash'}{a.remark ? ` · ${a.remark}` : ''}{a.paidBy ? <span className="text-slate-400"> · by {enteredBy(a.paidBy, user.email)}</span> : null}</span>
                             <span>{rupee(Number(a.amount || 0))}</span>
                           </div>
                         ))}
@@ -893,7 +929,7 @@ export function ManagerAdvances({ user }) {
           {bal && !list.length && <p className="text-sm text-slate-400 py-2">No workers match.</p>}
         </div>
       </div>
-      <p className="text-[11px] text-slate-500 px-1">Tap a worker for the date-wise list. Advances recorded here apply within a few minutes and the owner gets a Telegram alert. This page never shows salaries.</p>
+      <p className="text-[11px] text-slate-500 px-1">Tap a worker for the date-wise list (who entered it, until the month is settled). ⏳ pending = saved, waiting to be applied. This page never shows salaries.</p>
     </div>
   );
 }

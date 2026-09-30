@@ -21,7 +21,7 @@ function slimEmp(code, e) {
     active: e.active !== false, appOnly: !!e.appOnly, joinDate: e.joinDate || null,
     hisabClears: Array.isArray(e.hisabClears) ? e.hisabClears : [],
     advances: (e.advances || []).filter((a) => a && a.id && a.date)
-      .map((a) => ({ id: a.id, date: a.date, amount: Number(a.amount) || 0, mode: a.mode || 'cash', remark: a.remark || '' })),
+      .map((a) => ({ id: a.id, date: a.date, amount: Number(a.amount) || 0, mode: a.mode || 'cash', remark: a.remark || '', by: a.paidBy || '' })),
     months,
   };
 }
