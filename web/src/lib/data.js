@@ -278,6 +278,7 @@ export function advanceStatement(emp) {
   const after = bfMonth ? nextMonthKey(bfMonth) : '';
   const bf = after ? Number((months[after] || {}).openingBalance || 0) : 0;
   const entries = ((emp && emp.advances) || [])
+    .filter((a) => !a.extra)   // extra-loader day pays (01-10-2026) are paid work, not advances
     .filter((a) => !bfMonth || advanceMonth(a) > bfMonth)
     .sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')));
   const since = entries.reduce((t, a) => t + Number(a.amount || 0), 0);

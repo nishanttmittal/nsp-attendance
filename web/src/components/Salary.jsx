@@ -108,7 +108,7 @@ function OwnerSalary({ user }) {
   // Total money GIVEN OUT this month = advances handed out during the month (ALL people, even
   // no-salary ones — an advance is cash out regardless) + salary actually paid (locked payment
   // net = cash+account at lock; part payments via paidSoFar for months not locked yet).
-  const advEntries = emps.flatMap((e) => (e.advances || []).filter((a) => advanceMonth(a) === mk));
+  const advEntries = emps.flatMap((e) => (e.advances || []).filter((a) => !a.extra && advanceMonth(a) === mk));
   const advancesOut = advEntries.reduce((t, a) => t + Number(a.amount || 0), 0);
   const advCash = advEntries.filter((a) => a.mode !== 'account').reduce((t, a) => t + Number(a.amount || 0), 0);
   const salaryOut = rows.reduce((s, r) => s + Number(r.md.payment ? (r.md.payment.net || 0) : (r.md.paidSoFar || 0)), 0);
@@ -525,7 +525,7 @@ function OwnerRow({ r, mk, busy, justPaidMode, user, onName, onPay, onUndo, onAd
   // Advance picture for this row: total the worker owes = balance BROUGHT FORWARD from earlier months
   // (openingBalance; − = owes us, + = credit in his favour) + advances GIVEN this running month.
   const carried = Number(pay.openingBalance || 0);
-  const monthAdv = (emp.advances || []).filter((a) => advanceMonth(a) === mk).reduce((t, a) => t + Number(a.amount || 0), 0);
+  const monthAdv = (emp.advances || []).filter((a) => !a.extra && advanceMonth(a) === mk).reduce((t, a) => t + Number(a.amount || 0), 0);
   const advOwed = -carried + monthAdv;               // + = worker owes; − = net credit to worker
   const bfOwed = carried < 0 ? -carried : 0;
   const bfCredit = carried > 0 ? carried : 0;
@@ -748,7 +748,7 @@ function AdvancesExportCard({ emps }) {
         bf: Number(((e.months || {})[mk] || {}).openingBalance || 0),   // leftover carried from last month
         // attributed month decides where an entry lists; the asOf cap only trims same-month later
         // entries (a next-month-dated advance pulled back into this month must still appear here)
-        entries: (e.advances || []).filter((a) => a.date && advanceMonth(a) === mk && (advanceMonth(a) !== a.date.slice(0, 7) || a.date <= asOf)),
+        entries: (e.advances || []).filter((a) => !a.extra && a.date && advanceMonth(a) === mk && (advanceMonth(a) !== a.date.slice(0, 7) || a.date <= asOf)),
       }))
       .filter((g) => g.entries.length || Math.round(g.bf) !== 0)
       .sort((a, b) => (a.name || '').localeCompare(b.name || ''));

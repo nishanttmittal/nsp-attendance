@@ -92,7 +92,7 @@ export function attFor(emp, attMap, mk) {
 export function payFor(emp, attMap, mk, ctx, graceDelta = 0, punchDoc = null) {
   const att = attFor(emp, attMap, mk);
   const md = monthData(emp, mk);
-  const advs = (emp.advances || []).filter((a) => advanceMonth(a) === mk);
+  const advs = (emp.advances || []).filter((a) => !a.extra && advanceMonth(a) === mk);   // extra-loader day pays are paid work, not advances
   const advancesThisMonth = advs.reduce((s, a) => s + Number(a.amount || 0), 0);
   const advanceBalanceIn = Number(md.advanceBalanceIn || 0);
   // ONE advance account (owner 2026-07-13): the engine always cuts the FULL outstanding advance

@@ -519,11 +519,13 @@ async function writeAdvanceBalances(sal, cur) {
     const bf = after ? Number((months[after] || {}).openingBalance || 0) : 0;   // − = owes us
     const advMk = a => a.mk || String(a.date || '').slice(0, 7);
     const sinceAdv = (e.advances || [])
+      .filter(a => !a.extra)
       .filter(a => !bfMonth || advMk(a) > bfMonth)
       .reduce((t, a) => t + Number(a.amount || 0), 0);
     // date-wise lines since the last lock (owner 30-09-2026: Anshul ji must see every advance he or the
     // owner entered until the month is finalized) — advance facts only, never a pay figure.
     const entries = (e.advances || [])
+      .filter(a => !a.extra)   // extra-loader day pays are paid work, not advances (01-10-2026)
       .filter(a => !bfMonth || advMk(a) > bfMonth)
       .map(a => ({ id: a.id || '', date: a.date || '', amount: Number(a.amount || 0), mode: a.mode || 'cash', remark: a.remark || '', by: a.paidBy || '' }))
       .sort((x, y) => x.date.localeCompare(y.date));

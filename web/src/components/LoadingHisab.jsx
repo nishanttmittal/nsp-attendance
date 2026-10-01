@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { loadEmployees, loadAllPunches, loadLoadingMirror, addAdvanceDirect, queueAdvance, pendingAdvances, prunePendingAdvances, enteredBy, addHisabClear, removeHisabClear } from '../lib/data';
 import { rupee } from '../lib/paycalc';
-import { isLoader, openHisab, punchesSyncedTill, lastPunchDate, addDays, todayIST, dinGhante, r2, stdHoursOf } from '../lib/loadingHisab';
+import { isLoader, openHisab, punchesSyncedTill, lastPunchDate, addDays, todayIST, dinGhante, r2, extraMonth, extraNames } from '../lib/loadingHisab';
 
 // 🚚 LOADING HISAB — owner-only (feature 'salary'). Owner 13-09-2026: "I pay them once in a while, and
 // I cannot remember from which day until which date I have cleared their old account."
@@ -92,10 +92,13 @@ export default function LoadingHisab({ user, readOnly = false }) {
 
       {!readOnly && <button onClick={shareSlip} className="w-full bg-green-600 text-white rounded-2xl py-3 font-bold active:scale-95 transition-all">📤 Share slip on WhatsApp</button>}   {/* owner 29-09-2026: no share slip for the manager */}
       {/* owner 30-09-2026 "advance pay in loading tab for anshul": manager gets the advance button too (queued) */}
-      <div className={`grid gap-2 ${readOnly ? 'grid-cols-1' : 'grid-cols-2'}`}>
+      <div className="grid gap-2 grid-cols-1">
         <button onClick={() => setQuick('adv')} className="bg-rose-600 text-white rounded-2xl py-3 font-bold active:scale-95 transition-all">💸 Advance to loader</button>
-        {!readOnly && <button onClick={() => setQuick('casual')} className="bg-amber-600 text-white rounded-2xl py-3 font-bold active:scale-95 transition-all">👷 Pay casual for a day</button>}
       </div>
+      {(() => {
+        const abc = rows.find((r) => r.emp.appOnly)?.emp;
+        return abc ? <ExtraPanel emp={abc} me={user?.email} onAdd={() => setQuick('extra')} /> : null;
+      })()}
       {(() => {
         const names = Object.fromEntries((emps || []).map((e) => [e.code, e.name]));
         const mine = pending.filter((q) => names[q.code]);
@@ -108,7 +111,8 @@ export default function LoadingHisab({ user, readOnly = false }) {
       })()}
 
       {!rows.length && <p className="text-sm text-slate-400 text-center py-4">No loading staff found.</p>}
-      {rows.map(({ emp, h }) => (
+      {/* casual record: extras live in the ➕ panel; its old card shows only if something is still open */}
+      {rows.filter(({ emp, h }) => !emp.appOnly || Math.round(h.balance) !== 0).map(({ emp, h }) => (
         <LoaderCard key={emp.code} emp={emp} h={h} readOnly={readOnly} me={user?.email} open={openCode === emp.code}
           onToggle={() => setOpenCode(openCode === emp.code ? '' : emp.code)}
           onClear={() => setClearing(emp.code)}
@@ -122,10 +126,10 @@ export default function LoadingHisab({ user, readOnly = false }) {
         <AdvanceSheet loaders={rows.map((r) => r.emp).filter((e) => !e.appOnly && e.active !== false)} user={user} viaQueue={readOnly}
           onClose={() => setQuick('')} onDone={async () => { setQuick(''); if (readOnly) setPending(pendingAdvances()); else await reload(); }} />
       )}
-      {!readOnly && quick === 'casual' && (() => {
-        const r = rows.find((x) => x.emp.appOnly);
-        return r ? <CasualDaySheet emp={r.emp} user={user} onClose={() => setQuick('')} onDone={async () => { setQuick(''); await reload(); }} />
-          : <p className="text-sm text-rose-600">No casual (loading abc) record found.</p>;
+      {quick === 'extra' && (() => {
+        const abc = rows.find((x) => x.emp.appOnly)?.emp;
+        return abc ? <ExtraSheet emp={abc} user={user} viaQueue={readOnly}
+          onClose={() => setQuick('')} onDone={async () => { setQuick(''); if (readOnly) setPending(pendingAdvances()); else await reload(); }} /> : null;
       })()}
       {!readOnly && clearing && (() => {
         const r = rows.find((x) => x.emp.code === clearing);
@@ -387,56 +391,154 @@ function AdvanceSheet({ loaders, user, viaQueue = false, onClose, onDone }) {
   );
 }
 
-// Owner 29-09-2026: "pay to abc staff for particular day". Casual come-and-go loaders are paid under the
-// one MAN-LOADING-ABC record: this records that day's cash AND closes that day in one step, so nothing
-// stays open. Uses only its own advance id — other open cash on the record is left untouched.
-function CasualDaySheet({ emp, user, onClose, onDone }) {
+// EXTRA LOADERS (owner 01-10-2026, his design): "+ person" adds a row — name, then Full day or hours.
+// One entry per day: date once, any number of people. Full day = 10 h = wage; an hour = wage ÷ 10.
+// Saved as ONE payment on the casual record carrying the rows (see extraMonth in loadingHisab.js), so the
+// work and the money settle together — nothing is left open. Anshul ji's entries go through the queue.
+const HOUR_CHIPS = [2, 4, 5, 6, 8, 12];
+function ExtraSheet({ emp, user, viaQueue = false, onClose, onDone }) {
   const wage = Number(emp.wage) || 700;
+  const perHour = wage / 10;
+  const known = useMemo(() => extraNames(emp), [emp]);
   const [date, setDate] = useState(todayIST());
-  const [name, setName] = useState('');
-  const [days, setDays] = useState('1');
-  const [amount, setAmount] = useState(String(wage));
+  const [list, setList] = useState([{ name: '', full: true, hours: '' }]);
+  const [typing, setTyping] = useState({ 0: false });
+  const [paid, setPaid] = useState('');
   const [mode, setMode] = useState('cash');
   const [busy, setBusy] = useState(false);
-  const [ids] = useState(() => { const s = Date.now() + '-' + Math.random().toString(36).slice(2, 7); return { adv: 'adv-' + s, clear: 'clr-' + s }; });
-  useEffect(() => { setAmount(String(Math.round((Number(days) || 0) * wage))); }, [days, wage]);
+  const [id] = useState(() => 'adv-x-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7));   // retry-safe
+  const hoursOf = (r) => (r.full ? 10 : Number(r.hours) || 0);
+  const rowAmt = (r) => Math.round(hoursOf(r) * perHour);
+  const totalH = list.reduce((t, r) => t + hoursOf(r), 0);
+  const totalAmt = list.reduce((t, r) => t + rowAmt(r), 0);
+  useEffect(() => { setPaid(String(totalAmt)); }, [totalAmt]);
+  const set = (i, patch) => setList((l) => l.map((r, k) => (k === i ? { ...r, ...patch } : r)));
+  const dayDone = useMemo(() => {   // names already paid as extra on this date
+    const s = new Set();
+    for (const a of (emp.advances || [])) if (a.extra && a.date === date) for (const r of a.extra.rows) s.add(String(r.name).trim().toLowerCase());
+    return s;
+  }, [emp, date]);
+
   async function go() {
-    const amt = Math.round(Number(amount) || 0), d = Number(days) || 0;
-    if (!name.trim()) { alert('Write the person\'s name.'); return; }
-    if (d <= 0) { alert('Enter the days worked (1 for one day, 0.5 for half).'); return; }
+    const clean = list.map((r) => ({ ...r, name: String(r.name || '').trim() }));
+    if (clean.some((r) => !r.name)) { alert('Write or pick a name on every row (or remove the empty row).'); return; }
+    if (clean.some((r) => !r.full && !(hoursOf(r) > 0 && hoursOf(r) <= 16))) { alert('Pick the hours (or Full day) for every person.'); return; }
+    const names = clean.map((r) => r.name.toLowerCase());
+    if (new Set(names).size !== names.length) { alert('The same name is on two rows — put it once.'); return; }
+    if (!date || date > todayIST()) { alert('Pick the day they worked (not a future date).'); return; }
+    const again = clean.filter((r) => dayDone.has(r.name.toLowerCase())).map((r) => r.name);
+    if (again.length && !window.confirm(`${again.join(', ')} already paid as extra on ${fmt(date)}.\n\nSave again anyway?`)) return;
+    const amt = Math.round(Number(paid) || 0);
     if (amt <= 0) { alert('Enter the amount paid.'); return; }
-    if (!date || date > todayIST()) { alert('Pick the day he worked (not a future date).'); return; }
-    const who = name.trim();
+    const rowsOut = clean.map((r) => ({ name: r.name, hours: hoursOf(r), amount: rowAmt(r), ...(r.full ? { full: true } : {}) }));
+    const adv = {
+      id, date, mode, amount: amt, paidBy: user.email,
+      remark: 'Extra loaders: ' + rowsOut.map((r) => `${r.name} ${r.full ? 'full day' : r.hours + 'h'}`).join(', '),
+      extra: { rows: rowsOut, hours: totalH, earned: totalAmt },
+    };
     setBusy(true);
     try {
-      await addAdvanceDirect(emp.code, { id: ids.adv, date, mode, amount: amt, remark: `Casual ${who} · ${d} din ${fmt(date)}`, paidBy: user.email }, user.email);
-      const earned = r2(d * wage);
-      await addHisabClear(emp.code, {
-        id: ids.clear, from: date, till: date, hours: r2(d * stdHoursOf(emp)), machineHours: 0, earned, casualDays: d, casualName: who,
-        carryIn: 0, paid: amt, cashNow: amt, mode, carry: 0, advIds: [ids.adv], payKeys: [], dayPay: true,
-        by: user.email, at: new Date().toISOString(),
-      });
+      if (viaQueue) await queueAdvance(emp.code, adv, user.email);
+      else await addAdvanceDirect(emp.code, adv, user.email);
       await onDone();
     } catch (e) {
-      alert(/^LOCKED/.test(String(e?.message || '')) ? 'That month is already paid & locked — not saved.' : 'Could not save — check the internet and tap Save again (it will not double).');
+      alert(/^LOCKED/.test(String(e?.message || '')) ? 'That month is already locked — not saved.' : 'Could not save — check the internet and tap Save again (it will not double).');
       setBusy(false);
     }
   }
+
   return (
-    <Sheet title="👷 Pay casual loader for a day" onClose={onClose}>
-      <label className="block text-sm text-slate-600">Name
-        <input type="text" value={name} placeholder="e.g. Kamran" onChange={(e) => setName(e.target.value)} className="mt-1 w-full border-2 border-slate-200 rounded-xl px-3 py-2.5 text-base" /></label>
-      <label className="block text-sm text-slate-600">Day worked
+    <Sheet title="➕ Extra loaders" onClose={onClose}>
+      <label className="block text-sm text-slate-600">Date
         <input type="date" value={date} max={todayIST()} onChange={(e) => setDate(e.target.value)} className="mt-1 w-full border-2 border-slate-200 rounded-xl px-3 py-2.5 text-base" /></label>
-      <div className="grid grid-cols-2 gap-2">
-        <label className="block text-sm text-slate-600">Days (₹{wage}/day)
-          <input type="number" inputMode="decimal" step="0.5" value={days} onChange={(e) => setDays(e.target.value)} className="mt-1 w-full border-2 border-slate-200 rounded-xl px-3 py-2.5 text-xl text-center font-bold" /></label>
-        <label className="block text-sm text-slate-600">Paid ₹
-          <input type="number" inputMode="numeric" value={amount} onChange={(e) => setAmount(e.target.value)} className="mt-1 w-full border-2 border-slate-200 rounded-xl px-3 py-2.5 text-xl text-center font-bold" /></label>
+      {list.map((r, i) => (
+        <div key={i} className="border-2 border-slate-200 rounded-xl p-2 space-y-2">
+          <div className="flex items-center justify-between">
+            <b className="text-slate-700">{i + 1}. {r.name || 'Name'}</b>
+            {list.length > 1 && <button onClick={() => setList((l) => l.filter((_, k) => k !== i))} className="text-xs text-rose-600 underline">remove</button>}
+          </div>
+          {!typing[i] && known.length > 0 ? (
+            <div className="flex flex-wrap gap-1.5">
+              {known.map((n) => (
+                <button key={n} onClick={() => set(i, { name: n })}
+                  className={`rounded-lg px-3 py-2 text-sm font-semibold ${r.name === n ? 'bg-slate-800 text-white' : 'border-2 border-slate-200 text-slate-700'}`}>{n}</button>
+              ))}
+              <button onClick={() => { setTyping((t) => ({ ...t, [i]: true })); set(i, { name: '' }); }} className="rounded-lg px-3 py-2 text-sm font-semibold border-2 border-dashed border-slate-300 text-slate-500">+ New name</button>
+            </div>
+          ) : (
+            <input type="text" value={r.name} placeholder="Name (e.g. Kamran)" onChange={(e) => set(i, { name: e.target.value })}
+              className="w-full border-2 border-slate-200 rounded-xl px-3 py-2.5 text-base" />
+          )}
+          <div className="flex flex-wrap gap-1.5">
+            <button onClick={() => set(i, { full: true, hours: '' })} className={`rounded-lg px-3 py-2 text-sm font-bold ${r.full ? 'bg-emerald-600 text-white' : 'border-2 border-slate-200 text-slate-600'}`}>Full day</button>
+            {HOUR_CHIPS.map((h) => (
+              <button key={h} onClick={() => set(i, { full: false, hours: String(h) })}
+                className={`rounded-lg px-3 py-2 text-sm font-semibold ${!r.full && Number(r.hours) === h ? 'bg-slate-800 text-white' : 'border-2 border-slate-200 text-slate-600'}`}>{h}h</button>
+            ))}
+            <input type="number" inputMode="decimal" placeholder="h" value={!r.full && !HOUR_CHIPS.includes(Number(r.hours)) ? r.hours : ''}
+              onChange={(e) => set(i, { full: false, hours: e.target.value })} className="w-16 border-2 border-slate-200 rounded-lg px-2 py-2 text-sm text-center" />
+          </div>
+          <div className="text-right text-sm text-slate-600">{r.full ? 'Full day' : `${hoursOf(r)}h`} = <b>{rupee(rowAmt(r))}</b></div>
+        </div>
+      ))}
+      <button onClick={() => { setTyping((t) => ({ ...t, [list.length]: false })); setList((l) => [...l, { name: '', full: true, hours: '' }]); }}
+        className="w-full border-2 border-dashed border-slate-300 rounded-xl py-2.5 font-bold text-slate-600">+ person</button>
+      <div className="flex justify-between text-sm bg-slate-50 rounded-lg p-2">
+        <span>{list.length} {list.length === 1 ? 'person' : 'people'} · {dinGhante(totalH)}</span><b>{rupee(totalAmt)}</b>
       </div>
+      <label className="block text-sm text-slate-600">Paid ₹ (change only if you paid a different amount)
+        <input type="number" inputMode="numeric" value={paid} onChange={(e) => setPaid(e.target.value)} className="mt-1 w-full border-2 border-slate-200 rounded-xl px-3 py-2.5 text-xl text-center font-bold" /></label>
       <ModeButtons mode={mode} setMode={setMode} />
-      <SaveRow busy={busy} onClose={onClose} onSave={go} label="Save & clear day" />
+      <SaveRow busy={busy} onClose={onClose} onSave={go} label={viaQueue ? 'Save (applies shortly)' : 'Save & pay'} />
     </Sheet>
+  );
+}
+
+// Month view of extra loaders: total, each person's days (⚠ at 6+ days → put him on the machine), entries.
+function ExtraPanel({ emp, me, onAdd }) {
+  const [mk, setMk] = useState(todayIST().slice(0, 7));
+  const [open, setOpen] = useState(false);
+  const prevMk = (() => { const [y, m] = mk.split('-').map(Number); return m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, '0')}`; })();
+  const curMk = todayIST().slice(0, 7);
+  const x = useMemo(() => extraMonth(emp, mk), [emp, mk]);
+  const monthName = new Date(mk + '-01T00:00:00').toLocaleString('en-IN', { month: 'short' });
+  return (
+    <div className="bg-amber-50 border-2 border-amber-200 rounded-2xl p-3 space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <button onClick={() => setOpen((o) => !o)} className="text-left min-w-0">
+          <div className="font-bold text-amber-900">➕ Extra loaders · {monthName}</div>
+          <div className="text-xs text-amber-800">{x.people.length} people · {dinGhante(x.hours)} · <b>{rupee(Math.round(x.amount))}</b> {open ? '▾' : '▸'}</div>
+        </button>
+        <button onClick={onAdd} className="shrink-0 bg-amber-600 text-white rounded-xl px-4 py-3 font-bold active:scale-95 transition-all">+ Add</button>
+      </div>
+      {open && (
+        <div className="text-[12px] space-y-2">
+          <div className="flex gap-2">
+            <button onClick={() => setMk(prevMk)} className="px-2 py-1 rounded border border-amber-300 text-amber-800">◂ {new Date(prevMk + '-01T00:00:00').toLocaleString('en-IN', { month: 'short' })}</button>
+            {mk !== curMk && <button onClick={() => setMk(curMk)} className="px-2 py-1 rounded border border-amber-300 text-amber-800">This month ▸</button>}
+          </div>
+          {x.people.length > 0 && (
+            <div>
+              <div className="text-[10px] text-amber-700 uppercase tracking-wide">Per person</div>
+              {x.people.map((p) => (
+                <div key={p.name} className="flex justify-between border-t border-amber-100 py-0.5">
+                  <span className="text-slate-700">{p.name} · {p.dates.size} day{p.dates.size === 1 ? '' : 's'}{p.dates.size >= 6 && <span className="text-rose-600 font-semibold"> ⚠ put on machine</span>}</span>
+                  <span>{dinGhante(p.hours)} · <b>{rupee(Math.round(p.amount))}</b></span>
+                </div>
+              ))}
+            </div>
+          )}
+          {x.list.map((a) => (
+            <div key={a.id} className="border-t border-amber-100 pt-1">
+              <div className="flex justify-between"><b className="text-slate-700">{fmt(a.date)} {dow(a.date)}</b><b>{rupee(a.amount)}</b></div>
+              <div className="text-slate-600">{a.extra.rows.map((r) => `${r.name} ${r.full ? 'full day' : r.hours + 'h'}`).join(' · ')}</div>
+              <div className="text-slate-400">{a.mode || 'cash'}{(a.paidBy || a.by) ? ` · by ${enteredBy(a.paidBy || a.by, me)}` : ''}</div>
+            </div>
+          ))}
+          {!x.list.length && <p className="text-slate-500">No extra loaders entered this month.</p>}
+        </div>
+      )}
+    </div>
   );
 }
 

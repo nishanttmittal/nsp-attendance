@@ -64,6 +64,7 @@ export function cashEntries(emp, seedTill) {
   const list = [];
   for (const a of emp.advances || []) {
     if (!a || !a.date || !a.id || used.has(a.id)) continue;
+    if (a.extra) continue;   // extra-loader day pay = paid for that day's work, never an advance
     if (seedTill && a.date <= seedTill) continue;
     list.push({ key: a.id, kind: 'adv', date: a.date, amount: Number(a.amount) || 0, mode: a.mode || 'cash', remark: a.remark || '', by: a.paidBy || a.by || '' });
   }
@@ -110,4 +111,32 @@ export function dinGhante(hours, std = DAY_HOURS) {
 // Last date this worker punched at all — hides a loader who has left (nothing open, no recent punches).
 export function lastPunchDate(punchDoc) {
   return punchesSyncedTill(punchDoc ? { x: punchDoc } : {});
+}
+
+// EXTRA LOADERS (owner 01-10-2026): fixed loaders punch; extra people called for a day are paid on the
+// casual record (appOnly, MAN-LOADING-ABC) as ONE payment per entry carrying
+//   extra: { rows: [{ name, hours, amount }], hours, earned }   (full day = 10 h = wage; per hour = wage/10)
+// Such a payment settles itself (work and money in one line) — it never shows as an advance or balance.
+export const extraEntries = (emp) => ((emp && emp.advances) || []).filter((a) => a && a.extra && Array.isArray(a.extra.rows));
+export function extraMonth(emp, mk) {
+  const list = extraEntries(emp).filter((a) => String(a.date || '').slice(0, 7) === mk)
+    .sort((a, b) => String(b.date).localeCompare(String(a.date)));
+  const people = {};
+  for (const a of list) for (const r of a.extra.rows) {
+    const k = String(r.name || '').trim().toLowerCase(); if (!k) continue;
+    const p = people[k] || (people[k] = { name: String(r.name).trim(), hours: 0, amount: 0, dates: new Set() });
+    p.hours += Number(r.hours) || 0; p.amount += Number(r.amount) || 0; p.dates.add(a.date);
+  }
+  const hours = list.reduce((t, a) => t + (Number(a.extra.hours) || 0), 0);
+  const amount = list.reduce((t, a) => t + (Number(a.amount) || 0), 0);
+  return { list, hours: r2(hours), amount: r2(amount), people: Object.values(people).sort((a, b) => b.hours - a.hours) };
+}
+// names used before (newest first) — tap-to-pick so one person is never saved under two spellings
+export function extraNames(emp) {
+  const seen = new Map();
+  for (const a of extraEntries(emp).sort((x, y) => String(y.date).localeCompare(String(x.date)))) {
+    for (const r of a.extra.rows) { const n = String(r.name || '').trim(); if (n && !seen.has(n.toLowerCase())) seen.set(n.toLowerCase(), n); }
+  }
+  for (const c of (emp && emp.hisabClears) || []) { const n = String(c.casualName || '').trim(); if (n && !seen.has(n.toLowerCase())) seen.set(n.toLowerCase(), n); }
+  return [...seen.values()];
 }
