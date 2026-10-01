@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { loadEmployees, loadAllPunches, loadLoadingMirror, addAdvanceDirect, queueAdvance, pendingAdvances, prunePendingAdvances, enteredBy, addHisabClear, removeHisabClear } from '../lib/data';
+import { loadEmployees, loadAllPunches, loadLoadingMirror, addAdvanceDirect, queueAdvance, pendingAdvances, prunePendingAdvances, enteredBy, addHisabClear, removeHisabClear, queueJob, loadExtraPhoto } from '../lib/data';
+import { compressPhoto } from '../lib/photo';
 import { rupee } from '../lib/paycalc';
 import { isLoader, openHisab, punchesSyncedTill, lastPunchDate, addDays, todayIST, dinGhante, r2, extraMonth, extraNames } from '../lib/loadingHisab';
 
@@ -406,6 +407,8 @@ function ExtraSheet({ emp, user, viaQueue = false, onClose, onDone }) {
   const [paid, setPaid] = useState('');
   const [mode, setMode] = useState('cash');
   const [busy, setBusy] = useState(false);
+  const [photo, setPhoto] = useState('');      // optional small JPEG dataURL (owner 01-10-2026 "add photos if available")
+  const [photoMsg, setPhotoMsg] = useState('');
   const [id] = useState(() => 'adv-x-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7));   // retry-safe
   const hoursOf = (r) => (r.full ? 10 : Number(r.hours) || 0);
   const rowAmt = (r) => Math.round(hoursOf(r) * perHour);
@@ -434,12 +437,15 @@ function ExtraSheet({ emp, user, viaQueue = false, onClose, onDone }) {
     const adv = {
       id, date, mode, amount: amt, paidBy: user.email,
       remark: 'Extra loaders: ' + rowsOut.map((r) => `${r.name} ${r.full ? 'full day' : r.hours + 'h'}`).join(', '),
-      extra: { rows: rowsOut, hours: totalH, earned: totalAmt },
+      extra: { rows: rowsOut, hours: totalH, earned: totalAmt, ...(photo ? { photo: true } : {}) },
     };
     setBusy(true);
     try {
       if (viaQueue) await queueAdvance(emp.code, adv, user.email);
       else await addAdvanceDirect(emp.code, adv, user.email);
+      // photo goes separately through the worker (stored in att_meta/xphoto_<id>); a failure here never
+      // undoes the payment — the entry just shows "photo not received"
+      if (photo) { try { await queueJob('extra_photo', { code: emp.code, id, data: photo }, user.email); } catch { /* payment already saved */ } }
       await onDone();
     } catch (e) {
       alert(/^LOCKED/.test(String(e?.message || '')) ? 'That month is already locked — not saved.' : 'Could not save — check the internet and tap Save again (it will not double).');
@@ -488,8 +494,18 @@ function ExtraSheet({ emp, user, viaQueue = false, onClose, onDone }) {
       </div>
       <label className="block text-sm text-slate-600">Paid ₹ (change only if you paid a different amount)
         <input type="number" inputMode="numeric" value={paid} onChange={(e) => setPaid(e.target.value)} className="mt-1 w-full border-2 border-slate-200 rounded-xl px-3 py-2.5 text-xl text-center font-bold" /></label>
+      <label className={`block w-full text-center rounded-xl py-2.5 font-semibold border-2 ${photo ? 'border-emerald-400 text-emerald-700' : 'border-dashed border-slate-300 text-slate-600'}`}>
+        {photo ? '📷 Photo added — tap to change' : '📷 Add photo (optional)'}
+        <input type="file" accept="image/*" capture="environment" className="hidden" onChange={async (e) => {
+          const f = e.target.files && e.target.files[0]; if (!f) return;
+          setPhotoMsg('Preparing photo…');
+          try { setPhoto(await compressPhoto(f)); setPhotoMsg(''); } catch (err) { setPhoto(''); setPhotoMsg(err.message || 'Photo could not be read — try again.'); }
+        }} />
+      </label>
+      {photo && <img src={photo} alt="" className="w-full max-h-48 object-cover rounded-xl" />}
+      {photoMsg && <p className="text-xs text-amber-700">{photoMsg}</p>}
       <ModeButtons mode={mode} setMode={setMode} />
-      <SaveRow busy={busy} onClose={onClose} onSave={go} label={viaQueue ? 'Save (applies shortly)' : 'Save & pay'} />
+      <SaveRow busy={busy || photoMsg === 'Preparing photo…'} onClose={onClose} onSave={go} label={viaQueue ? 'Save (applies shortly)' : 'Save & pay'} />
     </Sheet>
   );
 }
@@ -498,6 +514,7 @@ function ExtraSheet({ emp, user, viaQueue = false, onClose, onDone }) {
 function ExtraPanel({ emp, me, onAdd }) {
   const [mk, setMk] = useState(todayIST().slice(0, 7));
   const [open, setOpen] = useState(false);
+  const [show, setShow] = useState('');   // advance id whose photo is open
   const prevMk = (() => { const [y, m] = mk.split('-').map(Number); return m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, '0')}`; })();
   const curMk = todayIST().slice(0, 7);
   const x = useMemo(() => extraMonth(emp, mk), [emp, mk]);
@@ -532,12 +549,28 @@ function ExtraPanel({ emp, me, onAdd }) {
             <div key={a.id} className="border-t border-amber-100 pt-1">
               <div className="flex justify-between"><b className="text-slate-700">{fmt(a.date)} {dow(a.date)}</b><b>{rupee(a.amount)}</b></div>
               <div className="text-slate-600">{a.extra.rows.map((r) => `${r.name} ${r.full ? 'full day' : r.hours + 'h'}`).join(' · ')}</div>
-              <div className="text-slate-400">{a.mode || 'cash'}{(a.paidBy || a.by) ? ` · by ${enteredBy(a.paidBy || a.by, me)}` : ''}</div>
+              <div className="text-slate-400 flex items-center justify-between gap-2">
+                <span>{a.mode || 'cash'}{(a.paidBy || a.by) ? ` · by ${enteredBy(a.paidBy || a.by, me)}` : ''}</span>
+                {a.extra.photo && <button onClick={() => setShow(a.id)} className="text-amber-800 underline shrink-0">📷 Photo</button>}
+              </div>
             </div>
           ))}
           {!x.list.length && <p className="text-slate-500">No extra loaders entered this month.</p>}
         </div>
       )}
+      {show && <PhotoView id={show} onClose={() => setShow('')} />}
+    </div>
+  );
+}
+
+function PhotoView({ id, onClose }) {
+  const [src, setSrc] = useState(undefined);   // undefined = loading, null = not there (yet)
+  useEffect(() => { loadExtraPhoto(id).then(setSrc).catch(() => setSrc(null)); }, [id]);
+  return (
+    <div className="fixed inset-0 bg-black/80 z-40 flex items-center justify-center p-3" onClick={onClose}>
+      {src === undefined && <p className="text-white">Loading photo…</p>}
+      {src === null && <p className="text-white text-center">Photo not received yet — it arrives with the next update.<br /><span className="text-sm text-slate-300">Tap to close</span></p>}
+      {src && <img src={src} alt="" className="max-w-full max-h-full rounded-xl" />}
     </div>
   );
 }

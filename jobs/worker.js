@@ -27,7 +27,7 @@ const BOOTSTRAP_OWNER = 'nspenterprises24@gmail.com';   // same as ADMIN_EMAILS 
 // Money/identity-changing jobs only the OWNER may run.
 const OWNER_ONLY = new Set(['finalize_hisab', 'lock_month', 'unlock_month', 'resign_employee', 'reprocess_period', 'monthly_download', 'payslip', 'backup', 'onboard_employee', 'push_employee_edit', 'weeklyoff_audit']);
 // Everything the worker knows how to do — unknown types are rejected outright.
-const KNOWN_TYPES = new Set(['manual_punch', 'backup', 'onboard_employee', 'push_employee_edit', 'resign_employee', 'reprocess_period', 'weeklyoff_audit', 'scan_missed', 'mark_paid', 'lock_month', 'unlock_month', 'finalize_hisab', 'add_advance', 'monthly_download', 'payslip']);
+const KNOWN_TYPES = new Set(['manual_punch', 'backup', 'onboard_employee', 'push_employee_edit', 'resign_employee', 'reprocess_period', 'weeklyoff_audit', 'scan_missed', 'mark_paid', 'lock_month', 'unlock_month', 'finalize_hisab', 'add_advance', 'extra_photo', 'monthly_download', 'payslip']);
 
 async function authorizeJob(requestedBy, type) {
   if (!KNOWN_TYPES.has(type)) return { ok: false, reason: `unknown job type '${type}'` };
@@ -378,6 +378,16 @@ async function handle(type, p) {
     await ref.set({ advances }, { merge: true });
     await sendTelegram(`💸 Advance ₹${p.advance.amount} to ${p.code} (${p.advance.mode}) by ${p.advance.paidBy || '?'}.${clashWarn}`);
     return 'advance added';
+  }
+  if (type === 'extra_photo') {  // owner 01-10-2026 "add photos if available": optional photo of extra loaders
+    // Stored in att_meta (staff-readable, client write:false) so no rules change is needed; one doc per
+    // payment, keyed by the payment's advance id. Only a small JPEG dataURL is accepted.
+    const id = String(p.id || '');
+    const data = String(p.data || '');
+    if (!/^[\w-]{6,80}$/.test(id)) return 'REJECTED — bad id';
+    if (!data.startsWith('data:image/jpeg;base64,') || data.length > 250000) return 'REJECTED — not a small JPEG';
+    await db().collection('att_meta').doc('xphoto_' + id).set({ id, code: String(p.code || ''), data, by: p._by || '', at: new Date().toISOString() });
+    return 'photo saved';
   }
   if (type === 'monthly_download') {
     const scope = p.scope === 'all' ? 'all' : p.scope === 'dept' ? 'dept:' + p.value : 'emp:' + p.value;

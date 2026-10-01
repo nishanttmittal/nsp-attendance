@@ -741,6 +741,12 @@ export async function loadLoadingMirror() {
   const s = await getDoc(doc(db, 'att_meta', 'loading_hisab'));
   return s.exists() ? s.data() : null;
 }
+// Optional photo of an extra-loaders payment (att_meta/xphoto_<advance id>, written by the worker).
+export async function loadExtraPhoto(id) {
+  if (!isConfigured || !db) return null;
+  const s = await getDoc(doc(db, 'att_meta', 'xphoto_' + id));
+  return s.exists() ? s.data().data : null;
+}
 // Owner finalizes a whole month's hisab: locks every ticked person's month and carries their
 // leftover advance forward to next month (advance carries ONLY at finalize). Worker applies it.
 export async function queueFinalizeHisab(month, by) {
