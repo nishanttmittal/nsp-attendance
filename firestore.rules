@@ -656,6 +656,142 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
     // users: a signed-in Google account may read ITS OWN doc (to resolve its role); only the owner lists/writes
     match /apps/powdercoating/users/{id}   { allow get: if nonAnon() && (id == tEmail() || pwOwner()); allow list: if pwOwner(); allow write: if pwOwner(); }
     // <<< POWDER BLOCK
+    // >>> FALCON BLOCK (managed by falcon/rules/compose.mjs — do not edit by hand)
+    // ---- FALCON (apps/falcon) — falcon/SPEC.md, 01-Oct-2026 ----
+    // Roles from apps/falcon/users/{email}: role 'owner' | 'incharge' | 'spender', active == true. Google login only.
+    // Money integrity: every entry/transfer create or cancel is ONE batch with its balances/{email} write;
+    // each side checks the other with getAfter (lastOp = 'e:'|'x:'|'t:'|'y:' + record id). No deletes anywhere.
+    function fxMe() { return tEmail().lower(); }
+    function fxP(c, id) { return /databases/$(database)/documents/apps/falcon/$(c)/$(id); }
+    function fxUserDoc() { return get(fxP('users', fxMe())).data; }
+    function fxG() { return request.auth != null && request.auth.token.firebase.sign_in_provider == 'google.com' && request.auth.token.get('email_verified', false) == true; }
+    function fxActive() { return fxG() && fxMe() != '' && (bootstrapOwner() || (exists(fxP('users', fxMe())) && fxUserDoc().active == true)); }
+    function fxRole() { return bootstrapOwner() ? 'owner' : fxUserDoc().role; }
+    function fxStaff() { return fxActive() && fxRole() in ['owner', 'incharge']; }
+    function fxOwner() { return fxActive() && fxRole() == 'owner'; }
+    function fxLeap(y) { return y % 4 == 0 && (y % 100 != 0 || y % 400 == 0); }
+    function fxDaysIn(y, m) { return m == 2 ? (fxLeap(y) ? 29 : 28) : (m in [4, 6, 9, 11] ? 30 : 31); }
+    function fxIsDate(d) {
+      return d is string && d.size() == 10 && d.matches('^20[0-9][0-9]-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$')
+        && int(d[8:10]) <= fxDaysIn(int(d[0:4]), int(d[5:7]));
+    }
+    // 'YYYY-MM-DD' → the moment that day starts in India. A line may be dated today or up to 7 days back
+    // (an offline phone syncs late), never in the future (5-minute grace for a phone clock running fast).
+    function fxDayStart(d) { return timestamp.date(int(d[0:4]), int(d[5:7]), int(d[8:10])) - duration.value(330, 'm'); }
+    function fxDateOk(d) { return fxIsDate(d) && fxDayStart(d) <= request.time + duration.value(5, 'm') && fxDayStart(d) >= request.time - duration.value(8, 'd'); }
+    function fxInt(n, max) { return n is int && n > 0 && n <= max; }
+    function fxStr(s, max) { return s is string && s.size() <= max; }
+    function fxLastOp(email) { return getAfter(fxP('balances', email)).data.get('lastOp', ''); }
+    function fxCancelOk(r) {
+      return r.data.diff(resource.data).affectedKeys().hasOnly(['status', 'cancelReason', 'cancelledBy', 'cancelledAt'])
+        && resource.data.status == 'active' && r.data.status == 'cancelled'
+        && r.data.cancelledBy == fxMe() && r.data.cancelledAt == request.time
+        && r.data.cancelReason is string && r.data.cancelReason.size() > 0 && r.data.cancelReason.size() <= 100;
+    }
+
+    match /apps/falcon/users/{id} {
+      allow read: if fxActive() && (id == fxMe() || fxStaff());
+      allow create, update: if fxOwner() && id == id.lower()
+        && request.resource.data.keys().hasOnly(['email', 'name', 'role', 'active', 'addedBy', 'addedAt'])
+        && request.resource.data.email == id && request.resource.data.role in ['owner', 'incharge', 'spender']
+        && request.resource.data.active is bool && fxStr(request.resource.data.name, 40) && request.resource.data.name.size() > 0;
+      allow delete: if false;
+    }
+
+    match /apps/falcon/entries/{id} {
+      allow read: if fxActive() && (resource.data.by == fxMe() || fxStaff());
+      allow create: if fxActive()
+        && request.resource.data.keys().hasOnly(['id', 'by', 'byName', 'kind', 'head', 'amount', 'detail', 'place', 'advFor', 'advStatus',
+             'date', 'hasPhoto', 'status', 'createdAt', 'clientAt', 'deviceId', 'schemaVersion'])
+        && request.resource.data.id == id && request.resource.data.by == fxMe()
+        && request.resource.data.kind in ['chai', 'saman', 'rick', 'petrol', 'khana', 'labour', 'bilty', 'repair', 'other', 'adv']
+        && fxInt(request.resource.data.amount, 50000) && fxDateOk(request.resource.data.date)
+        && request.resource.data.status == 'active' && request.resource.data.createdAt == request.time
+        && request.resource.data.hasPhoto is bool && fxStr(request.resource.data.detail, 120) && fxStr(request.resource.data.head, 40)
+        && fxStr(request.resource.data.byName, 40)
+        && (request.resource.data.kind != 'adv' || request.resource.data.advStatus == 'pending')
+        // photo compulsory: saman + bilty always; petrol / repair / other above ₹200 (same as logic/falcon.js photoRequired)
+        && (!(request.resource.data.kind in ['saman', 'bilty'] || (request.resource.data.kind in ['petrol', 'repair', 'other'] && request.resource.data.amount > 200))
+            || request.resource.data.hasPhoto == true)
+        && (request.resource.data.hasPhoto == false || existsAfter(fxP('photos', id)))
+        && fxLastOp(fxMe()) == 'e:' + id;
+      allow update: if (fxActive() && fxCancelOk(request.resource)
+          && (fxStaff() || (resource.data.by == fxMe() && request.time < resource.data.createdAt + duration.value(24, 'h')))
+          && fxLastOp(resource.data.by) == 'x:' + id)
+        // owner marks an advance as entered in Attendance (no money field changes; balance untouched)
+        || (fxOwner() && resource.data.kind == 'adv' && resource.data.status == 'active' && resource.data.advStatus == 'pending'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['advStatus', 'advDoneBy', 'advDoneAt'])
+          && request.resource.data.advStatus == 'entered' && request.resource.data.advDoneBy == fxMe()
+          && request.resource.data.advDoneAt == request.time);
+      allow delete: if false;
+    }
+
+    // Photos are never listed (list = false); one is fetched when someone taps a line.
+    match /apps/falcon/photos/{id} {
+      allow get: if fxActive() && (resource.data.by == fxMe() || fxStaff());
+      allow list: if false;
+      allow create: if fxActive() && request.resource.data.keys().hasOnly(['id', 'by', 'data', 'createdAt'])
+        && request.resource.data.id == id && request.resource.data.by == fxMe()
+        && request.resource.data.data is string && request.resource.data.data.size() < 250000
+        && request.resource.data.data[0:23] == 'data:image/jpeg;base64,'
+        && existsAfter(fxP('entries', id)) && getAfter(fxP('entries', id)).data.by == fxMe() && !exists(fxP('entries', id));
+      allow update, delete: if false;
+    }
+
+    match /apps/falcon/transfers/{id} {
+      allow read: if fxActive() && (resource.data.to == fxMe() || fxStaff());
+      allow create: if fxStaff()
+        && request.resource.data.keys().hasOnly(['id', 'to', 'toName', 'amount', 'kind', 'note', 'date', 'givenBy', 'givenByName',
+             'createdAt', 'clientAt', 'confirmedAt', 'confirmedBy', 'status', 'deviceId', 'schemaVersion'])
+        && request.resource.data.id == id && request.resource.data.givenBy == fxMe()
+        && request.resource.data.kind in ['give', 'opening', 'return'] && (request.resource.data.kind != 'opening' || fxOwner())
+        && fxInt(request.resource.data.amount, 200000) && fxDateOk(request.resource.data.date)
+        && request.resource.data.status == 'active' && request.resource.data.confirmedAt == null
+        && request.resource.data.createdAt == request.time && fxStr(request.resource.data.note, 120)
+        && request.resource.data.to is string && request.resource.data.to != fxMe() && exists(fxP('users', request.resource.data.to))
+        && get(fxP('users', request.resource.data.to)).data.active == true
+        && fxLastOp(request.resource.data.to) == 't:' + id;
+      // the recipient confirms "Paisa mila" once; money fields never change
+      allow update: if (fxActive() && resource.data.to == fxMe() && resource.data.status == 'active' && resource.data.confirmedAt == null
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['confirmedAt', 'confirmedBy'])
+            && request.resource.data.confirmedAt == request.time && request.resource.data.confirmedBy == fxMe())
+        // cancel: owner any time; the giver only while it is still unconfirmed
+        || (fxStaff() && (fxOwner() || (resource.data.givenBy == fxMe() && resource.data.confirmedAt == null))
+            && fxCancelOk(request.resource) && fxLastOp(resource.data.to) == 'y:' + id);
+      allow delete: if false;
+    }
+
+    // balances/{email} = { email, received, spent, lastOp, updatedAt }. A write is valid only together with the
+    // record named in lastOp, created or cancelled in the SAME batch, and the delta must equal its amount exactly.
+    function fxBefore(f) { return resource == null ? 0 : resource.data.get(f, 0); }
+    function fxDR() { return request.resource.data.get('received', 0) - fxBefore('received'); }
+    function fxDS() { return request.resource.data.get('spent', 0) - fxBefore('spent'); }
+    function fxSign(kind) { return kind == 'return' ? -1 : 1; }
+    function fxBalOk(email) {
+      let op = request.resource.data.lastOp;
+      let tag = op[0:2];
+      let rid = op[2:op.size()];
+      return request.resource.data.keys().hasOnly(['email', 'received', 'spent', 'lastOp', 'updatedAt'])
+        && request.resource.data.email == email && op is string && op.size() > 2 && op.size() < 80
+        && request.resource.data.updatedAt == request.time
+        && (
+          (tag == 'e:' && !exists(fxP('entries', rid)) && getAfter(fxP('entries', rid)).data.by == email
+             && fxDS() == getAfter(fxP('entries', rid)).data.amount && fxDR() == 0)
+          || (tag == 'x:' && get(fxP('entries', rid)).data.status == 'active' && getAfter(fxP('entries', rid)).data.status == 'cancelled'
+             && get(fxP('entries', rid)).data.by == email && fxDS() == -get(fxP('entries', rid)).data.amount && fxDR() == 0)
+          || (tag == 't:' && !exists(fxP('transfers', rid)) && getAfter(fxP('transfers', rid)).data.to == email
+             && fxDR() == fxSign(getAfter(fxP('transfers', rid)).data.kind) * getAfter(fxP('transfers', rid)).data.amount && fxDS() == 0)
+          || (tag == 'y:' && get(fxP('transfers', rid)).data.status == 'active' && getAfter(fxP('transfers', rid)).data.status == 'cancelled'
+             && get(fxP('transfers', rid)).data.to == email
+             && fxDR() == -fxSign(get(fxP('transfers', rid)).data.kind) * get(fxP('transfers', rid)).data.amount && fxDS() == 0)
+        );
+    }
+    match /apps/falcon/balances/{email} {
+      allow read: if fxActive() && (email == fxMe() || fxStaff());
+      allow create, update: if fxActive() && fxBalOk(email);
+      allow delete: if false;
+    }
+    // <<< FALCON BLOCK
     // Read-meter telemetry (usage_reads/{YYYY-MM-DD}): every app instance batches
     // increments into totals.<app>. Write-only for any signed-in user (incl. anon
     // workers) so ALL apps can report; shape-locked to counters, no client reads.
