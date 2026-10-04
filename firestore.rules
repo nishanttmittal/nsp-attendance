@@ -691,10 +691,13 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
 
     match /apps/falcon/users/{id} {
       allow read: if fxActive() && (id == fxMe() || fxStaff());
-      allow create, update: if fxOwner() && id == id.lower()
+      allow create: if fxOwner() && id == id.lower()
         && request.resource.data.keys().hasOnly(['email', 'name', 'role', 'active', 'addedBy', 'addedAt'])
         && request.resource.data.email == id && request.resource.data.role in ['owner', 'incharge', 'spender']
         && request.resource.data.active is bool && fxStr(request.resource.data.name, 40) && request.resource.data.name.size() > 0;
+      // after creation the app only switches a person on/off — name and role never change from a phone (ChatGPT final P2)
+      allow update: if fxOwner() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['active', 'addedBy', 'addedAt'])
+        && request.resource.data.active is bool;
       allow delete: if false;
     }
 
@@ -745,11 +748,14 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
              'createdAt', 'clientAt', 'confirmedAt', 'confirmedBy', 'status', 'deviceId', 'schemaVersion'])
         && request.resource.data.id == id && request.resource.data.givenBy == fxMe()
         && request.resource.data.kind in ['give', 'opening', 'return'] && (request.resource.data.kind != 'opening' || fxOwner())
+        // one opening per person: only before their balance exists (ChatGPT final P1)
+        && (request.resource.data.kind != 'opening' || !exists(fxP('balances', request.resource.data.to)))
         && fxInt(request.resource.data.amount, 200000) && fxDateOk(request.resource.data.date)
         && request.resource.data.status == 'active' && request.resource.data.confirmedAt == null
         && request.resource.data.createdAt == request.time && fxStr(request.resource.data.note, 120)
         && request.resource.data.to is string && request.resource.data.to != fxMe() && exists(fxP('users', request.resource.data.to))
         && get(fxP('users', request.resource.data.to)).data.active == true
+        && get(fxP('users', request.resource.data.to)).data.role == 'spender'  // cash goes to spenders only (Codex final P2)
         && fxLastOp(request.resource.data.to) == 't:' + id;
       // the recipient confirms "Paisa mila" once; money fields never change
       allow update: if (fxActive() && resource.data.to == fxMe() && resource.data.status == 'active' && resource.data.confirmedAt == null
