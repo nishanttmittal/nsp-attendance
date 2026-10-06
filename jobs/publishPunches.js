@@ -6,6 +6,7 @@ const XLSX = require('xlsx');
 const { session, downloadMonthly } = require('./lib/realtime');
 const { db } = require('./lib/firestore');
 
+const PORTAL_PURGED_BEFORE = '2026-09';
 const MONTHS = (process.env.MONTHS || '0,1').split(',').map(s => parseInt(s, 10));
 const pad = n => String(n).padStart(2, '0');
 const fmt = d => `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()}`;
@@ -41,6 +42,8 @@ async function pullInOut(page, from, to) {
   try {
     for (const offset of MONTHS) {
       const { first, to, label } = range(offset);
+      // Portal punches before Sep-2026 were deleted on 07-10-2026 (owner) — a re-pull would blank these months.
+      if (label < PORTAL_PURGED_BEFORE) { console.log(`publishPunches: SKIP ${label} — portal punches purged before ${PORTAL_PURGED_BEFORE}`); continue; }
       const byCode = await pullInOut(page, fmt(first), fmt(to));
       let batch = db().batch(), n = 0, written = 0;
       for (const code of Object.keys(byCode)) {

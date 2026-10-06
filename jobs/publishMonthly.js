@@ -13,6 +13,7 @@ const { sendTelegram } = require('./lib/notify');
 const pad = n => String(n).padStart(2, '0');
 const fmt = d => `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()}`;
 const OUT_DIR = path.resolve(__dirname, 'downloads');
+const PORTAL_PURGED_BEFORE = '2026-09';
 const MONTHS = (process.env.MONTHS || '0,1').split(',').map(s => parseInt(s.trim(), 10));
 
 async function downloadMonth(page, offset) {
@@ -35,6 +36,8 @@ async function downloadMonth(page, offset) {
     for (const offset of MONTHS) {
       const { label, fullMonth, daysInMonth, emps } = await downloadMonth(page, offset);
       if (frozen.includes(label)) { console.log(`publishMonthly: SKIP frozen month ${label} (att_meta/freeze)`); continue; }
+      // Portal punches before Sep-2026 were deleted on 07-10-2026 (owner) — a re-pull would blank these months.
+      if (label < PORTAL_PURGED_BEFORE) { console.log(`publishMonthly: SKIP ${label} — portal punches purged before ${PORTAL_PURGED_BEFORE}`); continue; }
       let batch = fdb.batch(), n = 0, written = 0;
       for (const e of emps) {
         const rec = {
