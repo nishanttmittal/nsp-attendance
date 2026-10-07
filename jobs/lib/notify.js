@@ -30,7 +30,7 @@ async function enqueueWhatsApp(text) {
     const { db, FieldValue } = require('./firestore');
     // WhatsApp has no HTML: strip the Telegram <b>…</b> tags so names don't show as "<b>name</b>" (07-10-2026)
     await db().collection('wa_outbox').add({
-      text: String(text).replace(/<\/?b>/g, ''),
+      text: String(text).replace(/<\/?(b|i)>/g, ''),
       status: 'pending',
       channel: 'staff',
       createdAt: FieldValue.serverTimestamp(),
