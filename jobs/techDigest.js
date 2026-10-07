@@ -43,7 +43,12 @@ function compact(t) {
   if (uniq.length > MAX_ITEMS) L.push(`• …aur ${uniq.length - MAX_ITEMS} items (Telegram mein poora)`);
   const msg = L.join('\n');
   if (process.env.DRY) { console.log(msg); return; }
-  await sendTelegram(msg);
+  const r = await sendTelegram(msg);
+  if (r && r.wa === false) {   // WhatsApp copy could not be queued — keep the items for the next slot, never drop silently
+    console.error('tech digest: WhatsApp enqueue failed — queue kept for the next run');
+    await ref.set({ lastError: new Date().toISOString() }, { merge: true });
+    return;
+  }
   await ref.set({ items: [], lastSent: new Date().toISOString(), lastCount: items.length }, { merge: true });
   console.log(`tech digest sent (${items.length} items, ${uniq.length} unique)`);
 })().catch(e => { console.error(e); process.exit(1); });

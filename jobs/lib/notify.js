@@ -36,8 +36,10 @@ async function enqueueWhatsApp(text) {
       createdAt: FieldValue.serverTimestamp(),
       createdAtMs: Date.now(),
     });
+    return true;
   } catch (e) {
     console.error('wa_outbox enqueue failed (non-fatal):', e.message);
+    return false;
   }
 }
 
@@ -68,7 +70,7 @@ async function sendTech(text) {
 // (push security review 07-10-2026: entities were decoded in sendTech and then reached the HTML sink).
 function escapeHtml(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 async function sendPlain(text) {
-  await enqueueWhatsApp(text);
+  const wa = await enqueueWhatsApp(text);   // callers that must not lose the message check this
   if (!TOKEN) { console.log('[DRY plain — no token] would send:\n' + text); return { dry: true }; }
   const ids = await recipients();
   for (const chat_id of ids) {
@@ -77,7 +79,7 @@ async function sendPlain(text) {
         body: JSON.stringify({ chat_id, text: escapeHtml(text), parse_mode: 'HTML', disable_web_page_preview: true }) });
     } catch (e) { console.error('plain telegram failed:', e.message); }
   }
-  return { ok: true };
+  return { ok: true, wa };
 }
 
 async function sendTelegram(text) {
