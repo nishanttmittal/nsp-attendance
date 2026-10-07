@@ -3,7 +3,7 @@
 // was getting "Present 0 · Absent 0" — that was this case leaking through as a report).
 const { session } = require('./lib/realtime');
 const { gatherState } = require('./getState');
-const { sendTelegram, sendTech } = require('./lib/notify');
+const { sendPlain: sendTelegram, sendTech } = require('./lib/notify'); // plain text: WA as-is, Telegram escaped
 const { clip, dmy } = require('./lib/simple');
 (async () => {
   const { browser, page } = await session();

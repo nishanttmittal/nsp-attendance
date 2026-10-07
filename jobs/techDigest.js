@@ -3,7 +3,7 @@
 // one by one; they are collected by sendTech() and sent as ONE plain WhatsApp message at 11:00 and 18:00.
 // DRY=1 prints and does not clear the queue.
 const { db } = require('./lib/firestore');
-const { sendTelegram } = require('./lib/notify');
+const { sendPlain: sendTelegram } = require('./lib/notify'); // plain text: WA as-is, Telegram escaped
 const { dmy } = require('./lib/simple');
 const MAX_ITEMS = 12;
 function firstLine(t) { return String(t).split('\n').map(x => x.trim()).filter(Boolean)[0] || ''; }

@@ -63,6 +63,23 @@ async function sendTech(text) {
   return { ok: true };
 }
 
+// PLAIN messages (digests, one-liners): WhatsApp gets the text exactly as written; the Telegram copy is
+// HTML-escaped first, so a "<" or "&" inside a product/worker name can never be parsed as markup
+// (push security review 07-10-2026: entities were decoded in sendTech and then reached the HTML sink).
+function escapeHtml(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+async function sendPlain(text) {
+  await enqueueWhatsApp(text);
+  if (!TOKEN) { console.log('[DRY plain — no token] would send:\n' + text); return { dry: true }; }
+  const ids = await recipients();
+  for (const chat_id of ids) {
+    try {
+      await fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chat_id, text: escapeHtml(text), parse_mode: 'HTML', disable_web_page_preview: true }) });
+    } catch (e) { console.error('plain telegram failed:', e.message); }
+  }
+  return { ok: true };
+}
+
 async function sendTelegram(text) {
   await enqueueWhatsApp(text); // also deliver on WhatsApp (best-effort, never throws)
   if (!TOKEN) { console.log('[DRY notify — no token] would send:\n' + text); return { dry: true }; }
@@ -93,4 +110,4 @@ async function sendTelegramDocument(filePath, caption = '') {
   return body;
 }
 
-module.exports = { sendTelegram, sendTelegramDocument, sendTech };
+module.exports = { sendTelegram, sendTelegramDocument, sendTech, sendPlain };

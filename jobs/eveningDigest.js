@@ -3,7 +3,7 @@
 // welder-production + plating-summary messages. Read-only on welder/plating/salary data.
 // DRY=1 prints instead of sending. DATE=YYYY-MM-DD for a past day.
 const { db } = require('./lib/firestore');
-const { sendTelegram } = require('./lib/notify');
+const { sendPlain: sendTelegram } = require('./lib/notify'); // plain text: WA as-is, Telegram escaped
 const { istToday } = require('./lib/opsdate');
 const { inr, num, dmy } = require('./lib/simple');
 

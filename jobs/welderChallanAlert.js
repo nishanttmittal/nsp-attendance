@@ -3,7 +3,7 @@
 // att_alert_state/welder_challans (our own namespace) so we never touch the live welder app.
 // Safe & additive: read-only on the welder data. Run frequently (every 15 min) from cron.
 const { db, FieldValue } = require('./lib/firestore');
-const { sendTelegram } = require('./lib/notify');
+const { sendPlain: sendTelegram } = require('./lib/notify'); // plain text: WA as-is, Telegram escaped
 const { prettyDate } = require('./lib/opsdate');
 
 const STATE = 'att_alert_state';
