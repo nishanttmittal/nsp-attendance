@@ -3,7 +3,7 @@
 // late_alerts), and points the owner to the Late tab to approve/reject the 25%/50% penalty.
 // Called by worker.js each cycle.
 const { db, FieldValue } = require('./lib/firestore');
-const { sendTelegram } = require('./lib/notify');
+const { sendTech: sendTelegram } = require('./lib/notify'); // tech-only since 07-10-2026 (owner: simple WhatsApp)
 
 const THRESHOLD = 4;
 

@@ -5,7 +5,7 @@ const path = require('path');
 const XLSX = require('xlsx');
 const { session, downloadMonthly } = require('./lib/realtime');
 const { gatherState } = require('./getState');
-const { sendTelegram } = require('./lib/notify');
+const { sendTech: sendTelegram } = require('./lib/notify'); // tech-only since 07-10-2026 (owner: simple WhatsApp)
 const { db } = require('./lib/firestore');
 
 const MODE = (process.env.MODE || 'evening').toLowerCase();

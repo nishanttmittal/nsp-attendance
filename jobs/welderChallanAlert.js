@@ -26,16 +26,8 @@ async function main() {
 
   if (!firstRun) {
     for (const c of fresh) {
-      const lines = [
-        '🧾 <b>New welder challan</b>',
-        `Challan: <b>${esc(c.welderChallan || c.id)}</b>`,
-        `Welder: ${esc(c.welder || '-')}`,
-        `Product: ${esc(c.finishedName || c.productName || '-')}`,
-        `Qty: <b>${c.qty ?? '-'}</b>`,
-        `Party: ${esc(c.party || '-')}${c.gaadi ? ' · Gaadi ' + esc(c.gaadi) : ''}`,
-        c.date ? `Date: ${prettyDate(c.date)}` : '',
-      ].filter(Boolean);
-      await sendTelegram(lines.join('\n'));
+      const line = `🧾 Challan ${c.welderChallan || c.id}: ${c.welder || '-'}, ${c.finishedName || c.productName || '-'} ${c.qty ?? '-'} pcs → ${c.party || '-'}${c.gaadi && c.gaadi !== '0000' ? ' (gaadi ' + c.gaadi + ')' : ''}`;
+      await sendTelegram(line);
     }
   }
 

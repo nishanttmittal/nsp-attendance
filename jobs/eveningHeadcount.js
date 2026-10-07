@@ -5,21 +5,10 @@ const { gatherState } = require('./getState');
 const { sendTelegram } = require('./lib/notify');
 
 function composeMessage(s) {
-  const dept = Object.entries(s.perDept).sort((a, b) => b[1] - a[1])
-    .map(([d, n]) => `  • ${d}: ${n}`).join('\n');
-  const late = s.late.length
-    ? s.late.map(l => `  • ${l.name} (${l.dept}) in ${l.inT}`).join('\n')
-    : '  • none';
+  // owner 07-10-2026: simple — one line for the kitchen, one for the floor
   return [
-    `<b>🍽️ Evening headcount — order food for ${s.mealHeadcount}</b>`,
-    `(still in, excluding ${s.mealExcludes}; ${s.stillInCount} total still in)`,
-    ``,
-    `<b>Present now:</b> ${s.counts.totalPresent ?? s.presentTotal}  ·  Absent: ${s.counts.totalAbsent ?? '—'}`,
-    `<b>By department:</b>`,
-    dept,
-    ``,
-    `<b>Late today (${s.lateCount}):</b>`,
-    late,
+    `🍽️ Khana order: ${s.mealHeadcount} (welders chhod kar)`,
+    `Present ${s.counts.totalPresent ?? s.presentTotal} · Absent ${s.counts.totalAbsent ?? '—'} · Late ${s.lateCount}`,
   ].join('\n');
 }
 

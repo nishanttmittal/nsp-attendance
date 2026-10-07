@@ -4,7 +4,7 @@
 // price moved sharply. Silent when all is well. Runs in GitHub Actions (has secrets +
 // Firestore + Telegram token) — the piece the cloud PRICE CHECK routine can't cover.
 const { db } = require('./lib/firestore');
-const { sendTelegram } = require('./lib/notify');
+const { sendTech: sendTelegram } = require('./lib/notify'); // tech-only since 07-10-2026 (owner: simple WhatsApp)
 
 const BIG_MOVE_PCT = 6;                 // flag any tracked price that moved >= this
 const istDate = () => new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);

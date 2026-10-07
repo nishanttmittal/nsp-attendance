@@ -4,7 +4,7 @@ const path = require('path');
 const fs = require('fs');
 const { session, setField, downloadMonthly } = require('./lib/realtime');
 const { parseSummary, range } = require('./salaryData');
-const { sendTelegram } = require('./lib/notify');
+const { sendTech: sendTelegram } = require('./lib/notify'); // tech-only since 07-10-2026 (owner: simple WhatsApp)
 const { db } = require('./lib/firestore');
 
 const MONTH = parseInt(process.env.MONTH || '0', 10);

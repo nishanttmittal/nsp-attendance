@@ -41,6 +41,20 @@ async function enqueueWhatsApp(text) {
   }
 }
 
+// Technical/ops alerts (owner 07-10-2026: "very simple reports on my WhatsApp") — Telegram ONLY,
+// never mirrored to the owner's WhatsApp. Use for watchdogs, portal/sync failures, backups, price feeds.
+async function sendTech(text) {
+  if (!TOKEN) { console.log('[DRY tech — no token] would send:\n' + text); return { dry: true }; }
+  const ids = await recipients();
+  for (const chat_id of ids) {
+    try {
+      await fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chat_id, text, parse_mode: 'HTML', disable_web_page_preview: true }) });
+    } catch (e) { console.error('tech telegram failed:', e.message); }
+  }
+  return { ok: true };
+}
+
 async function sendTelegram(text) {
   await enqueueWhatsApp(text); // also deliver on WhatsApp (best-effort, never throws)
   if (!TOKEN) { console.log('[DRY notify — no token] would send:\n' + text); return { dry: true }; }
@@ -71,4 +85,4 @@ async function sendTelegramDocument(filePath, caption = '') {
   return body;
 }
 
-module.exports = { sendTelegram, sendTelegramDocument };
+module.exports = { sendTelegram, sendTelegramDocument, sendTech };

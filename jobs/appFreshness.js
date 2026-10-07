@@ -3,7 +3,7 @@
 // NOTHING for longer than its threshold, Telegram the owner — silence must never again
 // look like success. Runs daily from alerts.yml. DRY=1 prints instead of alerting.
 const { db } = require('./lib/firestore');
-const { sendTelegram } = require('./lib/notify');
+const { sendTech: sendTelegram } = require('./lib/notify'); // tech-only since 07-10-2026 (owner: simple WhatsApp)
 
 // app → where its heartbeat lives + how many quiet days are normal before alarm.
 const WATCH = [

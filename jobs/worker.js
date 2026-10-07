@@ -4,7 +4,7 @@ const { execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const { db } = require('./lib/firestore');
-const { sendTelegram, sendTelegramDocument } = require('./lib/notify');
+const { sendTelegram, sendTelegramDocument, sendTech } = require('./lib/notify');
 const { drainSelfPunch } = require('./selfPunch');
 const { captureLate } = require('./lateCapture');
 const { alertLate } = require('./lateAlert');
@@ -502,7 +502,7 @@ async function selfHealFloor() {
   // token dead / portal down), throttled to 1/hour, so a normal cron-miss self-heals silently.
   if (nowMin - due.min > 30 && now - (Date.parse(s.lastAlert || 0) || 0) > 60 * 60 * 1000) {
     const last = pubAt ? new Date(pubAt + 5.5 * 3600 * 1000).toISOString().slice(11, 16) + ' IST' : 'never today';
-    await sendTelegram(`⚠️ The ${due.label} floor update didn't run (last pull ${last}). Auto-retry isn't taking — check the biometric device / the app's data token.`).catch(() => {});
+    await sendTech(`⚠️ The ${due.label} floor update didn't run (last pull ${last}). Auto-retry isn't taking — check the biometric device / the app's data token.`).catch(() => {});
     patch.lastAlert = new Date(now).toISOString();
   }
   if (Object.keys(patch).length) await ref.set(patch, { merge: true });

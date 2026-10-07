@@ -8,7 +8,7 @@
 const path = require('path');
 const fs = require('fs');
 const { session } = require('./lib/realtime');
-const { sendTelegram } = require('./lib/notify');
+const { sendTech: sendTelegram } = require('./lib/notify'); // tech-only since 07-10-2026 (owner: simple WhatsApp)
 
 const BASELINE = path.resolve(__dirname, 'shiftBaseline.json');
 const PAGES = [
