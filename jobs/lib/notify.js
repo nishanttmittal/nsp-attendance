@@ -44,6 +44,14 @@ async function enqueueWhatsApp(text) {
 // Technical/ops alerts (owner 07-10-2026: "very simple reports on my WhatsApp") — Telegram ONLY,
 // never mirrored to the owner's WhatsApp. Use for watchdogs, portal/sync failures, backups, price feeds.
 async function sendTech(text) {
+  // owner 07-10-2026: "i should receive it one at 11 am and other at 6pm" — every tech alert is also
+  // queued into att_alert_state/tech_digest; techDigest.js sends ONE plain WhatsApp message at 11:00 and 18:00.
+  try {
+    const { db, FieldValue } = require('./firestore');
+    const plain = String(text).replace(/<[^>]+>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+    await db().collection('att_alert_state').doc('tech_digest').set(
+      { items: FieldValue.arrayUnion({ at: new Date().toISOString(), text: plain.slice(0, 600) }) }, { merge: true });
+  } catch (e) { console.error('tech digest queue failed (non-fatal):', e.message); }
   if (!TOKEN) { console.log('[DRY tech — no token] would send:\n' + text); return { dry: true }; }
   const ids = await recipients();
   for (const chat_id of ids) {
