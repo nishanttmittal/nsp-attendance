@@ -2,7 +2,7 @@
 // plus present count, per-dept, and the day's late-comers. Run by GH Actions cron ~17:40.
 const { session } = require('./lib/realtime');
 const { gatherState } = require('./getState');
-const { sendPlain: sendTelegram } = require('./lib/notify'); // plain text: WA as-is, Telegram escaped
+const { sendPlain: sendTelegram, sendTech } = require('./lib/notify'); // plain text: WA as-is, Telegram escaped
 
 function composeMessage(s) {
   // owner 07-10-2026: simple — one line for the kitchen, one for the floor
@@ -17,6 +17,7 @@ if (require.main === module) {
     const { browser, page } = await session();
     try {
       const state = await gatherState(page);
+      if (!(state.counts?.totalPresent ?? state.presentTotal) && !state.counts?.totalAbsent) { await sendTech('food headcount held — portal returned 0 present / 0 absent'); console.error('held: zeros'); return; }
       const msg = composeMessage(state);
       await sendTelegram(msg);
     } finally { await browser.close(); }
