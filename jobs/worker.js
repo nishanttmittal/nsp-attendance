@@ -366,7 +366,7 @@ async function handle(type, p) {
     // notifyOnly (2026-07-22): the OWNER app already wrote this advance directly (addAdvanceDirect)
     // for instant display; this job exists only to fire the Telegram alert in the background.
     if (p.notifyOnly) {
-      await sendTelegram(`💸 Advance ₹${p.advance.amount} to ${p.code} (${p.advance.mode}) by ${p.advance.paidBy || '?'}.${clashWarn}`);
+      await sendTelegram(`💸 Advance ₹${p.advance.amount} to <b>${empData.name || p.code}</b>${empData.name ? ` (${p.code})` : ''} (${p.advance.mode}) by ${p.advance.paidBy || '?'}.${clashWarn}`);
       return already ? 'advance already applied — notified' : 'advance notified';
     }
     // DEDUPE (fix 2026-07-18): a stale-recovery re-run (runner killed after the write, before
@@ -376,7 +376,7 @@ async function handle(type, p) {
     }
     advances.push(p.advance);
     await ref.set({ advances }, { merge: true });
-    await sendTelegram(`💸 Advance ₹${p.advance.amount} to ${p.code} (${p.advance.mode}) by ${p.advance.paidBy || '?'}.${clashWarn}`);
+    await sendTelegram(`💸 Advance ₹${p.advance.amount} to <b>${empData.name || p.code}</b>${empData.name ? ` (${p.code})` : ''} (${p.advance.mode}) by ${p.advance.paidBy || '?'}.${clashWarn}`);
     return 'advance added';
   }
   if (type === 'extra_photo') {  // owner 01-10-2026 "add photos if available": optional photo of extra loaders
