@@ -10,9 +10,12 @@ service cloud.firestore {
     function nonAnon() { return gVerified(); }
 
     // ===== Self-punch (login-free link for app-only staff e.g. Radhey/Dinesh) =====
-    // att_punch: public read of name + times only (NO salary). Written only by the worker (Admin SDK).
+    // att_punch: name + in/out times only (NO salary). Written only by the back-office worker job (Admin SDK).
     match /att_punch/{code} {
-      allow read: if true;
+      // Owner 07-10-2026: "no one would be able to see punch details except me and anshul" → office staff only
+      // (owner + active att_users). The login-free punch page can still RECORD a tap (att_self_punch below);
+      // it no longer shows the worker his name / today's times, only the "recorded at HH:MM" confirmation.
+      allow read: if attStaff();
       allow write: if false;
     }
     // att_self_punch: anyone with the link may CREATE a tap; the worker validates the token
@@ -94,19 +97,133 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
     function fUser() { return signedIn() && (bootstrapOwner() || (fExists() && get(fPath()).data.active == true)); }
 
     // ---- Fitting (allowlist-locked: only active users-doc emails + bootstrap owner) ----
-    match /apps/fitting/users/{id} { allow read: if nonAnon(); allow write: if fOwner(); }
+    // own doc, or the whole list for a Fitting owner (owner 08-10-2026: close the readable users lists)
+    match /apps/fitting/users/{id} { allow read: if nonAnon() && (id == tEmail() || fOwner()); allow write: if fOwner(); }
     match /apps/fitting/{collection}/{docId} { allow read, write: if fUser() && collection != 'users'; }
     match /apps/fitting { allow read, write: if fUser(); }
 
     // ---- Orders (allowlist-locked: only Google users added in Admin → Users) ----
+    // TIGHTENED 2026-10-08 (owner: "anshul ji cannot delete anything only modify it and that modification will be
+    // available for me to check"; Day Report / Logs / Money are owner-only). What the rules now guarantee, whatever
+    // the app or anyone with a staff login tries:
+    //   • only the OWNER can delete anything, cancel an order, or change price / advance
+    //   • a manager can create orders (as himself, without money), correct them and mark dispatch, but can never
+    //     remove a line, change the order number or whose order it is
+    //   • customer / item names: staff may ADD, only the owner may change or delete
+    //   • the change log is write-once, stamped with the signer's own email, and readable by the owner only
+    //   • the order-number counter can only go up
+    // The laptop jobs use the Admin SDK and are not affected by these rules.
     function oPath()  { return /databases/$(database)/documents/apps/orders/users/$(tEmail()); }
     function oUser()  { return signedIn() && (bootstrapOwner() || (tEmail() != '' && exists(oPath()) && get(oPath()).data.active == true)); }
     function oOwner() { return signedIn() && (bootstrapOwner() || (tEmail() != '' && exists(oPath()) && get(oPath()).data.active == true && get(oPath()).data.role == 'owner')); }
-    // users allowlist: any signed-in device may READ (to resolve role at login); only owner WRITES
-    match /apps/orders/users/{id} { allow read: if nonAnon(); allow write: if oOwner(); }
-    // all other orders data: only allowlisted users (the != 'users' guard keeps this generic rule from granting writes to the users list)
-    match /apps/orders/{collection}/{docId} { allow read, write: if oUser() && collection != 'users'; }
-    match /apps/orders { allow read, write: if oUser(); }
+    // manager or owner (the people who may post to the staff group and correct orders)
+    function oManager() { return signedIn() && (bootstrapOwner() || (tEmail() != '' && exists(oPath()) && get(oPath()).data.active == true && get(oPath()).data.role in ['owner', 'manager'])); }
+    function oUnchanged(keys) { return !request.resource.data.diff(resource.data).affectedKeys().hasAny(keys); }
+
+    // users allowlist: only people ON the list (and the owner) may read it — a stranger with a Google account gets
+    // nothing, and the app shows him "No access"; only the owner writes
+    match /apps/orders/users/{id} { allow read: if oUser(); allow write: if oOwner(); }
+
+    // the staff-group line of an order ("mirror"): staff may only ask for a FAILED line to be sent again — never mark
+    // one as sent, never touch what the laptop job recorded
+    function oResendOk(n, o) {
+      return o.get('mirror', {}).get('status', 'none') in ['held', 'failed', 'uncertain']
+             && n.mirror.status == 'pending'
+             && n.mirror.diff(o.get('mirror', {})).affectedKeys().hasOnly(['status', 'retry', 'why']);
+    }
+    // correction / added-line notes for the staff group: ONE new note at the end, signed by the person, waiting to go;
+    // notes already there (sent or not) cannot be touched, so a sent note can never be made to go again
+    function oNoteOk(n, o) {
+      let was = o.get('groupNotes', []);
+      let last = n.groupNotes[n.groupNotes.size() - 1];
+      return n.groupNotes.size() == was.size() + 1
+             && (was.size() == 0 || n.groupNotes[0:was.size()] == was)
+             && last.keys().hasOnly(['id', 'kind', 'lines', 'status', 'at', 'by'])
+             && last.by == tEmail() && last.status == 'pending' && last.kind in ['ADD', 'EDIT']
+             && last.lines is list && last.lines.size() >= 1 && last.lines.size() <= 40;
+    }
+    function oNewOrderOk(d) {
+      let m = d.get('mirror', {});
+      let ms = m.get('status', 'none');
+      return d.createdByEmail == tEmail()
+             && d.get('price', 0) == 0 && d.get('advance', 0) == 0
+             && d.status == 'pending' && d.get('source', 'app') == 'app'
+             && d.orderNo is string && d.orderNo.matches('^UO-[0-9]{4,6}$')
+             && int(d.orderNo.split('-')[1]) < get(/databases/$(database)/documents/apps/orders/meta/counter).data.next
+             && d.clientName is string && d.clientName.size() <= 80
+             && d.items is list && d.items.size() >= 1 && d.items.size() <= 40
+             && !d.keys().hasAny(['groupNotes', 'notePending', 'cancelledAt', 'cancelledBy', 'cancelReason', 'test', 'scanKey', 'scanRef'])
+             && m.keys().hasOnly(['status'])
+             && (ms == 'none' ? oUser() : (ms == 'pending' && oManager()));
+    }
+    function oOrderEditOk(n, o, ch) {
+      return ch.hasOnly(['clientName', 'items', 'status', 'groupNotes', 'notePending', 'editedAt', 'editedBy', 'lastDispatchAt', 'mirror'])
+             && o.get('status', 'pending') != 'cancelled'
+             && n.get('status', 'pending') in ['pending', 'production', 'ready', 'dispatched']
+             && n.items is list && n.items.size() >= o.get('items', []).size() && n.items.size() <= 40
+             && n.clientName is string && n.clientName.size() <= 80
+             && (!ch.hasAny(['mirror']) || oResendOk(n, o))
+             && (!ch.hasAny(['groupNotes']) || oNoteOk(n, o))
+             && (!ch.hasAny(['notePending']) || n.notePending == true)
+             && oManager();
+    }
+
+    match /apps/orders/orders/{id} {
+      allow read: if oUser();
+      // a new order is always stamped with the signer's own email; only the owner may enter money; only a manager /
+      // owner may ask for a line in the staff group; the number must be one the shared counter has already given out
+      allow create: if oOwner() || oNewOrderOk(request.resource.data);
+      // manager: may correct an order and enter dispatch — only the listed fields, never the number, whose order it
+      // is, money, dates or remarks; never cancel; never end up with fewer lines than before.
+      // LIMIT (rules cannot loop over a list): the rule checks the NUMBER of lines, not what is in each line. A manager
+      // may rewrite a line's item or quantity — that is the "modify" the owner allows. What makes every such change
+      // visible is not this rule but the twice-daily audit snapshot taken by the laptop job (Admin SDK), which compares
+      // every order with the copy before and writes its own log entries that no app login can write or alter.
+      allow update: if oOwner() || oOrderEditOk(request.resource.data, resource.data, request.resource.data.diff(resource.data).affectedKeys());
+      allow delete: if oOwner();
+    }
+
+    // customer and item names: staff add, only the owner changes or deletes
+    match /apps/orders/clients/{id}  { allow read: if oUser(); allow create: if oManager() && request.resource.data.name is string && request.resource.data.name.size() <= 80; allow update, delete: if oOwner(); }
+    match /apps/orders/products/{id} { allow read: if oUser(); allow create: if oManager() && request.resource.data.name is string && request.resource.data.name.size() <= 120; allow update, delete: if oOwner(); }
+
+    // change log: write-once, stamped with the signer's own email; only the owner reads it
+    match /apps/orders/logs/{id} {
+      allow read: if oOwner();
+      // `at` must be the SERVER's clock (so an entry cannot be back-dated), and only the known fields are accepted
+      allow create: if oUser() && request.resource.data.get('byEmail', '') == tEmail()
+                    && request.resource.data.get('at', null) == request.time
+                    && request.resource.data.keys().hasOnly(['id', 'ts', 'at', 'action', 'detail', 'by', 'ref', 'byEmail'])
+                    && request.resource.data.get('action', '') is string && request.resource.data.get('action', '').size() <= 40
+                    && request.resource.data.get('detail', '') is string && request.resource.data.get('detail', '').size() <= 2000
+                    && (oOwner() || request.resource.data.get('by', '') != 'owner')
+                    // these two kinds are written only by the laptop jobs (Admin SDK): no phone login may write one
+                    && !(request.resource.data.get('action', '') in ['AUDIT', 'PAD_CORRECTION']);
+      allow update, delete: if false;
+    }
+
+    // doubts: written by the laptop job (Admin SDK); manager / owner settle them, nobody deletes
+    match /apps/orders/doubts/{id} {
+      allow read: if oManager();
+      allow create: if oOwner();
+      allow update: if oOwner() || (oManager() && oUnchanged(['customer', 'question', 'source', 'orderId', 'orderNo', 'createdAt', 'lines']));
+      allow delete: if oOwner();
+    }
+
+    // order-number counter: the number can only go up
+    match /apps/orders/meta/{id} {
+      allow read: if oUser();
+      // the number moves forward a little at a time: it can never go back, and never be thrown far ahead
+      allow create: if oUser() && id == 'counter' && request.resource.data.next is int && request.resource.data.next >= 2 && request.resource.data.next <= 50;
+      allow update: if oUser() && id == 'counter' && request.resource.data.next is int && request.resource.data.next > resource.data.next && request.resource.data.next <= resource.data.next + 20;
+      allow delete: if false;
+    }
+
+    // anything else under apps/orders (old WhatsApp inbox, future collections): owner only
+    match /apps/orders/{collection}/{docId} {
+      allow read, write: if oOwner() && !(collection in ['users', 'orders', 'clients', 'products', 'logs', 'doubts', 'meta']);
+    }
+    match /apps/orders { allow read: if oUser(); allow write: if oOwner(); }
 
     // ---- Welder Contractor (allowlist-locked; staff = entry only, NO pay data) ----
     // wUser = any active allowlisted user (staff/manager/owner) or bootstrap owner.
@@ -162,7 +279,8 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
     match /apps/plasticjobwork/meta/counter    { allow read, write: if plUser(); }
     match /apps/plasticjobwork/purchases/{id}  { allow read, write: if plOwner(); }
     match /apps/plasticjobwork/payments/{id}   { allow read, write: if plOwner(); }
-    match /apps/plasticjobwork/users/{id}      { allow read: if nonAnon(); allow write: if plOwner(); }
+    // own doc, or the whole list for a Plastic owner (owner 07-10-2026: close the readable users lists)
+    match /apps/plasticjobwork/users/{id}      { allow read: if nonAnon() && (id == tEmail() || plOwner()); allow write: if plOwner(); }
 
     // ---- UNICO Laser (BOCHU IoT) — read-only analytics; written only by the sync (Admin SDK).
     // LOCKED: requires a NON-anonymous Google login on the allowlist (bootstrap owner + active
@@ -236,7 +354,7 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
     // Job catalog (name + photo, optional file link) — staff/owner add for recall.
     match /laser_job_catalog/{id} { allow read: if laserUser(); allow write: if laserUser(); }
     // Allowlist: any signed-in user may READ (to resolve their own access at login); owner writes.
-    match /apps/laser/users/{id} { allow read: if nonAnon(); allow write: if bootstrapOwner(); }
+    match /apps/laser/users/{id} { allow read: if nonAnon() && (id == tEmail() || laserOwner()); allow write: if bootstrapOwner(); }
     // Quote workspace (products/customers/quotes) — owner-only: quotes carry cost basis + margins.
     match /apps/laser/products/{id}  { allow read, write: if laserOwner(); }
     match /apps/laser/customers/{id} { allow read, write: if laserOwner(); }
@@ -328,7 +446,7 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
     match /costing_material_rates/{id} { allow read: if costStaff(); allow write: if costOwner(); }
     match /costing_rate_snapshots/{id} { allow read: if costStaff(); allow write: if false; }
     match /costing_price_history/{id} { allow read: if costOwner(); allow create: if costOwner(); allow update, delete: if false; }
-    match /apps/costing/users/{id}    { allow read: if nonAnon(); allow write: if costOwner(); }
+    match /apps/costing/users/{id}    { allow read: if nonAnon() && (id == tEmail() || costOwner()); allow write: if costOwner(); }
     // Quote builder (Phase 1): cut-rates read-only for staff (admin SDK writes them);
     // quotes staff-readable/owner-write; cost snapshot owner-only (two-vault).
     match /costing_cut_rates/{id}     { allow read: if costStaff(); allow write: if false; }
@@ -346,7 +464,7 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
     // login (bootstrap owner, or an active apps/hisab/users allowlist email). No anon reads.
     function hiPath()  { return /databases/$(database)/documents/apps/hisab/users/$(tEmail()); }
     function hiUser()  { return nonAnon() && (bootstrapOwner() || (tEmail() != '' && exists(hiPath()) && get(hiPath()).data.active == true)); }
-    match /apps/hisab/users/{id}           { allow read: if nonAnon(); allow write: if bootstrapOwner(); }
+    match /apps/hisab/users/{id}           { allow read: if nonAnon() && (id == tEmail() || bootstrapOwner()); allow write: if bootstrapOwner(); }
     match /apps/hisab/{collection}/{docId} { allow read, write: if hiUser() && collection != 'users'; }
     match /apps/hisab                      { allow read, write: if hiUser(); }
 
@@ -663,7 +781,8 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
     // >>> FALCON BLOCK (managed by falcon/rules/compose.mjs — do not edit by hand)
     // ---- FALCON (apps/falcon) — falcon/SPEC.md, 01-Oct-2026; slimmed 04-Oct (one role lookup per write) ----
     // Roles from apps/falcon/users/{email}: role 'owner' | 'incharge' | 'spender', active == true. Google login only.
-    // Money integrity: every entry/transfer create or cancel is ONE batch with its balances/{email} write;
+    // Money integrity: every entry/transfer create or cancel is ONE batch with its balances/{email} write (a transfer with fromBal == true —
+    // worker → worker 'hand', or Anshul ji's give / wapas — writes TWO balances: giver and receiver);
     // each side checks the other with getAfter (lastOp = 'e:'|'x:'|'t:'|'y:' + record id). No deletes anywhere.
     // Firestore evaluates at most 1,000 expressions per request, so each rule resolves the caller's role ONCE
     // (`let role = fxRoleOf()`) instead of calling fxActive/fxStaff/fxOwner repeatedly.
@@ -700,6 +819,8 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
     }
 
     function fxUsersRead(id) { let role = fxRoleOf(); return role != '' && (id == fxMe() || role in ['owner', 'incharge']); }
+    // the people list (name, Gmail, role): any active member — a worker picks the saathi he hands cash to (owner 08-10-2026)
+    function fxUsersList() { return fxRoleOf() != ''; }
     function fxUsersCreate(id) {
       let d = request.resource.data;
       return fxRoleOf() == 'owner' && id == id.lower()
@@ -708,7 +829,7 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
         && d.active is bool && fxStr(d.name, 40) && d.name.size() > 0;
     }
     match /apps/falcon/users/{id} {
-      allow read: if fxUsersRead(id);
+      allow read: if fxUsersList();
       allow create: if fxUsersCreate(id);
       // after creation the app only switches a person on/off — name and role never change from a phone
       allow update: if fxRoleOf() == 'owner'
@@ -717,21 +838,38 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
       allow delete: if false;
     }
 
+    // heads a tile may write. 'Suspense' is NOT here on purpose (only a staff correction may park a line there).
+    // Contractor / Party payment / Owner personal = Anshul ji's tiles (owner 08-10-2026).
+    function fxHead(h) {
+      return h in ['Tea', 'Purchase Tax Free', 'Cartage', 'Petrol', 'Food', 'Loading/unloading', 'Maintanance Account', 'Factory Exp',
+        'Kaanta', 'Safai saman', 'Die / tool kaam', 'Office saman', 'Pani', 'Medical / pooja', 'Contractor', 'Party payment', 'Owner personal'];
+    }
     function fxEntryRead() { let role = fxRoleOf(); return role != '' && (resource.data.by == fxMe() || role in ['owner', 'incharge']); }
     function fxEntryCreate(id) {
       let d = request.resource.data;
       let me = fxMe();
-      return fxActive()
+      let role = fxRoleOf();
+      return role != ''
         && d.keys().hasOnly(['id', 'by', 'byName', 'kind', 'head', 'amount', 'detail', 'place', 'advFor', 'advStatus',
-             'date', 'hasPhoto', 'status', 'createdAt', 'clientAt', 'deviceId', 'schemaVersion'])
+             'date', 'hasPhoto', 'status', 'createdAt', 'clientAt', 'deviceId', 'schemaVersion', 'approval', 'hisab'])
         && d.id == id && d.by == me
+        // approval (owner 08-10-2026): a worker's line waits for the owner / Anshul ji; their own lines are OK at once.
+        // hisab: null until the line is closed into a 'Hisab final'.
+        // (d.get: a phone still on the old build in the cut-over minutes sends neither key — treated as pending / null)
+        && d.get('approval', 'pending') == (role == 'spender' ? 'pending' : 'ok') && d.get('hisab', null) == null
         && d.kind in ['chai', 'saman', 'rick', 'petrol', 'khana', 'labour', 'bilty', 'repair', 'other', 'adv']
-        && fxInt(d.amount, 50000) && fxDateOk(d.date)
+        // one line: a worker up to ₹50,000; Anshul ji / owner up to ₹2,00,000 (his hisab has ₹1,00,000 lines)
+        && fxInt(d.amount, role == 'spender' ? 50000 : 200000) && fxDateOk(d.date)
         && d.status == 'active' && d.createdAt == request.time
         && d.hasPhoto is bool && fxStr(d.detail, 120) && fxStr(d.head, 40) && fxStr(d.byName, 40)
+        // head is written by the phone: only the heads the tiles use (fxHead), so a tampered phone cannot invent one
+        && (d.head == '' || fxHead(d.head))
+        // Anshul ji's heads are not a worker's
+        && (role != 'spender' || !(d.head in ['Contractor', 'Party payment', 'Owner personal']))
         && (d.kind != 'adv' || d.advStatus == 'pending')
-        // photo compulsory: saman + bilty always; petrol / repair / other above ₹200 (same as logic/falcon.js photoRequired)
-        && (!(d.kind in ['saman', 'bilty'] || (d.kind in ['petrol', 'repair', 'other'] && d.amount > 200)) || d.hasPhoto == true)
+        // photo compulsory for a spender: saman + bilty always; petrol / repair / other above ₹200 (same as logic/falcon.js
+        // photoRequired). Anshul ji and the owner may save without one (owner 07-10-2026: "anshul need not enter photos").
+        && (role != 'spender' || !(d.kind in ['saman', 'bilty'] || (d.kind in ['petrol', 'repair', 'other'] && d.amount > 200)) || d.hasPhoto == true)
         && (d.hasPhoto == false || existsAfter(fxP('photos', id)))
         && fxLastOp(me) == 'e:' + id;
     }
@@ -740,7 +878,17 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
       let me = fxMe();
       let o = resource.data;
       let r = request.resource.data;
-      return role != '' && (
+      return role != '' && o.get('hisab', null) == null && (
+        // staff OK a worker's line (owner 08-10-2026): nothing else changes, money untouched
+        (role in ['owner', 'incharge'] && o.status == 'active' && o.get('approval', 'pending') == 'pending'
+          && r.diff(o).affectedKeys().hasOnly(['approval', 'approvedBy', 'approvedAt'])
+          && r.approval == 'ok' && r.approvedBy == me && r.approvedAt == request.time)
+        // Hisab final: staff close every line of one worker into hisabs/{hid} (created in the same batch); only OK'd or
+        // cancelled lines may close, so nothing pending ever disappears from the worker's screen unreviewed
+        || (role in ['owner', 'incharge'] && r.diff(o).affectedKeys().hasOnly(['hisab'])
+          && r.hisab is string && fxHisabOf(r.hisab, o.by)
+          && (o.status == 'cancelled' || o.get('approval', 'pending') == 'ok'))
+        ||
         // cancel: staff any time; the spender their own line within 24 h
         (fxCancelOk(me, o, r)
           && (role in ['owner', 'incharge'] || (o.by == me && request.time < o.createdAt + duration.value(24, 'h')))
@@ -749,6 +897,22 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
         || (role == 'owner' && o.kind == 'adv' && o.status == 'active' && o.advStatus == 'pending'
           && r.diff(o).affectedKeys().hasOnly(['advStatus', 'advDoneBy', 'advDoneAt'])
           && r.advStatus == 'entered' && r.advDoneBy == me && r.advDoneAt == request.time)
+        // owner / Anshul ji correct the NAME (detail) and the kharcha TYPE (head) of an active line (owner 08-10-2026).
+        // Amount, date, person and photo never change, so no balance moves. The value before the edit is kept on the line.
+        || (role in ['owner', 'incharge'] && o.status == 'active'
+          && r.diff(o).affectedKeys().hasOnly(['detail', 'head', 'advFor', 'editedBy', 'editedAt', 'oldDetail', 'oldHead', 'firstDetail', 'firstHead'])
+          && fxStr(r.detail, 120) && r.detail.size() > 0
+          && r.editedBy == me && r.editedAt == request.time
+          && r.oldDetail == o.detail && r.oldHead == o.get('head', '')
+          // the very first values are kept for ever (write-once), however many edits follow
+          && r.firstDetail == o.get('firstDetail', o.detail) && r.firstHead == o.get('firstHead', o.get('head', ''))
+          // an advance already entered in Attendance keeps its name (Attendance was booked under it)
+          && (o.kind != 'adv' || o.get('advStatus', '') != 'entered')
+          // an advance has no head; its name is the person, kept in step with advFor
+          && (o.kind == 'adv'
+            ? (r.get('head', '') == o.get('head', '') && r.advFor.name == r.detail && r.advFor.get('code', '') == o.advFor.get('code', ''))
+            : (r.get('advFor', null) == o.get('advFor', null)
+              && (r.head == 'Suspense' || fxHead(r.head)))))
       );
     }
     match /apps/falcon/entries/{id} {
@@ -775,24 +939,42 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
       allow update, delete: if false;
     }
 
-    function fxTransferRead() { let role = fxRoleOf(); return role != '' && (resource.data.to == fxMe() || role in ['owner', 'incharge']); }
+    function fxTransferRead() { let role = fxRoleOf(); return role != '' && (resource.data.to == fxMe() || resource.data.givenBy == fxMe() || role in ['owner', 'incharge']); }
     function fxTransferCreate(id) {
       let d = request.resource.data;
       let role = fxRoleOf();
       let me = fxMe();
-      return role in ['owner', 'incharge']
-        && d.keys().hasOnly(['id', 'to', 'toName', 'amount', 'kind', 'note', 'date', 'givenBy', 'givenByName',
-             'createdAt', 'clientAt', 'confirmedAt', 'confirmedBy', 'status', 'deviceId', 'schemaVersion'])
-        && d.id == id && d.givenBy == me
-        && d.kind in ['give', 'opening', 'return']
-        // one opening per person, owner only, and only before their balance exists
-        && (d.kind != 'opening' || (role == 'owner' && !exists(fxP('balances', d.to))))
+      // 'hand' = one worker hands cash to another (owner 08-10-2026: Sandeep ⇄ Jitender). Only a spender creates it, and
+      // BOTH balances move in the same batch: the giver's received goes down, the receiver's goes up.
+      // Anshul ji's own float (owner 08-10-2026): the owner gives cash to Anshul ji too; Anshul ji's give / wapas to a worker
+      // carries fromBal == true and moves HIS balance as well; 'in' = cash Anshul ji received (from the owner or elsewhere:
+      // O-50, Sachin, scrap…), written by himself on himself, source in the note. Owner OR Anshul ji may record the owner's cash.
+      let fromBal = d.get('fromBal', false);
+      return d.keys().hasOnly(['id', 'to', 'toName', 'amount', 'kind', 'note', 'date', 'givenBy', 'givenByName', 'fromBal',
+             'createdAt', 'clientAt', 'confirmedAt', 'confirmedBy', 'status', 'deviceId', 'schemaVersion', 'hisab'])
+        && d.id == id && d.givenBy == me && d.to is string && d.get('hisab', null) == null
+        && fxStr(d.toName, 40) && fxStr(d.givenByName, 40)
         && fxInt(d.amount, 200000) && fxDateOk(d.date)
         && d.status == 'active' && d.confirmedAt == null
         && d.createdAt == request.time && fxStr(d.note, 120)
-        // cash goes to an active spender only (never to self, the owner or Anshul ji)
-        && d.to is string && d.to != me && exists(fxP('users', d.to)) && fxUserRole(fxP('users', d.to)) == 'spender'
-        && fxLastOp(d.to) == 't:' + id;
+        && fxLastOp(d.to) == 't:' + id
+        && (d.kind == 'in'
+          ? (role == 'incharge' && d.to == me && fromBal == false && d.note.size() > 0)
+          : (d.to != me && exists(fxP('users', d.to)) && fxTransferPair(d.kind, role, fxUserRole(fxP('users', d.to)), fromBal)
+            // one opening per person, and only before their balance exists
+            && (d.kind != 'opening' || !exists(fxP('balances', d.to)))
+            && (fromBal == false || fxLastOp(me) == 't:' + id)
+            // a worker cannot hand over more than he holds (same doc as fxLastOp(me), so no extra read)
+            && (d.kind != 'hand' || fxInHandAfter(me) >= 0)));
+    }
+    function fxInHandAfter(email) { let b = getAfter(fxP('balances', email)).data; return b.get('received', 0) - b.get('spent', 0); }
+    // who may move cash to whom (giver role → receiver role), and whether the giver's own balance moves (fromBal)
+    function fxTransferPair(kind, role, toRole, fromBal) {
+      return kind == 'hand' ? (role == 'spender' && toRole == 'spender' && fromBal == true)
+        : (kind == 'opening' ? (role == 'owner' && toRole in ['spender', 'incharge'] && fromBal == false)
+        : (kind in ['give', 'return'] && (
+            (role == 'owner' && toRole in ['spender', 'incharge'] && fromBal == false)
+            || (role == 'incharge' && toRole == 'spender' && fromBal == true))));
     }
     function fxTransferUpdate(id) {
       let role = fxRoleOf();
@@ -800,13 +982,18 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
       let o = resource.data;
       let r = request.resource.data;
       return role != '' && (
-        // the recipient confirms "Paisa mila" once; money fields never change
+        // the recipient confirms "Paisa mila" once; money fields never change — allowed even after a Hisab final
         (o.to == me && o.status == 'active' && o.confirmedAt == null
           && r.diff(o).affectedKeys().hasOnly(['confirmedAt', 'confirmedBy'])
           && r.confirmedAt == request.time && r.confirmedBy == me)
-        // cancel: owner any time; the giver only while it is still unconfirmed
-        || (role in ['owner', 'incharge'] && (role == 'owner' || (o.givenBy == me && o.confirmedAt == null))
-          && fxCancelOk(me, o, r) && fxLastOp(o.to) == 'y:' + id)
+        // Hisab final closes the worker's transfers too (same batch as hisabs/{hid}); only confirmed or cancelled cash closes
+        || (role in ['owner', 'incharge'] && o.get('hisab', null) == null && r.diff(o).affectedKeys().hasOnly(['hisab'])
+          && r.hisab is string && fxHisabOf(r.hisab, o.to) && (o.status == 'cancelled' || o.confirmedAt != null || !(o.kind in ['give', 'hand'])))
+        // cancel: owner any time; the giver (Anshul ji, or the worker for his own hand-over) only while it is still unconfirmed;
+        // never once the line sits in a final hisab
+        || (o.get('hisab', null) == null && (role == 'owner' || (o.givenBy == me && o.confirmedAt == null && (role == 'incharge' || o.kind == 'hand')))
+          && fxCancelOk(me, o, r) && fxLastOp(o.to) == 'y:' + id
+          && (o.get('fromBal', false) == false || fxLastOp(o.givenBy) == 'y:' + id))
       );
     }
     match /apps/falcon/transfers/{id} {
@@ -824,8 +1011,8 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
     function fxSign(kind) { return kind == 'return' ? -1 : 1; }
     function fxBalE(email, rid) { let e = getAfter(fxP('entries', rid)).data; return !exists(fxP('entries', rid)) && e.by == email && fxDS() == e.amount && fxDR() == 0; }
     function fxBalX(email, rid) { let e = get(fxP('entries', rid)).data; return e.status == 'active' && getAfter(fxP('entries', rid)).data.status == 'cancelled' && e.by == email && fxDS() == -e.amount && fxDR() == 0; }
-    function fxBalT(email, rid) { let t = getAfter(fxP('transfers', rid)).data; return !exists(fxP('transfers', rid)) && t.to == email && fxDR() == fxSign(t.kind) * t.amount && fxDS() == 0; }
-    function fxBalY(email, rid) { let t = get(fxP('transfers', rid)).data; return t.status == 'active' && getAfter(fxP('transfers', rid)).data.status == 'cancelled' && t.to == email && fxDR() == -fxSign(t.kind) * t.amount && fxDS() == 0; }
+    function fxBalT(email, rid) { let t = getAfter(fxP('transfers', rid)).data; return !exists(fxP('transfers', rid)) && fxDS() == 0 && ((t.to == email && fxDR() == fxSign(t.kind) * t.amount) || (t.get('fromBal', false) == true && t.givenBy == email && fxDR() == -fxSign(t.kind) * t.amount)); }
+    function fxBalY(email, rid) { let t = get(fxP('transfers', rid)).data; return t.status == 'active' && getAfter(fxP('transfers', rid)).data.status == 'cancelled' && fxDS() == 0 && ((t.to == email && fxDR() == -fxSign(t.kind) * t.amount) || (t.get('fromBal', false) == true && t.givenBy == email && fxDR() == fxSign(t.kind) * t.amount)); }
     function fxBalOk(email) {
       let d = request.resource.data;
       let op = d.lastOp;
@@ -835,12 +1022,132 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
         && d.email == email && op is string && op.size() > 2 && op.size() < 80 && d.updatedAt == request.time
         && (tag == 'e:' ? fxBalE(email, rid) : (tag == 'x:' ? fxBalX(email, rid) : (tag == 't:' ? fxBalT(email, rid) : (tag == 'y:' ? fxBalY(email, rid) : false))));
     }
+    // Hisab final (owner 08-10-2026): staff close a worker's book. hisabs/{hid} = { id, email, name, closedAt, closedBy, prev,
+    // received, spent, closing, lines } with received/spent copied from the worker's balance doc AT THIS MOMENT (checked here),
+    // so the carry-forward can never drift from the money. The balance doc itself is not reset — closing IS the carry.
+    function fxHisabOf(hid, email) { let h = getAfter(fxP('hisabs', hid)).data; return !exists(fxP('hisabs', hid)) && h.email == email; }
+    function fxHisabCreate(id) {
+      let d = request.resource.data;
+      let b = get(fxP('balances', d.email)).data;
+      return fxRoleOf() in ['owner', 'incharge']
+        && d.keys().hasOnly(['id', 'email', 'name', 'closedAt', 'closedBy', 'prev', 'received', 'spent', 'closing', 'lines', 'note', 'schemaVersion'])
+        && d.id == id && d.email is string && exists(fxP('users', d.email)) && fxUserRole(fxP('users', d.email)) != 'owner'
+        && d.closedAt == request.time && d.closedBy == fxMe() && fxStr(d.name, 40) && fxStr(d.note, 120)
+        && d.received == b.get('received', 0) && d.spent == b.get('spent', 0) && d.closing == d.received - d.spent
+        && d.lines is int && d.lines >= 0 && (d.prev == null || d.prev is string);
+    }
+    match /apps/falcon/hisabs/{id} {
+      allow read: if fxUsersRead(resource.data.email);
+      allow create: if fxHisabCreate(id);
+      allow update, delete: if false;
+    }
+    // Worker name list for the Advance tile (owner 08-10-2026): mirrored from att_salary by attendance-app/jobs/falconRoster.js
+    // (admin SDK). Phones only read it; name + dept + code, no pay data.
+    match /apps/falcon/roster/{code} {
+      allow read: if fxActive();
+      allow write: if false;
+    }
     match /apps/falcon/balances/{email} {
       allow read: if fxUsersRead(email);
       allow create, update: if fxBalOk(email);
       allow delete: if false;
     }
     // <<< FALCON BLOCK
+    // >>> MACHINES BLOCK (managed by machine-list/rules/compose.mjs — do not edit by hand)
+    // ---- Machine List (apps/machines) — 07-Oct-2026, tightened 08-Oct-2026 after the Codex / ChatGPT / Grok reviews ----
+    // Roles from apps/machines/users/{email}: active == true AND role in owner | editor | viewer. Anything else = no access.
+    // Nothing is ever deleted: a removed machine is saved with active == false, a blocked person with active == false.
+    function mcPath() { return /databases/$(database)/documents/apps/machines/users/$(tEmail()); }
+    function mcRole() {
+      return !signedIn() || tEmail() == '' ? '' : (bootstrapOwner() ? 'owner'
+        : (exists(mcPath()) && get(mcPath()).data.get('active', false) == true
+           && get(mcPath()).data.get('role', '') in ['owner', 'editor', 'viewer'] ? get(mcPath()).data.role : ''));
+    }
+    function mcItemPath(id) { return /databases/$(database)/documents/apps/machines/items/$(id); }
+    function mcPhotoPath(id) { return /databases/$(database)/documents/apps/machines/photos/$(id); }
+    function mcStr(d, k, max) { return d[k] is string && d[k].size() <= max; }
+    function mcItemOk(id) {
+      let d = request.resource.data;
+      return d.keys().hasOnly(['id','no','department','name','capacity','make','usedFor','counterFitted','counterWorking','status',
+                               'operator','remark','thumb','hasPhoto','photoCount','active','rev','lastSaveId','createdBy','createdAt','updatedBy','updatedAt'])
+        && d.id == id
+        // machine ids are plain (letters, digits, _ and -) and never contain "__", which is the photo-slot separator
+        && id.matches('^[A-Za-z0-9_-]{1,60}$') && id.split('__').size() == 1
+        && mcStr(d, 'no', 20) && d.no.size() > 0
+        && mcStr(d, 'department', 60) && d.department.size() > 0
+        && mcStr(d, 'name', 120) && mcStr(d, 'capacity', 60) && mcStr(d, 'make', 80) && mcStr(d, 'usedFor', 200)
+        && d.counterFitted in ['', 'yes', 'no'] && d.counterWorking in ['', 'yes', 'no']
+        && d.status in ['running', 'repair', 'stopped']
+        && mcStr(d, 'operator', 80) && mcStr(d, 'remark', 300)
+        && mcStr(d, 'thumb', 60000)
+        && d.hasPhoto is bool && d.active is bool && d.rev is int
+        // up to 5 photos; hasPhoto simply says whether there is at least one
+        // (a save from the previous app version carries no photoCount: it has 0 or 1 photo, as hasPhoto says)
+        && (!('photoCount' in d) || (d.photoCount is int && d.photoCount >= 0 && d.photoCount <= 5 && d.hasPhoto == (d.photoCount > 0)))
+        // every save carries its own token: the app's proof, later, that THIS save is the one stored
+        && mcStr(d, 'lastSaveId', 80) && d.lastSaveId.size() > 0
+        // a machine that says it has a photo must have that photo once this save (one batch) is applied
+        && (d.hasPhoto == false || existsAfter(mcPhotoPath(id)))
+        && d.updatedBy == tEmail() && d.updatedAt == request.time;
+    }
+    match /apps/machines/items/{id} {
+      allow read: if mcRole() != '';
+      allow delete: if false;
+      // new machine: version 1, creation fields stamped now
+      allow create: if mcRole() in ['owner', 'editor'] && mcItemOk(id)
+        && request.resource.data.rev == 1
+        && request.resource.data.createdBy == tEmail() && request.resource.data.createdAt == request.time;
+      // change: exactly the next version (a stale form or a second phone is refused); creation fields never move
+      allow update: if mcRole() in ['owner', 'editor'] && mcItemOk(id)
+        && request.resource.data.rev == resource.data.rev + 1
+        && request.resource.data.createdBy == resource.data.createdBy
+        && request.resource.data.createdAt == resource.data.createdAt;
+    }
+    // photos/{machineId} = main photo (slot 1); photos/{machineId}__2 … __5 = more photos of the same machine.
+    // The id is parsed ONE way only: a machine id never contains "__", so a photo id is either exactly a machine id,
+    // or exactly "<machine id>__<2..5>" — nothing else (no "m__2__5", no machine called "m__2").
+    function mcPhotoParts(pid) { return pid.split('__'); }
+    function mcPhotoMachine(pid) { return mcPhotoParts(pid)[0]; }
+    function mcPhotoSlotOk(pid) {
+      return mcPhotoParts(pid).size() == 1
+        || (mcPhotoParts(pid).size() == 2 && mcPhotoParts(pid)[1] in ['2', '3', '4', '5']
+            && int(mcPhotoParts(pid)[1]) <= getAfter(mcItemPath(mcPhotoMachine(pid))).data.get('photoCount', 1));
+    }
+    match /apps/machines/photos/{id} {
+      allow read: if mcRole() != '';
+      allow delete: if false;
+      // a photo only ever belongs to a machine that exists once this save is applied…
+      allow create, update: if mcRole() in ['owner', 'editor']
+        && request.resource.data.keys().hasOnly(['id', 'data', 'updatedBy', 'updatedAt'])
+        && request.resource.data.id == id
+        && request.resource.data.data is string && request.resource.data.data.size() <= 700000
+        && request.resource.data.data.matches('^data:image/jpeg;base64,.*')
+        && request.resource.data.updatedBy == tEmail() && request.resource.data.updatedAt == request.time
+        // …and only ever travels WITH a save of that machine (same batch): no photo-only change slips past the version rule
+        && existsAfter(mcItemPath(mcPhotoMachine(id)))
+        && getAfter(mcItemPath(mcPhotoMachine(id))).data.hasPhoto == true
+        && getAfter(mcItemPath(mcPhotoMachine(id))).data.updatedAt == request.time
+        && mcPhotoSlotOk(id);
+    }
+    match /apps/machines/meta/{id} {
+      allow read: if mcRole() != '';
+      allow delete: if false;
+      allow create, update: if mcRole() == 'owner';
+    }
+    // users: a signed-in Google account may read ITS OWN doc (to resolve its role); only the owner lists/writes.
+    // A person is blocked with active == false, never deleted.
+    match /apps/machines/users/{id} {
+      allow get: if nonAnon() && (id == tEmail() || mcRole() == 'owner');
+      allow list: if mcRole() == 'owner';
+      allow delete: if false;
+      allow create, update: if mcRole() == 'owner'
+        && request.resource.data.keys().hasOnly(['email', 'name', 'role', 'active'])
+        && request.resource.data.email == id
+        && request.resource.data.role in ['owner', 'editor', 'viewer']
+        && request.resource.data.active is bool
+        && request.resource.data.get('name', '') is string && request.resource.data.get('name', '').size() <= 80;
+    }
+    // <<< MACHINES BLOCK
     // Read-meter telemetry (usage_reads/{YYYY-MM-DD}): every app instance batches
     // increments into totals.<app>. Write-only for any signed-in user (incl. anon
     // workers) so ALL apps can report; shape-locked to counters, no client reads.
