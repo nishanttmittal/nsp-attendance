@@ -32,6 +32,7 @@ const TASKS = [
   { name: 'live-prices', min: 8 * 60 + 15, run: () => run('fetchDelhiPrices.js') },                     // 08:15 FX+bullion+LME+Delhi scrap → costing Live Rates (+ dated history)
   { name: 'price-health', min: 8 * 60 + 45, run: () => run('checkPriceHealth.js') },                    // 08:45 alert Telegram if a source broke or a price jumped (silent if OK)
   { name: 'sync-employees', min: 8 * 60, day: 0, run: () => run('syncEmployees.js') },              // Sun 08:00 employee sync
+  { name: 'falcon-roster', min: 8 * 60 + 5, run: () => run('falconRoster.js') },                        // 08:05 worker names → Falcon pick list (owner 08-10-2026)
 ];
 
 async function runDueTasks() {
