@@ -23,7 +23,10 @@ const esc = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').
 /** Pure: pick the target for one advance name. roster = [{code,name,active}], welders = ['Naveen','Jitender',…]. */
 function resolveTarget(advFor, roster, welders) {
   const name = norm(advFor?.name), code = String(advFor?.code || '');
-  if (code && roster.some(r => r.code === code && r.active !== false)) return { target: 'attendance', code, name: roster.find(r => r.code === code).name };
+  // the code comes from a phone, so it is honoured only when it still names the same worker (a renamed or tampered line
+  // falls back to name matching) — security review 08-10
+  const byCode = code ? roster.find(r => r.code === code && r.active !== false) : null;
+  if (byCode && norm(byCode.name) === name) return { target: 'attendance', code, name: byCode.name };
   if (!name) return { target: 'none', why: 'naam khali' };
   if (WELD.test(name)) {
     const w = welders.find(w => name.includes(norm(w))) || welders.find(w => name.startsWith(norm(w).slice(0, 3)));
