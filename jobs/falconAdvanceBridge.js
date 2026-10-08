@@ -84,21 +84,26 @@ async function run({ dry = false } = {}) {
       if (dup) {
         // a same-day same-amount advance could be the same money typed by hand — or a real second advance. Never decide
         // money on a guess: push nothing, mark the line for the owner (security review 08-10: no fail-open dedupe)
-        await d.ref.update({ advPush: { target: 'attendance', code: t.code, name: t.name, status: 'possible-duplicate', error: `Attendance mein ${e.date} ko ₹${e.amount} pehle se hai (${dup.remark || dup.paidBy || dup.id}) — wahi hai to "Attendance mein daal diya" dabao, alag hai to khud daalo`, at: now } });
+        await d.ref.update({ advPush: { target: 'attendance', code: t.code, name: t.name, status: 'possible-duplicate', error: `Attendance mein ${e.date} ko ₹${e.amount} pehle se hai — wahi hai to "Attendance mein daal diya" dabao, alag hai to khud daalo`, at: now } });
         await sendTech(`Falcon advance ${esc(label)}: Attendance mein same din same amount pehle se hai — owner check kare`).catch((x) => console.error('tech alert failed:', x.message));
         out.flagged++; continue;
       }
       const advance = { id: `adv-${e.date}-falcon-${e.id}`, date: e.date, mode: 'cash', amount: Number(e.amount), remark: `Falcon: ${e.detail || ''}`.trim(), paidBy: e.by };
       const result = await handle('add_advance', { code: t.code, advance, _by: e.by });
       if (/^REJECTED/.test(result)) {
-        await d.ref.update({ advPush: { target: 'attendance', code: t.code, name: t.name, status: 'rejected', error: result.slice(0, 200), at: now } });
+        // the handler's reason names salary-lock state → keep it in the log / tech channel, not on the worker's phone
+        console.log('add_advance rejected:', label, result);
+        await sendTech(`Falcon advance ${esc(label)} Attendance ne nahi liya: ${esc(result)}`).catch((x) => console.error('tech alert failed:', x.message));
+        await d.ref.update({ advPush: { target: 'attendance', code: t.code, name: t.name, status: 'rejected', error: 'Attendance ne nahi liya — owner dekhe', at: now } });
         out.rejected++;
       } else {
-        await d.ref.update({ advStatus: 'entered', advDoneBy: 'auto:attendance', advDoneAt: new Date(), advPush: { target: 'attendance', code: t.code, name: t.name, status: 'done', result: result.slice(0, 120), at: now } });
+        await d.ref.update({ advStatus: 'entered', advDoneBy: 'auto:attendance', advDoneAt: new Date(), advPush: { target: 'attendance', code: t.code, name: t.name, status: 'done', at: now } });
         out.pushed++;
       }
     } else if (t.target === 'welder') {
-      const ref = await f.collection('hisab_advance_outbox').add({ target: 'welder', name: t.name, code: '', amount: Number(e.amount), date: e.date, note: `Falcon (${who}): ${e.detail || ''}`.trim(), status: 'pending', source: 'falcon', falconId: e.id, createdAt: now });
+      // idempotent: a crash after the add and before the Falcon update must not queue it twice
+      const prior = await f.collection('hisab_advance_outbox').where('falconId', '==', e.id).limit(1).get();
+      const ref = prior.empty ? await f.collection('hisab_advance_outbox').add({ target: 'welder', name: t.name, code: '', amount: Number(e.amount), date: e.date, note: `Falcon (${who}): ${e.detail || ''}`.trim(), status: 'pending', source: 'falcon', falconId: e.id, createdAt: now }) : prior.docs[0].ref;
       await d.ref.update({ advPush: { target: 'welder', name: t.name, ref: ref.id, status: 'queued', at: now } });
       out.queuedWelder++;
     } else {
