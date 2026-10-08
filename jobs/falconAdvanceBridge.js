@@ -18,6 +18,7 @@ const { sendTech } = require('./lib/notify');
 
 const WELD = /weld|वेल्ड/i;
 const norm = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+const esc = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); // names are phone-typed → never raw in Telegram HTML
 
 /** Pure: pick the target for one advance name. roster = [{code,name,active}], welders = ['Naveen','Jitender',…]. */
 function resolveTarget(advFor, roster, welders) {
@@ -56,7 +57,7 @@ async function run({ dry = false } = {}) {
   const now = new Date().toISOString();
   for (const d of adv.docs) {
     const e = d.data();
-    if (e.status === 'cancelled') continue;
+    if (e.status !== 'active' || e.hisab != null) continue;          // only live, open lines
     const push = e.advPush || null;
     // (b) a welder line already queued: has the Welder app accepted / dismissed it?
     if (push && push.target === 'welder' && push.ref) {
@@ -78,8 +79,11 @@ async function run({ dry = false } = {}) {
       const existing = ((await f.collection('att_salary').doc(t.code).get()).data() || {}).advances || [];
       const dup = existing.find(a => String(a.date).slice(0, 10) === e.date && Number(a.amount) === Number(e.amount));
       if (dup) {
-        await d.ref.update({ advStatus: 'entered', advDoneBy: 'matched-existing', advDoneAt: new Date(), advPush: { target: 'attendance', code: t.code, name: t.name, status: 'matched', result: `pehle se tha: ${dup.id}`, at: now } });
-        out.pushed++; continue;
+        // a same-day same-amount advance could be the same money typed by hand — or a real second advance. Never decide
+        // money on a guess: push nothing, mark the line for the owner (security review 08-10: no fail-open dedupe)
+        await d.ref.update({ advPush: { target: 'attendance', code: t.code, name: t.name, status: 'possible-duplicate', error: `Attendance mein ${e.date} ko ₹${e.amount} pehle se hai (${dup.remark || dup.paidBy || dup.id}) — wahi hai to "Attendance mein daal diya" dabao, alag hai to khud daalo`, at: now } });
+        await sendTech(`Falcon advance ${esc(label)}: Attendance mein same din same amount pehle se hai — owner check kare`).catch((x) => console.error('tech alert failed:', x.message));
+        out.flagged++; continue;
       }
       const advance = { id: `adv-${e.date}-falcon-${e.id}`, date: e.date, mode: 'cash', amount: Number(e.amount), remark: `Falcon: ${e.detail || ''}`.trim(), paidBy: e.by };
       const result = await handle('add_advance', { code: t.code, advance, _by: e.by });
@@ -96,7 +100,7 @@ async function run({ dry = false } = {}) {
       out.queuedWelder++;
     } else {
       await d.ref.update({ advPush: { target: 'none', status: 'unmatched', error: t.why, at: now } });
-      await sendTech(`Falcon advance ${label} Attendance mein nahi gaya — ${t.why}. Owner Falcon mein "Attendance mein daal diya" dabaye ya naam theek kare.`).catch(() => {});
+      await sendTech(`Falcon advance ${esc(label)} Attendance mein nahi gaya — ${esc(t.why)}. Owner Falcon mein "Attendance mein daal diya" dabaye ya naam theek kare.`).catch((x) => console.error('tech alert failed:', x.message));
       out.flagged++;
     }
   }
