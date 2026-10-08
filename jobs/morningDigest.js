@@ -4,7 +4,7 @@
 const { session } = require('./lib/realtime');
 const { gatherState } = require('./getState');
 const { sendPlain: sendTelegram, sendTech } = require('./lib/notify'); // plain text: WA as-is, Telegram escaped
-const { clip, dmy } = require('./lib/simple');
+const { dmy } = require('./lib/simple');
 (async () => {
   const { browser, page } = await session();
   try {
@@ -17,7 +17,11 @@ const { clip, dmy } = require('./lib/simple');
     const present = s.counts?.totalPresent ?? 0, absent = s.counts?.totalAbsent ?? 0, late = s.lateCount ?? 0;
     if (!present && !absent) { await sendTech('morning digest held — portal returned 0 present / 0 absent'); return; }
     const L = [`☀️ Aaj — ${dmy(todayIST)}`, `Present ${present} · Absent ${absent} · Late ${late}`];
-    if (s.late?.length) L.push('Late: ' + clip(s.late.map(l => l.name), 6));
+    // owner 08-10-2026: full late list, each name with the in-time — no "+4" cut-off
+    if (s.late?.length) {
+      const byTime = [...s.late].sort((x, y) => String(x.inT || '').localeCompare(String(y.inT || '')));
+      L.push('Late aaye:', ...byTime.map(l => `• ${l.name || l.code} — ${l.inT || 'time nahi mila'}`));
+    }
     const under = Object.entries(s.deptRatio || {}).filter(([, r]) => r.total > 0 && r.pct < 50).map(([d, r]) => `${d} ${r.present}/${r.total}`);
     if (under.length) L.push('Kam staff: ' + under.join(', '));
     if (process.env.DRY) { console.log(L.join('\n')); return; }
