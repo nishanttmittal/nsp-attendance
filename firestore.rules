@@ -851,7 +851,7 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
       let role = fxRoleOf();
       return role != ''
         && d.keys().hasOnly(['id', 'by', 'byName', 'kind', 'head', 'amount', 'detail', 'place', 'advFor', 'advStatus',
-             'date', 'hasPhoto', 'status', 'createdAt', 'clientAt', 'deviceId', 'schemaVersion', 'approval', 'hisab'])
+             'date', 'hasPhoto', 'status', 'createdAt', 'clientAt', 'deviceId', 'schemaVersion', 'approval', 'hisab', 'selfAdv'])
         && d.id == id && d.by == me
         // approval (owner 08-10-2026): a worker's line waits for the owner / Anshul ji; their own lines are OK at once.
         // hisab: null until the line is closed into a 'Hisab final'.
@@ -867,19 +867,31 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
         // Anshul ji's heads are not a worker's
         && (role != 'spender' || !(d.head in ['Contractor', 'Party payment', 'Owner personal']))
         && (d.kind != 'adv' || d.advStatus == 'pending')
+        // Khud ka advance (owner 09-10-2026 "build b"): a worker's advance to HIMSELF must carry selfAdv == true (so it shows in red to whoever
+        // passes it — owner or Anshul ji, owner 09-10 23:24), and only such a line may carry it. "Himself" = the Attendance code on his own users doc (selfCode, never set from a phone).
+        && (!('selfAdv' in d) || (d.selfAdv == true && d.kind == 'adv' && role == 'spender'))
+        && (role != 'spender' || d.kind != 'adv' || d.get('selfAdv', false) == true || fxNotSelf(me, d.get('advFor', {}).get('code', '')))
         // photo compulsory for a spender: saman + bilty always; petrol / repair / other above ₹200 (same as logic/falcon.js
         // photoRequired). Anshul ji and the owner may save without one (owner 07-10-2026: "anshul need not enter photos").
         && (role != 'spender' || !(d.kind in ['saman', 'bilty'] || (d.kind in ['petrol', 'repair', 'other'] && d.amount > 200)) || d.hasPhoto == true)
         && (d.hasPhoto == false || existsAfter(fxP('photos', id)))
         && fxLastOp(me) == 'e:' + id;
     }
+    function fxNotSelf(me, code) { return code == '' || code != get(fxP('users', me)).data.get('selfCode', '~'); }
+    // also a Karigar / thekedar line that went to the Welder inbox (any kind): queued or accepted there
+    function fxAdvLocked(o) { return (o.kind == 'adv' && o.get('advStatus', '') == 'entered') || o.get('advPush', {}).get('status', '') in ['queued', 'accepted']; }
     function fxEntryUpdate(id) {
       let role = fxRoleOf();
       let me = fxMe();
       let o = resource.data;
       let r = request.resource.data;
       return role != '' && o.get('hisab', null) == null && (
+        // a line cancelled by staff goes BACK to the worker (owner 08-10-2026 23:52); he marks it seen — his own line only
+        (o.by == me && o.status == 'cancelled' && o.get('cancelledBy', '') != me && o.get('rejectAck', false) == false
+          && r.diff(o).affectedKeys().hasOnly(['rejectAck', 'rejectAckAt'])
+          && r.rejectAck == true && r.rejectAckAt == request.time)
         // staff OK a worker's line (owner 08-10-2026): nothing else changes, money untouched
+        ||
         (role in ['owner', 'incharge'] && o.status == 'active' && o.get('approval', 'pending') == 'pending'
           && r.diff(o).affectedKeys().hasOnly(['approval', 'approvedBy', 'approvedAt'])
           && r.approval == 'ok' && r.approvedBy == me && r.approvedAt == request.time)
@@ -887,27 +899,45 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
         // cancelled lines may close, so nothing pending ever disappears from the worker's screen unreviewed
         || (role in ['owner', 'incharge'] && r.diff(o).affectedKeys().hasOnly(['hisab'])
           && r.hisab is string && fxHisabOf(r.hisab, o.by)
-          && (o.status == 'cancelled' || o.get('approval', 'pending') == 'ok'))
+          // a line staff sent back must have been seen by the worker before it can be closed away
+          // (the OWNER may close it unseen — a worker who has left or is switched off can never press "Theek hai", and his
+          //  book must still be closable — Grok final review 09-10)
+          && (o.status == 'cancelled' ? (o.get('cancelledBy', '') == o.by || o.get('rejectAck', false) == true || role == 'owner') : o.get('approval', 'pending') == 'ok')
+          // an advance must already be in Attendance / the Welder app: once closed nobody can mark it entered any more
+          && (o.status == 'cancelled' || o.kind != 'adv' || o.get('advStatus', '') == 'entered'))
         ||
         // cancel: staff any time; the spender their own line within 24 h
         (fxCancelOk(me, o, r)
           && (role in ['owner', 'incharge'] || (o.by == me && request.time < o.createdAt + duration.value(24, 'h')))
+          // an advance Attendance already holds, or one waiting in the Welder inbox, is corrected THERE first — cancelling
+          // it here would refund Falcon while the salary deduction stays (review 09-10-2026)
+          && !fxAdvLocked(o)
           && fxLastOp(o.by) == 'x:' + id)
         // owner marks an advance as entered in Attendance (no money field changes; balance untouched)
         || (role == 'owner' && o.kind == 'adv' && o.status == 'active' && o.advStatus == 'pending'
           && r.diff(o).affectedKeys().hasOnly(['advStatus', 'advDoneBy', 'advDoneAt'])
           && r.advStatus == 'entered' && r.advDoneBy == me && r.advDoneAt == request.time)
-        // owner / Anshul ji correct the NAME (detail) and the kharcha TYPE (head) of an active line (owner 08-10-2026).
-        // Amount, date, person and photo never change, so no balance moves. The value before the edit is kept on the line.
+        // Edit (owner 08-10-2026 19:31): the OWNER may change amount, date, name and type of any open line, with a reason;
+        // Anshul ji may change the NAME only (+ reason). Person and photo never change. If the amount changes, the person's
+        // balance moves by the difference in the same batch (lastOp 'a:' + id). Old and first values stay on the line.
         || (role in ['owner', 'incharge'] && o.status == 'active'
-          && r.diff(o).affectedKeys().hasOnly(['detail', 'head', 'advFor', 'editedBy', 'editedAt', 'oldDetail', 'oldHead', 'firstDetail', 'firstHead'])
+          && r.diff(o).affectedKeys().hasOnly(['detail', 'head', 'advFor', 'amount', 'date', 'editedBy', 'editedAt', 'editReason',
+               'oldDetail', 'oldHead', 'oldAmount', 'oldDate', 'firstDetail', 'firstHead', 'firstAmount', 'firstDate'])
           && fxStr(r.detail, 120) && r.detail.size() > 0
-          && r.editedBy == me && r.editedAt == request.time
-          && r.oldDetail == o.detail && r.oldHead == o.get('head', '')
+          && r.editedBy == me && r.editedAt == request.time && r.editReason is string && r.editReason.size() > 0 && r.editReason.size() <= 100
+          && r.oldDetail == o.detail && r.oldHead == o.get('head', '') && r.oldAmount == o.amount && r.oldDate == o.date
           // the very first values are kept for ever (write-once), however many edits follow
           && r.firstDetail == o.get('firstDetail', o.detail) && r.firstHead == o.get('firstHead', o.get('head', ''))
+          && r.firstAmount == o.get('firstAmount', o.amount) && r.firstDate == o.get('firstDate', o.date)
+          // Anshul ji: name only. Owner: amount (balance follows) and date (any past day, never future) too
+          && (role == 'owner' || (r.amount == o.amount && r.date == o.date && r.get('head', '') == o.get('head', '')))
+          && fxInt(r.amount, 200000) && fxIsDate(r.date) && fxDayStart(r.date) <= request.time + duration.value(5, 'm')
+          // a changed amount: the person's spent must move by exactly the difference in THIS batch (lastOp alone could be a
+          // stale 'a:' left by an earlier edit of the same line — Codex final review 09-10)
+          && (r.amount == o.amount || (fxLastOp(o.by) == 'a:' + id
+            && getAfter(fxP('balances', o.by)).data.get('spent', 0) - get(fxP('balances', o.by)).data.get('spent', 0) == r.amount - o.amount))
           // an advance already entered in Attendance keeps its name (Attendance was booked under it)
-          && (o.kind != 'adv' || o.get('advStatus', '') != 'entered')
+          && !fxAdvLocked(o)
           // an advance has no head; its name is the person, kept in step with advFor
           && (o.kind == 'adv'
             ? (r.get('head', '') == o.get('head', '') && r.advFor.name == r.detail && r.advFor.get('code', '') == o.advFor.get('code', ''))
@@ -950,17 +980,30 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
       // carries fromBal == true and moves HIS balance as well; 'in' = cash Anshul ji received (from the owner or elsewhere:
       // O-50, Sachin, scrap…), written by himself on himself, source in the note. Owner OR Anshul ji may record the owner's cash.
       let fromBal = d.get('fromBal', false);
-      return d.keys().hasOnly(['id', 'to', 'toName', 'amount', 'kind', 'note', 'date', 'givenBy', 'givenByName', 'fromBal',
-             'createdAt', 'clientAt', 'confirmedAt', 'confirmedBy', 'status', 'deviceId', 'schemaVersion', 'hisab'])
+      // src (owner 08-10-2026 18:09): Anshul ji sometimes hands a worker OFFICE cash, not his own float — then src == 'office'
+      // and his balance stays put. Any other give / wapas by him comes out of his float (src 'float').
+      let src = d.get('src', 'float');
+      let pend = d.kind == 'return' && d.to == me;
+      return d.keys().hasOnly(['id', 'to', 'toName', 'amount', 'kind', 'note', 'date', 'givenBy', 'givenByName', 'fromBal', 'src',
+             'createdAt', 'clientAt', 'confirmedAt', 'confirmedBy', 'status', 'deviceId', 'schemaVersion', 'hisab', 'approval'])
+        // owner 09-10-2026: cash coming BACK is written by the person who returns it, ON HIMSELF (to == givenBy), and is
+        // born 'pending': it moves NO balance until it is approved — a worker's by the owner or Anshul ji, Anshul ji's by the
+        // owner only (see fxTransferUpdate). Nothing else may carry the field.
+        && (pend ? d.get('approval', '') == 'pending' : !d.keys().hasAny(['approval']))
+        // office cash: only for a GIVE by Anshul ji. Cash he takes back from a worker always lands in his own float, so it can
+        // reach the office / owner only through his own wapas — which needs the owner's OK (owner 09-10-2026).
+        && src in ['float', 'office'] && (src == 'float' || (role == 'incharge' && d.kind == 'give'))
         && d.id == id && d.givenBy == me && d.to is string && d.get('hisab', null) == null
         && fxStr(d.toName, 40) && fxStr(d.givenByName, 40)
         && fxInt(d.amount, 200000) && fxDateOk(d.date)
         && d.status == 'active' && d.confirmedAt == null
         && d.createdAt == request.time && fxStr(d.note, 120)
-        && fxLastOp(d.to) == 't:' + id
+        && (pend || fxLastOp(d.to) == 't:' + id)
         && (d.kind == 'in'
           ? (role == 'incharge' && d.to == me && fromBal == false && d.note.size() > 0)
-          : (d.to != me && exists(fxP('users', d.to)) && fxTransferPair(d.kind, role, fxUserRole(fxP('users', d.to)), fromBal)
+          // a worker or Anshul ji returns cash: a pending wapas on himself, no balance write in this batch
+          : pend ? (role in ['spender', 'incharge'] && fromBal == false && src == 'float')
+          : (d.to != me && exists(fxP('users', d.to)) && fxTransferPair(d.kind, role, fxUserRole(fxP('users', d.to)), fromBal, src)
             // one opening per person, and only before their balance exists
             && (d.kind != 'opening' || !exists(fxP('balances', d.to)))
             && (fromBal == false || fxLastOp(me) == 't:' + id)
@@ -969,12 +1012,17 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
     }
     function fxInHandAfter(email) { let b = getAfter(fxP('balances', email)).data; return b.get('received', 0) - b.get('spent', 0); }
     // who may move cash to whom (giver role → receiver role), and whether the giver's own balance moves (fromBal)
-    function fxTransferPair(kind, role, toRole, fromBal) {
+    function fxTransferPair(kind, role, toRole, fromBal, src) {
       return kind == 'hand' ? (role == 'spender' && toRole == 'spender' && fromBal == true)
         : (kind == 'opening' ? (role == 'owner' && toRole in ['spender', 'incharge'] && fromBal == false)
-        : (kind in ['give', 'return'] && (
+        // Nobody takes cash back by writing it himself any more — not Anshul ji, not the owner (Codex + Grok final review
+        // 09-10): returned cash has ONE route, the returner's own pending wapas + an OK, which also checks what he holds.
+        : (kind == 'give' && (
             (role == 'owner' && toRole in ['spender', 'incharge'] && fromBal == false)
-            || (role == 'incharge' && toRole == 'spender' && fromBal == true))));
+            // Anshul ji: from his float (fromBal) — or office cash (src 'office', his balance untouched)
+            // (a give only: cash coming back to him goes through the worker's own pending wapas + his "Mujhe mila" — one
+            //  route, so the same cash can never be taken off the worker twice — Codex + reviewer 09-10)
+            || (role == 'incharge' && kind == 'give' && toRole == 'spender' && fromBal == (src != 'office')))));
     }
     function fxTransferUpdate(id) {
       let role = fxRoleOf();
@@ -983,15 +1031,32 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
       let r = request.resource.data;
       return role != '' && (
         // the recipient confirms "Paisa mila" once; money fields never change — allowed even after a Hisab final
-        (o.to == me && o.status == 'active' && o.confirmedAt == null
+        (o.to == me && o.status == 'active' && o.confirmedAt == null && o.kind != 'return'
           && r.diff(o).affectedKeys().hasOnly(['confirmedAt', 'confirmedBy'])
           && r.confirmedAt == request.time && r.confirmedBy == me)
         // Hisab final closes the worker's transfers too (same batch as hisabs/{hid}); only confirmed or cancelled cash closes
         || (role in ['owner', 'incharge'] && o.get('hisab', null) == null && r.diff(o).affectedKeys().hasOnly(['hisab'])
-          && r.hisab is string && fxHisabOf(r.hisab, o.to) && (o.status == 'cancelled' || o.confirmedAt != null || !(o.kind in ['give', 'hand'])))
+          && r.hisab is string && fxHisabOf(r.hisab, o.to) && (o.status == 'cancelled' || o.confirmedAt != null || o.kind != 'hand')
+          && (o.status == 'cancelled' || o.get('approval', null) != 'pending'))
+        // OK of a returned amount = the moment the money moves (lastOp 'r:'): the returner's balance goes down by it; when
+        // Anshul ji is the one who took it (recvBal) it is added to HIS float in the same batch. The owner may OK anyone's;
+        // Anshul ji only a worker's, never his own. The returner must actually hold that much.
+        || (o.status == 'active' && o.get('approval', null) == 'pending' && o.to != me
+          && (role == 'owner' || (role == 'incharge' && fxUserRole(fxP('users', o.to)) == 'spender'))
+          && r.diff(o).affectedKeys().hasOnly(['approval', 'approvedBy', 'approvedAt', 'recvBal'])
+          && r.approval == 'ok' && r.approvedBy == me && r.approvedAt == request.time
+          && r.get('recvBal', false) == (role == 'incharge')
+          && fxLastOp(o.to) == 'r:' + id && fxInHandAfter(o.to) >= 0
+          && (role == 'owner' || fxLastOp(me) == 'r:' + id))
+        // a pending returned amount never moved money: the owner / Anshul ji (a worker's) reject it, or its writer withdraws it
+        || (o.get('approval', null) == 'pending' && o.get('hisab', null) == null && fxCancelOk(me, o, r)
+          && (role == 'owner' || o.givenBy == me || (role == 'incharge' && fxUserRole(fxP('users', o.to)) == 'spender')))
         // cancel: owner any time; the giver (Anshul ji, or the worker for his own hand-over) only while it is still unconfirmed;
         // never once the line sits in a final hisab
-        || (o.get('hisab', null) == null && (role == 'owner' || (o.givenBy == me && o.confirmedAt == null && (role == 'incharge' || o.kind == 'hand')))
+        // (a returned amount is cancelled above while pending; once OK'd it is final — correct it with a fresh Diya)
+        // (gives are never confirmed since 09-10, so Anshul ji's window to undo his own give is 24 h; after that the owner does it)
+        || (o.get('hisab', null) == null && !('approval' in o) && (role == 'owner' || (o.givenBy == me && o.confirmedAt == null
+            && (o.kind == 'hand' || (role == 'incharge' && request.time < o.createdAt + duration.value(24, 'h')))))
           && fxCancelOk(me, o, r) && fxLastOp(o.to) == 'y:' + id
           && (o.get('fromBal', false) == false || fxLastOp(o.givenBy) == 'y:' + id))
       );
@@ -1011,8 +1076,18 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
     function fxSign(kind) { return kind == 'return' ? -1 : 1; }
     function fxBalE(email, rid) { let e = getAfter(fxP('entries', rid)).data; return !exists(fxP('entries', rid)) && e.by == email && fxDS() == e.amount && fxDR() == 0; }
     function fxBalX(email, rid) { let e = get(fxP('entries', rid)).data; return e.status == 'active' && getAfter(fxP('entries', rid)).data.status == 'cancelled' && e.by == email && fxDS() == -e.amount && fxDR() == 0; }
-    function fxBalT(email, rid) { let t = getAfter(fxP('transfers', rid)).data; return !exists(fxP('transfers', rid)) && fxDS() == 0 && ((t.to == email && fxDR() == fxSign(t.kind) * t.amount) || (t.get('fromBal', false) == true && t.givenBy == email && fxDR() == -fxSign(t.kind) * t.amount)); }
-    function fxBalY(email, rid) { let t = get(fxP('transfers', rid)).data; return t.status == 'active' && getAfter(fxP('transfers', rid)).data.status == 'cancelled' && fxDS() == 0 && ((t.to == email && fxDR() == -fxSign(t.kind) * t.amount) || (t.get('fromBal', false) == true && t.givenBy == email && fxDR() == fxSign(t.kind) * t.amount)); }
+    function fxBalT(email, rid) { let t = getAfter(fxP('transfers', rid)).data; return !exists(fxP('transfers', rid)) && !('approval' in t) && fxDS() == 0 && ((t.to == email && fxDR() == fxSign(t.kind) * t.amount) || (t.get('fromBal', false) == true && t.givenBy == email && fxDR() == -fxSign(t.kind) * t.amount)); }
+    // owner's amount edit: spent moves by exactly (new − old) of that person's active line, in the same batch
+    function fxBalA(email, rid) { let o = get(fxP('entries', rid)).data; let n = getAfter(fxP('entries', rid)).data; return o.status == 'active' && n.status == 'active' && o.by == email && n.by == email && fxDS() == n.amount - o.amount && fxDR() == 0; }
+    // 'r:' = a returned amount is OK'd: the returner's received goes down; Anshul ji's goes up when he is the one who took it
+    function fxBalR(email, rid) {
+      let o = get(fxP('transfers', rid)).data;
+      let n = getAfter(fxP('transfers', rid)).data;
+      return o.status == 'active' && o.get('approval', '') == 'pending' && n.get('approval', '') == 'ok' && fxDS() == 0
+        && ((o.to == email && fxDR() == -o.amount)
+          || (o.to != email && n.get('recvBal', false) == true && n.approvedBy == email && fxDR() == o.amount));
+    }
+    function fxBalY(email, rid) { let t = get(fxP('transfers', rid)).data; return !('approval' in t) && t.status == 'active' && getAfter(fxP('transfers', rid)).data.status == 'cancelled' && fxDS() == 0 && ((t.to == email && fxDR() == -fxSign(t.kind) * t.amount) || (t.get('fromBal', false) == true && t.givenBy == email && fxDR() == fxSign(t.kind) * t.amount)); }
     function fxBalOk(email) {
       let d = request.resource.data;
       let op = d.lastOp;
@@ -1020,7 +1095,7 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
       let rid = op[2:op.size()];
       return fxActive() && d.keys().hasOnly(['email', 'received', 'spent', 'lastOp', 'updatedAt'])
         && d.email == email && op is string && op.size() > 2 && op.size() < 80 && d.updatedAt == request.time
-        && (tag == 'e:' ? fxBalE(email, rid) : (tag == 'x:' ? fxBalX(email, rid) : (tag == 't:' ? fxBalT(email, rid) : (tag == 'y:' ? fxBalY(email, rid) : false))));
+        && (tag == 'e:' ? fxBalE(email, rid) : (tag == 'x:' ? fxBalX(email, rid) : (tag == 't:' ? fxBalT(email, rid) : (tag == 'y:' ? fxBalY(email, rid) : (tag == 'a:' ? fxBalA(email, rid) : (tag == 'r:' ? fxBalR(email, rid) : false))))));
     }
     // Hisab final (owner 08-10-2026): staff close a worker's book. hisabs/{hid} = { id, email, name, closedAt, closedBy, prev,
     // received, spent, closing, lines } with received/spent copied from the worker's balance doc AT THIS MOMENT (checked here),
