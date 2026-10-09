@@ -14,6 +14,8 @@ const { db } = require('./lib/firestore')
   const row = (e) => (want[e] = want[e] || { received: 0, spent: 0 })
   trs.forEach(d => {
     const t = d.data(); if (t.status === 'cancelled') return
+    if (t.approval === 'pending') return // a returned amount counts only once it is OK'd
+    if (t.recvBal === true && t.approvedBy) row(t.approvedBy).received += t.amount // Anshul ji took the returned cash into his float
     row(t.to).received += t.kind === 'return' ? -t.amount : t.amount
     // the giver's side: worker → worker hand-over, or Anshul ji's give / wapas (fromBal)
     if (t.kind === 'hand' || t.fromBal === true) row(t.givenBy).received -= t.kind === 'return' ? -t.amount : t.amount

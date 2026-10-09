@@ -8,6 +8,7 @@
 //                         becomes "Attendance mein ✓ (auto)".
 //   • a welder contractor (name says weld / वेल्ड) → hisab_advance_outbox, the inbox the Welder app already has
 //                         (owner taps Accept there) → Falcon line becomes entered once accepted.
+//   • a welder paid on the Karigar / thekedar tile (kind 'other', head 'Contractor') → the same Welder inbox (09-10-2026)
 //   • no clear match (name not in the Attendance list, or two workers match) → flagged on the line; the owner's manual
 //                         "Attendance mein daal diya" stays the fallback. Tech channel gets one line per flagged advance.
 // Never writes money in Falcon (advStatus / advPush are flags only). Idempotent: a line is pushed once (advPush set).
@@ -17,6 +18,7 @@ const { handle } = require('./worker');
 const { sendTech } = require('./lib/notify');
 
 const WELD = /weld|वेल्ड/i;
+const CONTRACTOR_FROM = '2026-10-08'; // Karigar / thekedar lines are bridged from the day the tile went live, never older ones
 const norm = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
 const esc = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); // names are phone-typed → never raw in Telegram HTML
 
@@ -47,8 +49,9 @@ function resolveTarget(advFor, roster, welders) {
 async function run({ dry = false } = {}) {
   const f = db();
   const base = f.collection('apps').doc('falcon');
-  const [adv, rosterSnap, weldSnap, users] = await Promise.all([
+  const [adv, con, rosterSnap, weldSnap, users] = await Promise.all([
     base.collection('entries').where('kind', '==', 'adv').where('advStatus', '==', 'pending').get(),
+    base.collection('entries').where('head', '==', 'Contractor').get(),
     base.collection('roster').get(),
     f.collection('apps').doc('welder').collection('welders').get(),
     base.collection('users').get(),
@@ -56,8 +59,46 @@ async function run({ dry = false } = {}) {
   const roster = rosterSnap.docs.map(d => d.data());
   const welders = weldSnap.docs.map(d => d.data().name).filter(Boolean);
   const nameOf = Object.fromEntries(users.docs.map(d => [d.id, d.data().name || d.id]));
+  // Khud ka advance (owner 09-10-2026 "build b"): a worker's advance to HIMSELF reaches Attendance only on the OWNER's OK.
+  // The Falcon rules already enforce this for a name picked from the list; this is the backstop for a name typed by hand.
+  const selfCodeOf = Object.fromEntries(users.docs.map(d => [d.id, d.data().selfCode || '']));
+  const roleOfUser = Object.fromEntries(users.docs.map(d => [d.id, d.data().active === true ? d.data().role : '']));
+  // (owner 09-10-2026 23:24: Anshul ji may pass it too — the OK must come from staff, never from the worker himself)
+  const isOwner = (email) => email === 'nspenterprises24@gmail.com' || ['owner', 'incharge'].includes(roleOfUser[email]);
   const out = { pushed: 0, queuedWelder: 0, accepted: 0, flagged: 0, waiting: 0, rejected: 0 };
   const now = new Date().toISOString();
+  // (c) Karigar / thekedar tile (owner 09-10-2026: "yes welder tile"). Anshul ji writes a payment to a welder on that tile,
+  // not on the Advance tile (e.g. "Naveen weld 1000", 08-10) — it must reach the Welder app's Incoming Advances too. Only a
+  // name that clearly is a welder goes; any other contractor line is left alone, silently. Same inbox, owner Accepts there.
+  // The Falcon line only gets the advPush flag (no money, no kind change).
+  for (const d of con.docs) {
+    const e = d.data();
+    if (e.kind !== 'other' || e.status !== 'active' || e.hisab != null || e.date < CONTRACTOR_FROM) continue;
+    const push = e.advPush || null;
+    if (push && push.target === 'welder' && push.ref) {
+      if (push.status !== 'queued') continue;                         // accepted / dismissed already recorded
+      const o = await f.collection('hisab_advance_outbox').doc(push.ref).get();
+      const st = o.exists ? o.data().status : 'missing';
+      if (st === 'accepted' && !dry) { await d.ref.update({ 'advPush.status': 'accepted', 'advPush.doneAt': now }); out.accepted++; }
+      else if (st === 'dismissed' && !dry) { await d.ref.update({ 'advPush.status': 'dismissed', 'advPush.error': 'Welder app mein dismiss kiya' }); out.flagged++; }
+      else out.waiting++;
+      continue;
+    }
+    if (push) continue;
+    if (e.approval !== 'ok') { out.waiting++; continue; }
+    const t = resolveTarget({ name: e.detail, code: '' }, roster, welders);
+    const exactWelder = welders.find(w => norm(w) === norm(e.detail));
+    const welder = t.target === 'welder' ? t.name : exactWelder || '';
+    if (!welder) continue;                                           // some other contractor — nothing to post
+    const who = nameOf[e.by] || e.by;
+    if (dry) { console.log(`[dry] Karigar tile ₹${e.amount} ${e.detail} (${who}, ${e.date}) → welder ${welder}`); continue; }
+    const cur = (await d.ref.get()).data();                          // read again just before acting (same guard as below)
+    if (!cur || cur.status !== 'active' || cur.hisab != null || cur.approval !== 'ok' || cur.advPush || cur.amount !== e.amount || cur.date !== e.date || cur.detail !== e.detail) { out.waiting++; continue; }
+    const prior = await f.collection('hisab_advance_outbox').where('falconId', '==', e.id).limit(1).get();
+    const ref = prior.empty ? await f.collection('hisab_advance_outbox').add({ target: 'welder', name: welder, code: '', amount: Number(e.amount), date: e.date, note: `Falcon (${who}): ${e.detail || ''}`.trim(), status: 'pending', source: 'falcon', falconId: e.id, createdAt: now }) : prior.docs[0].ref;
+    await d.ref.update({ advPush: { target: 'welder', name: welder, ref: ref.id, status: 'queued', at: now } });
+    out.queuedWelder++;
+  }
   for (const d of adv.docs) {
     const e = d.data();
     if (e.status !== 'active' || e.hisab != null) continue;          // only live, open lines
@@ -75,12 +116,29 @@ async function run({ dry = false } = {}) {
     if (e.approval !== 'ok') { out.waiting++; continue; }         // a worker's line waits for the OK
     const who = nameOf[e.by] || e.by;
     const t = resolveTarget(e.advFor, roster, welders);
+    if (t.target === 'attendance' && selfCodeOf[e.by] && t.code === selfCodeOf[e.by] && roleOfUser[e.by] === 'spender' && !isOwner(e.approvedBy || '')) {
+      if (!dry && !e.advPush) {
+        await d.ref.update({ advPush: { target: 'attendance', code: t.code, name: t.name, status: 'self-needs-owner', error: 'Khud ka advance — Nishant ji / Anshul ji pass karenge', at: now } });
+        await sendTech(`Falcon: ₹${e.amount} ${esc(e.advFor?.name || e.detail)} (${esc(who)}, ${e.date}) — khud ka advance, staff ke OK ke bina Attendance mein nahi gaya`).catch((x) => console.error('tech alert failed:', x.message));
+      }
+      out.flagged++; continue;
+    }
     const label = `₹${e.amount} ${e.advFor?.name || e.detail} (${who}, ${e.date})`;
     if (dry) { console.log(`[dry] ${label} → ${t.target}${t.code ? ' ' + t.code : ''}${t.name ? ' ' + t.name : ''}${t.why ? ' — ' + t.why : ''}`); continue; }
+    // The list above was read a moment ago. Read THIS line again just before acting on it: if it was cancelled, edited,
+    // closed or already handled in between, leave it for the next cycle — never push a line that has since changed
+    // (review 09-10-2026: a cancel landing between the read and the push would leave the deduction without its line).
+    const cur = (await d.ref.get()).data();
+    if (!cur || cur.status !== 'active' || cur.hisab != null || cur.approval !== 'ok' || cur.advPush
+      || cur.amount !== e.amount || cur.date !== e.date || (cur.advFor?.name || '') !== (e.advFor?.name || '')) { out.waiting++; continue; }
     if (t.target === 'attendance') {
       // already typed into Attendance by hand (same worker, same day, same amount)? then only mark the Falcon line — no second advance
       const existing = ((await f.collection('att_salary').doc(t.code).get()).data() || {}).advances || [];
-      const dup = existing.find(a => String(a.date).slice(0, 10) === e.date && Number(a.amount) === Number(e.amount));
+      const advId = `adv-${e.date}-falcon-${e.id}`;
+      // our own earlier push (a run that died after the Attendance write, before marking the Falcon line — 09-10-2026,
+      // Telegram unreachable from the factory network) is NOT a "possible duplicate": it is this very advance
+      const mine = existing.some(a => a.id === advId);
+      const dup = !mine && existing.find(a => String(a.date).slice(0, 10) === e.date && Number(a.amount) === Number(e.amount));
       if (dup) {
         // a same-day same-amount advance could be the same money typed by hand — or a real second advance. Never decide
         // money on a guess: push nothing, mark the line for the owner (security review 08-10: no fail-open dedupe)
@@ -88,8 +146,20 @@ async function run({ dry = false } = {}) {
         await sendTech(`Falcon advance ${esc(label)}: Attendance mein same din same amount pehle se hai — owner check kare`).catch((x) => console.error('tech alert failed:', x.message));
         out.flagged++; continue;
       }
-      const advance = { id: `adv-${e.date}-falcon-${e.id}`, date: e.date, mode: 'cash', amount: Number(e.amount), remark: `Falcon: ${e.detail || ''}`.trim(), paidBy: e.by };
-      const result = await handle('add_advance', { code: t.code, advance, _by: e.by });
+      const advance = { id: advId, date: e.date, mode: 'cash', amount: Number(e.amount), remark: `Falcon: ${e.detail || ''}`.trim(), paidBy: e.by };
+      let result;
+      if (mine) result = 'advance already recorded by an earlier run';
+      else {
+        try { result = await handle('add_advance', { code: t.code, advance, _by: e.by }); }
+        catch (x) {
+          // the handler writes the advance first and alerts after; an alert failure must not leave the line unmarked.
+          // Trust only what is really in Attendance now.
+          const after = ((await f.collection('att_salary').doc(t.code).get()).data() || {}).advances || [];
+          if (!after.some(a => a.id === advId)) throw x;
+          console.error('add_advance alert failed after the write (advance is recorded):', label, x.message);
+          result = 'advance added (alert failed)';
+        }
+      }
       if (/^REJECTED/.test(result)) {
         // the handler's reason names salary-lock state → keep it in the log / tech channel, not on the worker's phone
         console.log('add_advance rejected:', label, result);
