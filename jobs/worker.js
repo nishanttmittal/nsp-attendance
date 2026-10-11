@@ -7,7 +7,7 @@ const { db } = require('./lib/firestore');
 const { sendTelegram, sendTelegramDocument, sendTech, escapeHtml } = require('./lib/notify');
 const attBot = require('./lib/notify').channel('attendance'); // punches, staff changes, monthly sheet
 const advBot = require('./lib/notify').channel('advance');    // advances + salary paid/locked
-const techBot = require('./lib/notify').channel('tech');      // job rejected / job failed
+// Job rejected / job failed stay on the shared NSP OPS bot: they need action, and the Tech bot is muted.
 // H`…` escapes every inserted value, so a "<" or "&" typed into a name / remark / reason can neither be read
 // by Telegram as markup nor make it reject the alert. The <b> tags written in the template itself stay.
 const H = (strings, ...vals) => strings.reduce((out, str, i) => out + str + (i < vals.length ? escapeHtml(vals[i] ?? '') : ''), '');
@@ -414,7 +414,7 @@ async function handle(type, p) {
       fdb.collection('att_attendance').doc(p.code).get(),
     ]);
     const emp = empDoc.exists ? empDoc.data() : null;
-    if (!emp || !(emp.amount || emp.wage)) { await sendTelegram(H`🧾 Payslip: no salary set for ${p.code}.`); return 'no salary config'; }
+    if (!emp || !(emp.amount || emp.wage)) { await advBot.sendTelegram(H`🧾 Payslip: no salary set for ${p.code}.`); return 'no salary config'; }
     const now = new Date();
     const first = new Date(now.getFullYear(), now.getMonth(), 1);
     const last = new Date(now.getFullYear(), now.getMonth() + 1, 0);
@@ -451,7 +451,7 @@ async function handle(type, p) {
       // `payable` = this month's net PLUS the balance carried from last month. Printing `net` alone
       // hid the carried balance for 40 workers (Codex review 2026-07-30).
       pay.openingBalance ? `Previous balance ${r(pay.openingBalance)}  →  <b>PAYABLE ${r(pay.payable)}</b>` : ''];
-    await sendTelegram(lines.filter(Boolean).join('\n'));
+    await advBot.sendTelegram(lines.filter(Boolean).join('\n'));
     return 'payslip sent';
   }
   return 'unknown job type';
@@ -668,7 +668,7 @@ async function main() {
     const auth = await authorizeJob(requestedBy, type);
     if (!auth.ok) {
       await doc.ref.update({ status: 'error', error: 'unauthorized: ' + auth.reason, finishedAt: new Date().toISOString() });
-      await techBot.sendTelegram(H`🚫 Rejected job <b>${type}</b> from ${requestedBy || '?'} — ${auth.reason}`).catch(() => {});
+      await sendTelegram(H`🚫 Rejected job <b>${type}</b> from ${requestedBy || '?'} — ${auth.reason}`).catch(() => {});
       console.log(`[rejected] ${type}: ${auth.reason}`);
       continue;
     }
@@ -689,7 +689,7 @@ async function main() {
         console.log(`[retry ${attempts}] ${type}: ${msg}`);
       } else {
         await doc.ref.update({ status: 'error', attempts, error: msg.slice(0, 500), finishedAt: new Date().toISOString() });
-        await techBot.sendTelegram(H`⚠️ Job ${type} failed${transient ? ' (gave up after ' + attempts + ' tries)' : ''}: ${msg}`).catch(() => {});
+        await sendTelegram(H`⚠️ Job ${type} failed${transient ? ' (gave up after ' + attempts + ' tries)' : ''}: ${msg}`).catch(() => {});
         console.log(`[error] ${type}: ${msg}`);
       }
     }

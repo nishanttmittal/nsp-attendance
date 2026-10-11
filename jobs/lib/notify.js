@@ -18,14 +18,6 @@ for (const t of ['ATTENDANCE', 'ADVANCE', 'ORDERS', 'TECH', 'LEADS', 'QUALITY'])
 }
 const tokenFor = topic => (topic && TOPIC_TOKENS[topic]) || TOKEN;
 
-// A topic can post into a Telegram GROUP instead of the owner's direct chat (so the manager who must act sees it
-// too): set TELEGRAM_CHAT_ID_<TOPIC> to the group's id. It REPLACES the direct chat for that topic — no doubles.
-const TOPIC_CHATS = {};
-for (const t of ['ATTENDANCE', 'ADVANCE', 'ORDERS', 'TECH', 'LEADS', 'QUALITY']) {
-  const v = process.env['TELEGRAM_CHAT_ID_' + t] || local['TELEGRAM_CHAT_ID_' + t];
-  if (v) TOPIC_CHATS[t.toLowerCase()] = String(v);
-}
-
 // "Open app" button under an alert (Telegram only; the WhatsApp copy is plain text and unchanged).
 const APP = 'https://unico-operations.firebaseapp.com';
 const TOPIC_BUTTON = {
@@ -36,8 +28,7 @@ const TOPIC_BUTTON = {
 const buttonFor = topic => (topic && TOPIC_BUTTON[topic] ? { reply_markup: { inline_keyboard: [[TOPIC_BUTTON[topic]]] } } : {});
 
 // recipients = owner (env CHAT_ID) + any managers with a telegramChatId in att_users
-async function recipients(topic) {
-  if (topic && TOPIC_CHATS[topic]) return [TOPIC_CHATS[topic]];
+async function recipients() {
   const set = new Set();
   if (CHAT_ID) set.add(String(CHAT_ID));
   try {
@@ -53,12 +44,14 @@ async function recipients(topic) {
 // owner's phone. Best-effort and awaited (so the write flushes before a short-
 // lived GitHub Actions run exits); a Firestore error here must NEVER block the
 // Telegram alert, which is the reliable channel.
-async function enqueueWhatsApp(text) {
+async function enqueueWhatsApp(text, { plain = false } = {}) {
   try {
     const { db, FieldValue } = require('./firestore');
     // WhatsApp has no HTML: strip the Telegram <b>…</b> tags so names don't show as "<b>name</b>" (07-10-2026)
     await db().collection('wa_outbox').add({
-      text: String(text).replace(/<\/?(b|i)>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&'), // WhatsApp shows plain text, not entities
+      // HTML alerts: drop <b>/<i> and turn entities back into characters. PLAIN text (sendPlain) is not HTML-encoded,
+      // so it only loses stray <b>/<i> as before and is otherwise stored exactly as written.
+      text: plain ? String(text).replace(/<\/?(b|i)>/g, '') : String(text).replace(/<\/?(b|i)>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&'),
       status: 'pending',
       channel: 'staff',
       createdAt: FieldValue.serverTimestamp(),
@@ -73,8 +66,22 @@ async function enqueueWhatsApp(text) {
 
 // Technical/ops alerts (owner 07-10-2026: "very simple reports on my WhatsApp") — Telegram ONLY,
 // never mirrored to the owner's WhatsApp. Use for watchdogs, portal/sync failures, backups, price feeds.
+// One Telegram send. Never throws; a refusal (bot not started, token revoked, bad markup) or a network
+// failure is LOGGED with the bot id and returns false — before 12-10-2026 sendTech/sendPlain ignored the answer.
+async function post(token, body, label) {
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body), signal: AbortSignal.timeout(20000) });
+    const j = await res.json().catch(() => ({}));
+    if (res.ok && j.ok) return true;
+    console.error(`${label} telegram REFUSED (bot ${String(token).split(':')[0]}, chat ${body.chat_id}): ${j.description || res.status}`);
+  } catch (e) { console.error(`${label} telegram failed (bot ${String(token).split(':')[0]}): ${e.message}`); }
+  return false;
+}
+
 async function sendTech(text, topic) {
-  const TOKEN = tokenFor(topic || 'tech');   // technical alerts → the (muted) Tech bot unless a topic claims them
+  topic = topic || 'tech';   // technical alerts → the Tech bot unless a topic claims them
+  const TOKEN = tokenFor(topic);
   // owner 07-10-2026: "i should receive it one at 11 am and other at 6pm" — every tech alert is also
   // queued into att_alert_state/tech_digest; techDigest.js sends ONE plain WhatsApp message at 11:00 and 18:00.
   try {
@@ -84,14 +91,12 @@ async function sendTech(text, topic) {
       { items: FieldValue.arrayUnion({ at: new Date().toISOString(), text: plain.slice(0, 600) }) }, { merge: true });
   } catch (e) { console.error('tech digest queue failed (non-fatal):', e.message); }
   if (!TOKEN) { console.log('[DRY tech — no token] would send:\n' + text); return { dry: true }; }
-  const ids = await recipients(topic);
+  const ids = await recipients();
+  let sent = 0;
   for (const chat_id of ids) {
-    try {
-      await fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chat_id, text, parse_mode: 'HTML', disable_web_page_preview: true, ...buttonFor(topic) }) });
-    } catch (e) { console.error('tech telegram failed:', e.message); }
+    if (await post(TOKEN, { chat_id, text, parse_mode: 'HTML', disable_web_page_preview: true, ...buttonFor(topic) }, 'tech')) sent++;
   }
-  return { ok: true };
+  return { ok: sent > 0, sent };
 }
 
 // PLAIN messages (digests, one-liners): WhatsApp gets the text exactly as written; the Telegram copy is
@@ -100,23 +105,21 @@ async function sendTech(text, topic) {
 function escapeHtml(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 async function sendPlain(text, topic) {
   const TOKEN = tokenFor(topic);
-  const wa = await enqueueWhatsApp(text);   // callers that must not lose the message check this
+  const wa = await enqueueWhatsApp(text, { plain: true });   // callers that must not lose the message check this
   if (!TOKEN) { console.log('[DRY plain — no token] would send:\n' + text); return { dry: true }; }
-  const ids = await recipients(topic);
+  const ids = await recipients();
+  let sent = 0;
   for (const chat_id of ids) {
-    try {
-      await fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chat_id, text: escapeHtml(text), parse_mode: 'HTML', disable_web_page_preview: true, ...buttonFor(topic) }) });
-    } catch (e) { console.error('plain telegram failed:', e.message); }
+    if (await post(TOKEN, { chat_id, text: escapeHtml(text), parse_mode: 'HTML', disable_web_page_preview: true, ...buttonFor(topic) }, 'plain')) sent++;
   }
-  return { ok: true, wa };
+  return { ok: sent > 0, sent, wa };
 }
 
 async function sendTelegram(text, topic) {
   const TOKEN = tokenFor(topic);
   await enqueueWhatsApp(text); // also deliver on WhatsApp (best-effort, never throws)
   if (!TOKEN) { console.log('[DRY notify — no token] would send:\n' + text); return { dry: true }; }
-  const rcpts = await recipients(topic);
+  const rcpts = await recipients();
   if (!rcpts.length) { console.log('[DRY notify — no chat id] would send:\n' + text); return { dry: true }; }
   let last;
   for (const chat of rcpts) {
@@ -135,7 +138,7 @@ async function sendTelegramDocument(filePath, caption = '', topic) {
   if (!TOKEN || !CHAT_ID) { console.log('[DRY notify] would send document:', filePath); return { dry: true }; }
   const buf = fs.readFileSync(filePath);
   const form = new FormData();
-  form.append('chat_id', (topic && TOPIC_CHATS[topic]) || CHAT_ID);
+  form.append('chat_id', CHAT_ID);
   if (caption) form.append('caption', caption);
   form.append('document', new Blob([buf]), path.basename(filePath));
   const res = await fetch(`https://api.telegram.org/bot${TOKEN}/sendDocument`, { method: 'POST', body: form });
