@@ -77,6 +77,18 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
     function wOwner() { return signedIn() && (bootstrapOwner() || (wExists() && wData().role == 'owner' && wData().active == true)); }
     function wManager() { return signedIn() && (wOwner() || (wExists() && wData().role == 'manager' && wData().active == true)); }
 
+    function wInboxRow(id) {
+      let oid = id[3:id.size()];
+      let o = get(/databases/$(database)/documents/hisab_advance_outbox/$(oid)).data;
+      let r = request.resource.data;
+      return id.size() > 3 && id[0:3] == 'hx_'
+        && o.target == 'welder' && o.status == 'pending'
+        && r.id == id && r.type == 'advance' && r.direction == 'credit' && r.reversed == false
+        && r.contractor == o.name && r.amount == o.amount && r.amount > 0
+        && r.keys().hasOnly(['id', 'createdAt', 'updatedAt', 'contractor', 'date', 'type', 'direction', 'amount', 'note', 'createdBy', 'reversed'])
+        && getAfter(/databases/$(database)/documents/hisab_advance_outbox/$(oid)).data.status == 'accepted';
+    }
+
     // ---- plating admin helper ----
     function pPath() { return /databases/$(database)/documents/apps/platingjobwork/users/$(tEmail()); }
     function pExists() { return tEmail() != '' && exists(pPath()); }
@@ -250,7 +262,11 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
     match /apps/welder/adjustments/{id}     { allow read: if wUser(); allow write: if wOwner(); }
     // pay-sensitive: staff BLOCKED — manager/owner only
     match /apps/welder/rates/{id}        { allow read: if wManager(); allow write: if wOwner(); }
-    match /apps/welder/ledger/{id}       { allow read: if wManager(); allow write: if wOwner(); }
+    match /apps/welder/ledger/{id}       { allow read: if wManager(); allow write: if wOwner();
+      // the ONE ledger row a manager may add: the advance of a pending Welder-inbox item, same welder, same amount,
+      // id fixed to that item (so never twice), and only in the commit that marks the item accepted (owner 11-10-2026)
+      allow create: if wManager() && wInboxRow(id);
+    }
     match /apps/welder/settlements/{id}  { allow read: if wManager(); allow write: if wOwner(); }
     match /apps/welder/payments/{id} {
       allow read:           if wManager();
@@ -473,6 +489,16 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
     // single owner records in Hisab and accepts in welder/salary.
     match /hisab_advance_outbox/{id}       {
       allow read, write: if nonAnon() && bootstrapOwner();
+      // Welder MANAGER (owner 11-10-2026 "b": Anshul ji may accept incoming advances in the Welder app): sees and settles
+      // WELDER-target items only. Accept is valid only together with that item's own ledger row ('hx_' + id, created
+      // in the same commit — see wInboxRow); dismiss needs nothing else. Salary-target items stay owner-only.
+      allow read: if wManager() && resource.data.target == 'welder';
+      allow update: if wManager() && resource.data.target == 'welder' && resource.data.status == 'pending'
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'acceptedAt', 'acceptedBy', 'dismissedAt', 'dismissedBy'])
+        && (request.resource.data.status == 'dismissed'
+          || (request.resource.data.status == 'accepted'
+            && !exists(/databases/$(database)/documents/apps/welder/ledger/$('hx_' + id))
+            && existsAfter(/databases/$(database)/documents/apps/welder/ledger/$('hx_' + id))));
       // 💸 Self-reported advances from the login-free punch page (2026-08-12): CREATE-only,
       // pending-only, strict shape + ₹50k cap. NOTHING reaches salary until the owner taps
       // Accept in the app's "Hisab advances" screen — a forged entry can only sit in the queue.
@@ -851,7 +877,7 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
       let role = fxRoleOf();
       return role != ''
         && d.keys().hasOnly(['id', 'by', 'byName', 'kind', 'head', 'amount', 'detail', 'place', 'advFor', 'advStatus',
-             'date', 'hasPhoto', 'status', 'createdAt', 'clientAt', 'deviceId', 'schemaVersion', 'approval', 'hisab', 'selfAdv'])
+             'date', 'hasPhoto', 'status', 'createdAt', 'clientAt', 'deviceId', 'schemaVersion', 'approval', 'hisab', 'selfAdv', 'hasSlip', 'noSlip'])
         && d.id == id && d.by == me
         // approval (owner 08-10-2026): a worker's line waits for the owner / Anshul ji; their own lines are OK at once.
         // hisab: null until the line is closed into a 'Hisab final'.
@@ -875,6 +901,9 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
         // photoRequired). Anshul ji and the owner may save without one (owner 07-10-2026: "anshul need not enter photos").
         && (role != 'spender' || !(d.kind in ['saman', 'bilty'] || (d.kind in ['petrol', 'repair', 'other'] && d.amount > 200)) || d.hasPhoto == true)
         && (d.hasPhoto == false || existsAfter(fxP('photos', id)))
+        // second photo = the shop's slip, doc '<id>_s' (owner 11-10-2026); or the worker's word that no slip was given
+        && (!('hasSlip' in d) || (d.hasSlip == true && existsAfter(fxP('photos', id + '_s'))))
+        && (!('noSlip' in d) || (d.noSlip == true && !('hasSlip' in d)))
         && fxLastOp(me) == 'e:' + id;
     }
     function fxNotSelf(me, code) { return code == '' || code != get(fxP('users', me)).data.get('selfCode', '~'); }
@@ -962,10 +991,22 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
         && d.data[0:23] == 'data:image/jpeg;base64,'
         && !exists(fxP('entries', id)) && existsAfter(fxP('entries', id)) && getAfter(fxP('entries', id)).data.by == me;
     }
+    // the shop's slip of entry <eid>: doc '<eid>_s', created in the entry's own commit, only when that entry says hasSlip
+    function fxSlipCreate(id) {
+      let d = request.resource.data;
+      let me = fxMe();
+      let n = id.size();
+      return n > 2 && id[n - 2:n] == '_s' && fxActive() && d.keys().hasOnly(['id', 'by', 'data', 'createdAt'])
+        && d.id == id && d.by == me
+        && d.data is string && d.data.size() < 250000
+        && d.data[0:23] == 'data:image/jpeg;base64,'
+        && !exists(fxP('entries', id[0:n - 2])) && existsAfter(fxP('entries', id[0:n - 2]))
+        && getAfter(fxP('entries', id[0:n - 2])).data.by == me && getAfter(fxP('entries', id[0:n - 2])).data.get('hasSlip', false) == true;
+    }
     match /apps/falcon/photos/{id} {
       allow get: if fxEntryRead();
       allow list: if false;
-      allow create: if fxPhotoCreate(id);
+      allow create: if fxPhotoCreate(id) || fxSlipCreate(id);
       allow update, delete: if false;
     }
 
