@@ -22,3 +22,7 @@ jobs/metals.local.json
 # Firestore rules rollback snapshots (local safety copies, not source of truth).
 # Already-committed ones stay tracked; new ones are ignored.
 jobs/rules_backup/*.rules
+
+# Monthly PF figures per worker (names + wages) — local data only, never commit (repo is public)
+jobs/pf/*.json
+jobs/rules_backup/pf-before-*.json

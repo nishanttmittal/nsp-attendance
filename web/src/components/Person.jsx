@@ -193,6 +193,7 @@ export default function Person({ code, mk, user, onBack }) {
             <div className="border-t border-slate-200 mt-1.5 pt-1.5 space-y-0.5">
               {prevBal !== 0 && <div>Previous balance <b className={prevBal >= 0 ? 'text-green-700' : 'text-red-600'}>{rupee(Math.abs(prevBal))}</b> <span className="text-gray-400">({prevBal >= 0 ? 'owed to you' : 'you owe'})</span></div>}
               {fineAmt > 0 && <div>Fine <b className="text-red-600">−{rupee(fineAmt)}</b></div>}
+              {emp.pf && emp.pf[mk] && <div>🏦 PF deposited for {MON}: <b className="text-emerald-700">{rupee(Number(emp.pf[mk].ee || 0) + Number(emp.pf[mk].er || 0))}</b> <span className="text-gray-400">(his 12% {rupee(emp.pf[mk].ee)} + company 12% {rupee(emp.pf[mk].er)})</span></div>}
               {advs.length > 0 && <div className="text-gray-600">Advance this month: {advLines}</div>}
               {(dispPay.advanceDue || 0) > 0
                 ? <div className="flex items-center justify-between mt-1 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5">
