@@ -12,7 +12,7 @@ const sum = (list, f) => list.reduce((s, x) => s + Number(f(x) || 0), 0);
 
 export default function PfPaid() {
   const [emps, setEmps] = useState(null);
-  const [draft, setDraft] = useState({});   // code -> text being typed in the PF-cut box
+  const [draft, setDraft] = useState({});   // `${mk}:${code}` -> text being typed (month in the key: a figure typed for Sep must never save into Oct)
   const [busy, setBusy] = useState('');
   const [mk, setMk] = useState(() => {
     const d = new Date(Date.now() + 5.5 * 3600 * 1000); d.setUTCMonth(d.getUTCMonth() - 1, 1);   // PF is for last month's salary
@@ -36,14 +36,26 @@ export default function PfPaid() {
     })
     .sort((a, b) => a.name.localeCompare(b.name)), [emps, mk]);
 
+  const dk = (r) => `${mk}:${r.code}`;
   async function saveCut(r) {
-    const v = Math.max(0, Math.round(Number(draft[r.code]) || 0));
+    const key = dk(r), month = mk;                      // freeze month + worker for this save
+    const v = Math.max(0, Math.round(Number(draft[key]) || 0));
     setBusy(r.code);
     try {
-      await saveMonth(r.code, mk, { pfCut: v });
+      // Re-read the record first: the month may have been settled (here or on another phone) since this
+      // screen loaded. A settled month is never written to — reopen it in Salary to change the cut.
+      const now = await loadEmployee(r.code);
+      const mdNow = (now.months || {})[month] || {};
+      if (mdNow.locked || mdNow.payment) {
+        setEmps((prev) => prev.map((e) => (e.code === r.code ? now : e)));
+        setDraft((d) => { const n = { ...d }; delete n[key]; return n; });
+        alert(`${r.name}: ${month} is already settled. Reopen it in Salary first, then enter the PF cut.`);
+        return;
+      }
+      await saveMonth(r.code, month, { pfCut: v });
       const fresh = await loadEmployee(r.code).catch(() => null);
       if (fresh) setEmps((prev) => prev.map((e) => (e.code === r.code ? fresh : e)));
-      setDraft((d) => { const n = { ...d }; delete n[r.code]; return n; });
+      setDraft((d) => { const n = { ...d }; delete n[key]; return n; });
     } catch { alert('Could not save — check the internet and try again.'); }
     finally { setBusy(''); }
   }
@@ -108,14 +120,14 @@ export default function PfPaid() {
                 ) : (
                   <div className="flex gap-2 mt-1">
                     <input type="number" inputMode="numeric" min="0" placeholder="0"
-                      value={draft[r.code] ?? (r.pfCut ? String(r.pfCut) : '')}
-                      onChange={(e) => setDraft((d) => ({ ...d, [r.code]: e.target.value }))}
+                      value={draft[dk(r)] ?? (r.pfCut ? String(r.pfCut) : '')}
+                      onChange={(e) => setDraft((d) => ({ ...d, [dk(r)]: e.target.value }))}
                       className="flex-1 min-w-0 border-2 border-slate-300 rounded-xl px-3 py-2.5 text-lg font-semibold" />
-                    <button disabled={busy === r.code || draft[r.code] === undefined} onClick={() => saveCut(r)}
+                    <button disabled={busy === r.code || draft[dk(r)] === undefined} onClick={() => saveCut(r)}
                       className="bg-emerald-600 text-white rounded-xl px-5 font-bold disabled:opacity-40 active:scale-95">Save</button>
                   </div>
                 )}
-                {!r.locked && r.pfCut > 0 && draft[r.code] === undefined && <div className="text-[11px] text-emerald-700 mt-1">✓ {rupee(r.pfCut)} will come off his payable at settlement.</div>}
+                {!r.locked && r.pfCut > 0 && draft[dk(r)] === undefined && <div className="text-[11px] text-emerald-700 mt-1">✓ {rupee(r.pfCut)} will come off his payable at settlement.</div>}
               </div>
               {r.months > 1 && <div className="text-xs text-slate-500 mt-1.5">Total deposited so far ({r.months} months): <b className="text-slate-700">{rupee(r.tillNow)}</b></div>}
             </div>
