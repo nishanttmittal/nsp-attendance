@@ -46,6 +46,34 @@ function resolveTarget(advFor, roster, welders) {
   return { target: 'none', why: 'Attendance list mein yeh naam nahi' };
 }
 
+/** Atomically CLAIM one passed line before any money is posted for it (Codex review 11-10-2026: a plain re-read left a
+ *  gap — a cancel / edit landing between the read and the post). The transaction re-checks the line and writes
+ *  advPush.status 'posting'; the Falcon rules lock a 'posting' line against cancel and edit, exactly like a queued one.
+ *  A line already 'posting' (an earlier run died mid-way) may be claimed again: every step after this is idempotent.
+ *  same(cur) → is the line still what we read? Returns true when the claim is ours. */
+async function claim(f, ref, target, same) {
+  return f.runTransaction(async (tx) => {
+    const cur = (await tx.get(ref)).data();
+    if (!cur || cur.status !== 'active' || cur.hisab != null || cur.approval !== 'ok' || !same(cur)) return false;
+    if (cur.advPush && cur.advPush.status !== 'posting') return false;
+    tx.update(ref, { advPush: { ...target, status: 'posting', at: new Date().toISOString() } });
+    return true;
+  });
+}
+
+/** One inbox doc per Falcon line, whatever happens: fixed id (two runs at once cannot both add one — Codex 11-10-2026),
+ *  after first looking for a doc queued by an older build under a random id. Returns the doc id. */
+async function queueWelder(f, e, welder, who) {
+  const col = f.collection('hisab_advance_outbox');
+  const prior = await col.where('falconId', '==', e.id).limit(1).get();
+  if (!prior.empty) return prior.docs[0].id;
+  const id = 'fx_' + e.id;
+  try {
+    await col.doc(id).create({ target: 'welder', name: welder, code: '', amount: Number(e.amount), date: e.date, note: `Falcon (${who}): ${e.detail || ''}`.trim(), status: 'pending', source: 'falcon', falconId: e.id, ts: Date.now() });
+  } catch (x) { if (x.code !== 6 && !/already exists/i.test(x.message || '')) throw x; }
+  return id;
+}
+
 async function run({ dry = false } = {}) {
   const f = db();
   const base = f.collection('apps').doc('falcon');
@@ -84,7 +112,7 @@ async function run({ dry = false } = {}) {
       else out.waiting++;
       continue;
     }
-    if (push) continue;
+    if (push && push.status !== 'posting') continue;
     if (e.approval !== 'ok') { out.waiting++; continue; }
     const t = resolveTarget({ name: e.detail, code: '' }, roster, welders);
     const exactWelder = welders.find(w => norm(w) === norm(e.detail));
@@ -92,11 +120,9 @@ async function run({ dry = false } = {}) {
     if (!welder) continue;                                           // some other contractor — nothing to post
     const who = nameOf[e.by] || e.by;
     if (dry) { console.log(`[dry] Karigar tile ₹${e.amount} ${e.detail} (${who}, ${e.date}) → welder ${welder}`); continue; }
-    const cur = (await d.ref.get()).data();                          // read again just before acting (same guard as below)
-    if (!cur || cur.status !== 'active' || cur.hisab != null || cur.approval !== 'ok' || cur.advPush || cur.amount !== e.amount || cur.date !== e.date || cur.detail !== e.detail) { out.waiting++; continue; }
-    const prior = await f.collection('hisab_advance_outbox').where('falconId', '==', e.id).limit(1).get();
-    const ref = prior.empty ? await f.collection('hisab_advance_outbox').add({ target: 'welder', name: welder, code: '', amount: Number(e.amount), date: e.date, note: `Falcon (${who}): ${e.detail || ''}`.trim(), status: 'pending', source: 'falcon', falconId: e.id, createdAt: now }) : prior.docs[0].ref;
-    await d.ref.update({ advPush: { target: 'welder', name: welder, ref: ref.id, status: 'queued', at: now } });
+    if (!(await claim(f, d.ref, { target: 'welder', name: welder }, (c) => c.amount === e.amount && c.date === e.date && c.detail === e.detail))) { out.waiting++; continue; }
+    const refId = await queueWelder(f, e, welder, who);
+    await d.ref.update({ advPush: { target: 'welder', name: welder, ref: refId, status: 'queued', at: now } });
     out.queuedWelder++;
   }
   for (const d of adv.docs) {
@@ -112,10 +138,18 @@ async function run({ dry = false } = {}) {
       else out.waiting++;
       continue;
     }
-    if (push) { out.waiting++; continue; }                       // flagged / rejected earlier — the owner handles it by hand
-    if (e.approval !== 'ok') { out.waiting++; continue; }         // a worker's line waits for the OK
+    if (push && push.status !== 'posting') { out.waiting++; continue; } // flagged / rejected earlier — the owner handles it by hand
     const who = nameOf[e.by] || e.by;
     const t = resolveTarget(e.advFor, roster, welders);
+    if (e.approval !== 'ok') {
+      // Still waiting for the OK. If this is the worker's OWN advance and the phone did not mark it (a name typed in a
+      // way the app did not recognise, or an altered app), mark it here so whoever passes it sees the red "Khud ka adv"
+      // (Codex review 11-10-2026). Only the mark is written — no money, no approval.
+      if (!dry && !push && e.selfAdv !== true && roleOfUser[e.by] === 'spender' && t.target === 'attendance' && selfCodeOf[e.by] && t.code === selfCodeOf[e.by]) {
+        await d.ref.update({ selfAdv: true, selfAdvBy: 'auto:bridge' });
+      }
+      out.waiting++; continue;
+    }
     if (t.target === 'attendance' && selfCodeOf[e.by] && t.code === selfCodeOf[e.by] && roleOfUser[e.by] === 'spender' && !isOwner(e.approvedBy || '')) {
       if (!dry && !e.advPush) {
         await d.ref.update({ advPush: { target: 'attendance', code: t.code, name: t.name, status: 'self-needs-owner', error: 'Khud ka advance — Nishant ji / Anshul ji pass karenge', at: now } });
@@ -128,16 +162,26 @@ async function run({ dry = false } = {}) {
     // The list above was read a moment ago. Read THIS line again just before acting on it: if it was cancelled, edited,
     // closed or already handled in between, leave it for the next cycle — never push a line that has since changed
     // (review 09-10-2026: a cancel landing between the read and the push would leave the deduction without its line).
-    const cur = (await d.ref.get()).data();
-    if (!cur || cur.status !== 'active' || cur.hisab != null || cur.approval !== 'ok' || cur.advPush
-      || cur.amount !== e.amount || cur.date !== e.date || (cur.advFor?.name || '') !== (e.advFor?.name || '')) { out.waiting++; continue; }
+    const sameAdv = (c) => c.amount === e.amount && c.date === e.date && (c.advFor?.name || '') === (e.advFor?.name || '');
+    if (t.target === 'none') {
+      const cur = (await d.ref.get()).data();
+      if (!cur || cur.status !== 'active' || cur.hisab != null || cur.approval !== 'ok' || (cur.advPush && cur.advPush.status !== 'posting') || !sameAdv(cur)) { out.waiting++; continue; }
+    } else if (!(await claim(f, d.ref, t.target === 'attendance' ? { target: 'attendance', code: t.code, name: t.name } : { target: 'welder', name: t.name }, sameAdv))) { out.waiting++; continue; }
     if (t.target === 'attendance') {
       // already typed into Attendance by hand (same worker, same day, same amount)? then only mark the Falcon line — no second advance
       const existing = ((await f.collection('att_salary').doc(t.code).get()).data() || {}).advances || [];
       const advId = `adv-${e.date}-falcon-${e.id}`;
       // our own earlier push (a run that died after the Attendance write, before marking the Falcon line — 09-10-2026,
       // Telegram unreachable from the factory network) is NOT a "possible duplicate": it is this very advance
-      const mine = existing.some(a => a.id === advId);
+      const mineRow = existing.find(a => a.id === advId);
+      // our id is already in Attendance: it is this advance ONLY if the money matches too. Anything else (an amount
+      // changed after an earlier posting) is never marked done on a guess — the owner looks at it (Codex 11-10-2026).
+      if (mineRow && Number(mineRow.amount) !== Number(e.amount)) {
+        await d.ref.update({ advPush: { target: 'attendance', code: t.code, name: t.name, status: 'mismatch', error: `Attendance mein ₹${mineRow.amount} hai, yahan ₹${e.amount} — owner dekhe`, at: now } });
+        await sendTech(`Falcon advance ${esc(label)}: Attendance mein ₹${mineRow.amount} pehle se gaya hua hai, line ab ₹${e.amount} hai — owner check kare`).catch((x) => console.error('tech alert failed:', x.message));
+        out.flagged++; continue;
+      }
+      const mine = !!mineRow;
       const dup = !mine && existing.find(a => String(a.date).slice(0, 10) === e.date && Number(a.amount) === Number(e.amount));
       if (dup) {
         // a same-day same-amount advance could be the same money typed by hand — or a real second advance. Never decide
@@ -171,10 +215,8 @@ async function run({ dry = false } = {}) {
         out.pushed++;
       }
     } else if (t.target === 'welder') {
-      // idempotent: a crash after the add and before the Falcon update must not queue it twice
-      const prior = await f.collection('hisab_advance_outbox').where('falconId', '==', e.id).limit(1).get();
-      const ref = prior.empty ? await f.collection('hisab_advance_outbox').add({ target: 'welder', name: t.name, code: '', amount: Number(e.amount), date: e.date, note: `Falcon (${who}): ${e.detail || ''}`.trim(), status: 'pending', source: 'falcon', falconId: e.id, createdAt: now }) : prior.docs[0].ref;
-      await d.ref.update({ advPush: { target: 'welder', name: t.name, ref: ref.id, status: 'queued', at: now } });
+      const refId = await queueWelder(f, e, t.name, who);
+      await d.ref.update({ advPush: { target: 'welder', name: t.name, ref: refId, status: 'queued', at: now } });
       out.queuedWelder++;
     } else {
       await d.ref.update({ advPush: { target: 'none', status: 'unmatched', error: t.why, at: now } });
