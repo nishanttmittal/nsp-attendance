@@ -26,3 +26,12 @@ jobs/rules_backup/*.rules
 # Monthly PF figures per worker (names + wages) — local data only, never commit (repo is public)
 jobs/pf/*.json
 jobs/rules_backup/pf-before-*.json
+
+# Data backups written by jobs (worker names, pay, punches) — local safety copies only, never commit (12-10-2026)
+jobs/rules_backup/*.json
+jobs/rules_backup/*.xls
+jobs/rules_backup/*.xlsx
+jobs/rules_backup/*.csv
+jobs/rules_backup/*.txt
+jobs/*.bak*
+jobs/secrets.json*
