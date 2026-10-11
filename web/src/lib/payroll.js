@@ -61,10 +61,13 @@ export function computePay({ emp, att, daysInMonth, elapsedDays, fullMonth, adva
   const lunchDeductHrs = 0.5 * (att.presentDays || 0);
   const dailyEquivDays = att.equivalentDays != null ? att.equivalentDays
     : Math.max(0, (att.workHrs || 0) - lunchDeductHrs) / dailyStdHrs;
+  // Days the monthly BASE is paid on. The screen's "Paid days" shows this same figure (owner 2026-10-11:
+  // seema read 27.5 on screen while paid on 28.5 — the portal had dropped 04-Sep from her counts).
+  const monthlyBaseDays = att.noRecord ? 0                 // no attendance this month (joined later) -> pay 0, never a full month
+    : Math.max(0, effElapsed - absentForBase - unpaidSat);
   const base = emp.type === 'daily'
     ? rate * dailyEquivDays
-    : att.noRecord ? 0                                    // no attendance this month (joined later) -> pay 0, never a full month
-    : perDay * Math.max(0, effElapsed - absentForBase - unpaidSat);
+    : perDay * monthlyBaseDays;
 
   // Net OT = raw OT − late − early, floored at 0 (lateness is also handled by the penalty tab).
   // Daily-wagers get NO separate OT: their overtime hours are ALREADY inside workHrs and paid at 1×
@@ -136,12 +139,15 @@ export function computePay({ emp, att, daysInMonth, elapsedDays, fullMonth, adva
   const saturdaysCut = emp.type === 'daily' ? 0 : Math.max(0, round(saturdaysInPeriod - weeklyOffAll));
   const paidDays = emp.type === 'daily'
     ? round(dailyEquivDays)                                 // daily: hours ÷ standard-day (workHrs/11) = paid full-day equivalents
-    : round(present + weeklyOffAll + holiday - unpaidSat);  // monthly: paid Saturdays minus those worked in an unearned week (OT only)
+    : round(monthlyBaseDays);                               // monthly: exactly the days the base is paid on
+  // Paid days the machine's own counts (present + weekly-off + holiday) do not explain — e.g. a day the
+  // portal treated as a worked holiday, or a no-show whose absents the portal under-counted. Display only.
+  const uncountedDays = emp.type === 'daily' ? 0 : round(monthlyBaseDays - (present + weeklyOffAll + holiday - unpaidSat));
 
   return {
     type: emp.type, effectiveRate: rate, effectiveRemark: eff.remark, perDay: round(perDay), noAttendance: !!att.noRecord,
     payableDays: effElapsed, presentDays: att.presentDays || 0, absentDays: att.absentDays || 0,
-    weeklyOff, weeklyOffPresent, weeklyOffAll, holiday, paidDays, unpaidWorkedSat: unpaidSat,
+    weeklyOff, weeklyOffPresent, weeklyOffAll, holiday, paidDays, uncountedDays, unpaidWorkedSat: unpaidSat,
     workHrs: round(att.workHrs || 0), dailyStdHrs, equivalentDays: emp.type === 'daily' ? round(dailyEquivDays) : undefined,
     saturdaysInPeriod, saturdaysCut,
     restoreSaturdayDays: restoreSatDays, restoreSaturdayPay: round(restoreSaturdayPay),

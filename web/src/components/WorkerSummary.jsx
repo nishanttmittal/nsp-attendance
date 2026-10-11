@@ -46,6 +46,7 @@ export default function WorkerSummary({ r, mk, disp }) {
         <span>Weekly-off <b>{pay.weeklyOffAll}</b></span>
         <span>Holiday <b>{holidayN}</b></span>
         <span>Extra day <b className={extraDays ? 'text-green-700' : ''}>{extraDays}</b>{bonusEligibleUnpaid ? <span className="text-[11px] text-green-600"> (+1 eligible)</span> : ''}</span>
+        {(pay.uncountedDays || 0) !== 0 && <span className="text-amber-700">Not in machine count <b>{pay.uncountedDays > 0 ? '+' : ''}{pay.uncountedDays}</b></span>}
         <span>Paid days <b>{paidDaysN}</b></span>
         <span>Overtime <b>{pay.otHrsNet}h</b></span>
       </div>

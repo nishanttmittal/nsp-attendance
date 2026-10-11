@@ -174,6 +174,7 @@ export default function Person({ code, mk, user, onBack }) {
               <span>Weekly-off <b>{pay.weeklyOffAll}</b></span>
               <span>Holiday <b>{holidayN}</b></span>
               <span>Extra day <b className={extraDays ? 'text-green-700' : ''}>{extraDays}</b>{bonusEligibleUnpaid ? <span className="text-[11px] text-green-600"> (+1 eligible)</span> : ''}</span>
+              {(pay.uncountedDays || 0) !== 0 && <span className="text-amber-700">Not in machine count <b>{pay.uncountedDays > 0 ? '+' : ''}{pay.uncountedDays}</b></span>}
               <span>Paid days <b>{paidDaysN}</b></span>
               {/* Daily wagers are paid on HOURS (wage x (workHrs - 0.5/day lunch) / 11), and OT is
                   already inside those hours — they never earn separate OT. Showing "Overtime 0h"
