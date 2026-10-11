@@ -4,9 +4,12 @@ const { execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const { db } = require('./lib/firestore');
-const { sendTelegram, sendTelegramDocument, sendTech } = require('./lib/notify');
+const { sendTelegram, sendTelegramDocument, sendTech, escapeHtml } = require('./lib/notify');
 const attBot = require('./lib/notify').channel('attendance'); // punches, staff changes, monthly sheet
 const advBot = require('./lib/notify').channel('advance');    // advances + salary paid/locked
+// H`…` escapes every inserted value, so a "<" or "&" typed into a name / remark / reason can neither be read
+// by Telegram as markup nor make it reject the alert. The <b> tags written in the template itself stay.
+const H = (strings, ...vals) => strings.reduce((out, str, i) => out + str + (i < vals.length ? escapeHtml(vals[i] ?? '') : ''), '');
 const { drainSelfPunch } = require('./selfPunch');
 const { captureLate } = require('./lateCapture');
 const { alertLate } = require('./lateAlert');
@@ -86,7 +89,7 @@ async function handle(type, p) {
         }
       }
     } catch (e) { console.error('missed-list cleanup failed:', e.message); }
-    await attBot.sendTelegram(`✏️ Punch correction: ${p.emp} on ${p.date} (in ${p.in || '—'}/out ${p.out || '—'})${p.reason ? ' — ' + p.reason : ''}.`);
+    await attBot.sendTelegram(H`✏️ Punch correction: ${p.emp} on ${p.date} (in ${p.in || '—'}/out ${p.out || '—'})${p.reason ? ' — ' + p.reason : ''}.`);
     return 'punch inserted + day reprocessed + logged + removed from list';
   }
   if (type === 'backup') {
@@ -102,7 +105,7 @@ async function handle(type, p) {
       return `cardno ${p.cardno} already on the machine roster — skipped (duplicate guard)`;
     }
     run('onboardEmployee.js', { NAME: p.name, CARDNO: p.cardno, DEPT: p.dept, SHIFT: p.shift, GENDER: p.gender, DRY: 'false' });
-    await attBot.sendTelegram(`🧑‍🏭 New employee added: ${p.name} (${p.cardno}) · ${p.dept} · ${p.shift}.`);
+    await attBot.sendTelegram(H`🧑‍🏭 New employee added: ${p.name} (${p.cardno}) · ${p.dept} · ${p.shift}.`);
     return 'employee created on machine';
   }
   if (type === 'push_employee_edit') {   // owner edited profile in app → push to the machine
@@ -113,19 +116,19 @@ async function handle(type, p) {
     if (p.gender) env.PE_GENDER = p.gender;
     run('pushEmployeeEdit.js', env);
     const bits = [p.name ? 'name “' + p.name + '”' : '', p.dept ? 'dept ' + p.dept : '', p.shift ? 'shift ' + p.shift : '', p.gender ? p.gender : ''].filter(Boolean).join(' · ');
-    await attBot.sendTelegram(`✏️ Updated on machine: ${p.code}${bits ? ' · ' + bits : ''}.`);
+    await attBot.sendTelegram(H`✏️ Updated on machine: ${p.code}${bits ? ' · ' + bits : ''}.`);
     return 'profile pushed to machine';
   }
   if (type === 'resign_employee') {
     // Owner rule (2026-07-12): KEEP the worker's record INACTIVE with name + paid history so the owner
     // can always look up whom he paid & when. NO att_archive snapshot (removed) — the live inactive
     // record + the monthly salary_register ARE the permanent record. Machine removal stays manual.
-    await attBot.sendTelegram(`👋 ${p.code} marked resigned — kept inactive in the salary sheet (name + paid history retained). Machine removal is manual.`).catch(() => {});
+    await attBot.sendTelegram(H`👋 ${p.code} marked resigned — kept inactive in the salary sheet (name + paid history retained). Machine removal is manual.`).catch(() => {});
     return 'resigned: kept inactive in salary sheet (no archive; machine NOT touched)';
   }
   if (type === 'reprocess_period') {
     run('reprocessRange.js', { FROM: p.from, TO: p.to });
-    await attBot.sendTelegram(`🔄 Reprocessed attendance ${p.from} → ${p.to}.`);
+    await attBot.sendTelegram(H`🔄 Reprocessed attendance ${p.from} → ${p.to}.`);
     return 'reprocessed ' + p.from + '..' + p.to;
   }
   if (type === 'weeklyoff_audit') {   // worked-but-unearned Saturdays → unpaidWorkedSat (OT-only rule)
@@ -141,7 +144,7 @@ async function handle(type, p) {
     const [my, mm] = String(p.month || curMk).split('-').map(Number);
     const offset = (cy * 12 + cm) - (my * 12 + mm);     // 0 = current month, 1 = last month, …
     const n = await scanMissed(Math.max(0, offset));
-    await attBot.sendTelegram(`🔍 Rescanned ${p.month || curMk}: ${n} missed punch(es) found — see the Problems tab.`);
+    await attBot.sendTelegram(H`🔍 Rescanned ${p.month || curMk}: ${n} missed punch(es) found — see the Problems tab.`);
     return `scanned ${p.month}: ${n}`;
   }
   if (type === 'mark_paid') {    // pay a salary — supports PART payments (e.g. cash today + bank next day)
@@ -206,10 +209,10 @@ async function handle(type, p) {
     const remaining = Math.max(0, due - paidSoFar);
     if (fullyPaid) {
       const extra = Math.max(0, paidSoFar - due);
-      await advBot.sendTelegram(`💵 Paid in full: <b>${e.name || p.code}</b> ₹${paidSoFar.toLocaleString('en-IN')} (${months[p.month].payment.mode}) · ${p.month}${extra > 0 ? ` · ₹${extra.toLocaleString('en-IN')} extra → advance carried forward` : ''}${payments.length > 1 ? ` · ${payments.length} parts` : ''}${p.remark ? ` · ${p.remark}` : ''} · by ${p._by || 'manager'}`);
+      await advBot.sendTelegram(H`💵 Paid in full: <b>${e.name || p.code}</b> ₹${paidSoFar.toLocaleString('en-IN')} (${months[p.month].payment.mode}) · ${p.month}${extra > 0 ? ` · ₹${extra.toLocaleString('en-IN')} extra → advance carried forward` : ''}${payments.length > 1 ? ` · ${payments.length} parts` : ''}${p.remark ? ` · ${p.remark}` : ''} · by ${p._by || 'manager'}`);
       return extra > 0 ? `paid in full (₹${extra} extra → advance)` : 'paid in full';
     }
-    await advBot.sendTelegram(`💵 Part paid: <b>${e.name || p.code}</b> ₹${thisAmt.toLocaleString('en-IN')} (${p.mode || 'cash'}) · ${p.month} · ₹${remaining.toLocaleString('en-IN')} still pending${p.remark ? ` · ${p.remark}` : ''} · by ${p._by || 'manager'}`);
+    await advBot.sendTelegram(H`💵 Part paid: <b>${e.name || p.code}</b> ₹${thisAmt.toLocaleString('en-IN')} (${p.mode || 'cash'}) · ${p.month} · ₹${remaining.toLocaleString('en-IN')} still pending${p.remark ? ` · ${p.remark}` : ''} · by ${p._by || 'manager'}`);
     return `part paid ₹${thisAmt} · ₹${remaining} pending`;
   }
   if (type === 'lock_month') {   // CASHIER settle (owner 2026-07-12): record cash+account, freeze the
@@ -243,7 +246,7 @@ async function handle(type, p) {
       // balance when next month is already frozen desyncs the carry chain. Unlock later months first.
       const nextMd = months[next] || {};
       if (nextMd.locked || nextMd.payment) {
-        await advBot.sendTelegram(`🚫 Could not lock <b>${e.name || p.code}</b> ${p.month} — ${next} is already paid & locked. Reopen ${next} first, then lock ${p.month}.`).catch(() => {});
+        await advBot.sendTelegram(H`🚫 Could not lock <b>${e.name || p.code}</b> ${p.month} — ${next} is already paid & locked. Reopen ${next} first, then lock ${p.month}.`).catch(() => {});
         return `REFUSED — ${next} is already locked; lock months in order`;
       }
       const prevNextOpening = Number(nextMd.openingBalance || 0), prevNextAdvance = Number(nextMd.advanceBalanceIn || 0);
@@ -262,7 +265,7 @@ async function handle(type, p) {
       reg.count = Object.keys(reg.byCode).length; reg.updatedAt = new Date().toISOString();
       await regRef.set(reg);
     } catch (e2) { console.error('register write failed:', e2.message); }
-    await advBot.sendTelegram(`🔒 Locked <b>${e.name || p.code}</b> ${p.month}: paid ₹${paid.toLocaleString('en-IN')} (cash ${cash} + acct ${account})${closing ? ` · carry ₹${closing.toLocaleString('en-IN')} → next month` : ''} · by ${p._by || 'owner'}${p.reason ? ` · ${p.reason}` : ''}`).catch(() => {});
+    await advBot.sendTelegram(H`🔒 Locked <b>${e.name || p.code}</b> ${p.month}: paid ₹${paid.toLocaleString('en-IN')} (cash ${cash} + acct ${account})${closing ? ` · carry ₹${closing.toLocaleString('en-IN')} → next month` : ''} · by ${p._by || 'owner'}${p.reason ? ` · ${p.reason}` : ''}`).catch(() => {});
     return `locked ${p.month}: paid ${paid}, carry ${closing} (register+alert)`;
   }
   if (type === 'unlock_month') {   // reopen a locked month: clear the payment + revert the carried balance
@@ -307,7 +310,7 @@ async function handle(type, p) {
     if (n) await batch.commit();
     reg.total = total; reg.count = locked; reg.finalizedAt = new Date().toISOString(); reg.finalizedBy = p._by || 'owner';
     await db().collection('att_meta').doc('hisab_' + mk).set(reg);   // durable monthly hisab register
-    await advBot.sendTelegram(`🔒 <b>Hisab finalized — ${mk}</b>: ${locked} staff, total ₹${Math.round(total).toLocaleString('en-IN')}. Leftover advances carried to ${next}.`);
+    await advBot.sendTelegram(H`🔒 <b>Hisab finalized — ${mk}</b>: ${locked} staff, total ₹${Math.round(total).toLocaleString('en-IN')}. Leftover advances carried to ${next}.`);
     return `hisab finalized ${mk}: ${locked} staff, ₹${Math.round(total)}`;
   }
   if (type === 'add_advance') {  // manager-created; applied with admin SDK (bypasses rules)
@@ -321,7 +324,7 @@ async function handle(type, p) {
     // same leak, different cause. The app rejects this (BADDATE); the manager queue must too, or
     // the two paths this guard was unified across would disagree again (2026-07-31).
     if (!/^\d{4}-\d{2}$/.test(dateMk)) {
-      await advBot.sendTelegram(`🚫 Advance ₹${p.advance.amount} to ${(snap.exists && snap.data().name) || p.code} NOT saved — it has no valid date ("${p.advance.date || ''}"), so it could never be deducted from a salary. Re-enter it with a date. (by ${p.advance.paidBy || '?'})`);
+      await advBot.sendTelegram(H`🚫 Advance ₹${p.advance.amount} to ${(snap.exists && snap.data().name) || p.code} NOT saved — it has no valid date ("${p.advance.date || ''}"), so it could never be deducted from a salary. Re-enter it with a date. (by ${p.advance.paidBy || '?'})`);
       return `REJECTED — advance has no valid date; not recorded`;
     }
     // OWNER RULE (13-08-2026): while the worker's PREVIOUS month is still unlocked, a new advance
@@ -339,7 +342,7 @@ async function handle(type, p) {
     const allMonths = (empData.months || {});
     const mdAdv = allMonths[advMk] || {};
     if (mdAdv.locked || mdAdv.payment) {
-      await advBot.sendTelegram(`🚫 Advance ₹${p.advance.amount} to ${(snap.exists && snap.data().name) || p.code} NOT saved — ${advMk} salary is already paid & locked. Date it in the current month instead. (by ${p.advance.paidBy || '?'})`);
+      await advBot.sendTelegram(H`🚫 Advance ₹${p.advance.amount} to ${(snap.exists && snap.data().name) || p.code} NOT saved — ${advMk} salary is already paid & locked. Date it in the current month instead. (by ${p.advance.paidBy || '?'})`);
       return `REJECTED — ${advMk} is locked; advance not recorded`;
     }
     // ...and never BEFORE a locked month either (2026-07-31): that month's carry already accounts for
@@ -347,7 +350,7 @@ async function handle(type, p) {
     // checked this; add did not.
     const laterLocked = Object.entries(allMonths).find(([m, d]) => m > advMk && d && (d.locked || d.payment));
     if (laterLocked) {
-      await advBot.sendTelegram(`🚫 Advance ₹${p.advance.amount} to ${(snap.exists && snap.data().name) || p.code} NOT saved — a LATER month (${laterLocked[0]}) is already paid & locked, so this advance could never be deducted. Date it in the current month instead. (by ${p.advance.paidBy || '?'})`);
+      await advBot.sendTelegram(H`🚫 Advance ₹${p.advance.amount} to ${(snap.exists && snap.data().name) || p.code} NOT saved — a LATER month (${laterLocked[0]}) is already paid & locked, so this advance could never be deducted. Date it in the current month instead. (by ${p.advance.paidBy || '?'})`);
       return `REJECTED — later month ${laterLocked[0]} is locked; advance not recorded`;
     }
     // SETTLE-CASH DOUBLE-ENTRY WARNING (owner 2026-08-23) — mirrors data.js settleCashClash. Cash paid
@@ -368,7 +371,7 @@ async function handle(type, p) {
     // notifyOnly (2026-07-22): the OWNER app already wrote this advance directly (addAdvanceDirect)
     // for instant display; this job exists only to fire the Telegram alert in the background.
     if (p.notifyOnly) {
-      await advBot.sendTelegram(`💸 Advance ₹${p.advance.amount} to <b>${empData.name || p.code}</b>${empData.name ? ` (${p.code})` : ''} (${p.advance.mode}) by ${p.advance.paidBy || '?'}.${clashWarn}`);
+      await advBot.sendTelegram(H`💸 Advance ₹${p.advance.amount} to <b>${empData.name || p.code}</b>${empData.name ? ` (${p.code})` : ''} (${p.advance.mode}) by ${p.advance.paidBy || '?'}.${clashWarn}`);
       return already ? 'advance already applied — notified' : 'advance notified';
     }
     // DEDUPE (fix 2026-07-18): a stale-recovery re-run (runner killed after the write, before
@@ -378,7 +381,7 @@ async function handle(type, p) {
     }
     advances.push(p.advance);
     await ref.set({ advances }, { merge: true });
-    await advBot.sendTelegram(`💸 Advance ₹${p.advance.amount} to <b>${empData.name || p.code}</b>${empData.name ? ` (${p.code})` : ''} (${p.advance.mode}) by ${p.advance.paidBy || '?'}.${clashWarn}`);
+    await advBot.sendTelegram(H`💸 Advance ₹${p.advance.amount} to <b>${empData.name || p.code}</b>${empData.name ? ` (${p.code})` : ''} (${p.advance.mode}) by ${p.advance.paidBy || '?'}.${clashWarn}`);
     return 'advance added';
   }
   if (type === 'extra_photo') {  // owner 01-10-2026 "add photos if available": optional photo of extra loaders
@@ -410,7 +413,7 @@ async function handle(type, p) {
       fdb.collection('att_attendance').doc(p.code).get(),
     ]);
     const emp = empDoc.exists ? empDoc.data() : null;
-    if (!emp || !(emp.amount || emp.wage)) { await sendTelegram(`🧾 Payslip: no salary set for ${p.code}.`); return 'no salary config'; }
+    if (!emp || !(emp.amount || emp.wage)) { await sendTelegram(H`🧾 Payslip: no salary set for ${p.code}.`); return 'no salary config'; }
     const now = new Date();
     const first = new Date(now.getFullYear(), now.getMonth(), 1);
     const last = new Date(now.getFullYear(), now.getMonth() + 1, 0);
@@ -439,7 +442,7 @@ async function handle(type, p) {
       openingBalance: Number(md.openingBalance || 0),   // carried balance — else Telegram payslip over/under-states payable
     });
     const r = n => '₹' + Number(n || 0).toLocaleString('en-IN');
-    const lines = [`🧾 <b>Payslip — ${emp.name || p.code} (${mk})</b>`,
+    const lines = [H`🧾 <b>Payslip — ${emp.name || p.code} (${mk})</b>`,
       `Rate ${r(pay.effectiveRate)} ${emp.type === 'daily' ? '/day' : '/mo'}  ·  Present ${pay.presentDays} / Absent ${pay.absentDays}`,
       `Base ${r(pay.base)} + OT ${r(pay.otPay)}${pay.perfectBonus ? ' + bonus ' + r(pay.perfectBonus) : ''}`,
       `${pay.fines ? '− Fine ' + r(pay.fines) + '  ' : ''}${pay.loanInstallment ? '− Loan ' + r(pay.loanInstallment) + '  ' : ''}${pay.advanceRecovered ? '− Advance ' + r(pay.advanceRecovered) : ''}`,
@@ -504,7 +507,7 @@ async function selfHealFloor() {
   // token dead / portal down), throttled to 1/hour, so a normal cron-miss self-heals silently.
   if (nowMin - due.min > 30 && now - (Date.parse(s.lastAlert || 0) || 0) > 60 * 60 * 1000) {
     const last = pubAt ? new Date(pubAt + 5.5 * 3600 * 1000).toISOString().slice(11, 16) + ' IST' : 'never today';
-    await attBot.sendTech(`⚠️ The ${due.label} floor update didn't run (last pull ${last}). Auto-retry isn't taking — check the biometric device / the app's data token.`).catch(() => {});
+    await attBot.sendTech(H`⚠️ The ${due.label} floor update didn't run (last pull ${last}). Auto-retry isn't taking — check the biometric device / the app's data token.`).catch(() => {});
     patch.lastAlert = new Date(now).toISOString();
   }
   if (Object.keys(patch).length) await ref.set(patch, { merge: true });
@@ -664,7 +667,7 @@ async function main() {
     const auth = await authorizeJob(requestedBy, type);
     if (!auth.ok) {
       await doc.ref.update({ status: 'error', error: 'unauthorized: ' + auth.reason, finishedAt: new Date().toISOString() });
-      await sendTelegram(`🚫 Rejected job <b>${type}</b> from ${requestedBy || '?'} — ${auth.reason}`).catch(() => {});
+      await sendTelegram(H`🚫 Rejected job <b>${type}</b> from ${requestedBy || '?'} — ${auth.reason}`).catch(() => {});
       console.log(`[rejected] ${type}: ${auth.reason}`);
       continue;
     }
@@ -685,7 +688,7 @@ async function main() {
         console.log(`[retry ${attempts}] ${type}: ${msg}`);
       } else {
         await doc.ref.update({ status: 'error', attempts, error: msg.slice(0, 500), finishedAt: new Date().toISOString() });
-        await sendTelegram(`⚠️ Job ${type} failed${transient ? ' (gave up after ' + attempts + ' tries)' : ''}: ${msg}`).catch(() => {});
+        await sendTelegram(H`⚠️ Job ${type} failed${transient ? ' (gave up after ' + attempts + ' tries)' : ''}: ${msg}`).catch(() => {});
         console.log(`[error] ${type}: ${msg}`);
       }
     }
