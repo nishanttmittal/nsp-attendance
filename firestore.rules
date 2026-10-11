@@ -902,8 +902,15 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
         && (role != 'spender' || !(d.kind in ['saman', 'bilty'] || (d.kind in ['petrol', 'repair', 'other'] && d.amount > 200)) || d.hasPhoto == true)
         && (d.hasPhoto == false || existsAfter(fxP('photos', id)))
         // second photo = the shop's slip, doc '<id>_s' (owner 11-10-2026); or the worker's word that no slip was given
-        && (!('hasSlip' in d) || (d.hasSlip == true && existsAfter(fxP('photos', id + '_s'))))
+        // the slip doc must be NEW in this very commit (never an older photo that happens to sit at that id), and no
+        // entry id may itself end in '_s', so 'photo of entry X_s' and 'slip of entry X' can never be the same doc
+        && !id.matches('.*_s$')
+        && (!('hasSlip' in d) || (d.hasSlip == true && !exists(fxP('photos', id + '_s')) && existsAfter(fxP('photos', id + '_s'))))
         && (!('noSlip' in d) || (d.noSlip == true && !('hasSlip' in d)))
+        // a worker's Bazaar saman line must carry the slip or the "slip nahi mili" mark. Enforced here from 13-10-2026
+        // 00:00 IST, so phones still on the previous build keep saving for the two days it takes them to update.
+        && (role != 'spender' || d.kind != 'saman' || request.time < timestamp.date(2026, 10, 12) + duration.value(1110, 'm')
+            || d.get('hasSlip', false) == true || d.get('noSlip', false) == true)
         && fxLastOp(me) == 'e:' + id;
     }
     function fxNotSelf(me, code) { return code == '' || code != get(fxP('users', me)).data.get('selfCode', '~'); }
