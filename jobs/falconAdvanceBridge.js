@@ -99,6 +99,13 @@ async function run({ dry = false } = {}) {
   // Khud ka advance (owner 09-10-2026 "build b"): a worker's advance to HIMSELF reaches Attendance only on the OWNER's OK.
   // The Falcon rules already enforce this for a name picked from the list; this is the backstop for a name typed by hand.
   const selfCodeOf = Object.fromEntries(users.docs.map(d => [d.id, d.data().selfCode || '']));
+  // the worker's own first names (his display name + selfNames): used when the name was typed by hand, or when no
+  // selfCode is on file for him yet (Grok review 12-10-2026 — without it such a line carried no red mark at all)
+  const first = (x) => norm(x).split(' ')[0] || '';
+  const selfNamesOf = Object.fromEntries(users.docs.map(d => [d.id, [d.data().name, ...(d.data().selfNames || [])].map(first).filter(Boolean)]));
+  const isOwnAdvance = (e, t) => roleOfUser[e.by] === 'spender' && (
+    (t.target === 'attendance' && !!selfCodeOf[e.by] && t.code === selfCodeOf[e.by])
+    || ((!selfCodeOf[e.by] || !(e.advFor && e.advFor.code)) && (selfNamesOf[e.by] || []).includes(first(e.advFor && e.advFor.name))));
   const roleOfUser = Object.fromEntries(users.docs.map(d => [d.id, d.data().active === true ? d.data().role : '']));
   // (owner 09-10-2026 23:24: Anshul ji may pass it too — the OK must come from staff, never from the worker himself)
   const isOwner = (email) => email === 'nspenterprises24@gmail.com' || ['owner', 'incharge'].includes(roleOfUser[email]);
@@ -154,7 +161,7 @@ async function run({ dry = false } = {}) {
       // Still waiting for the OK. If this is the worker's OWN advance and the phone did not mark it (a name typed in a
       // way the app did not recognise, or an altered app), mark it here so whoever passes it sees the red "Khud ka adv"
       // (Codex review 11-10-2026). Only the mark is written — no money, no approval.
-      if (!dry && !push && e.selfAdv !== true && roleOfUser[e.by] === 'spender' && t.target === 'attendance' && selfCodeOf[e.by] && t.code === selfCodeOf[e.by]) {
+      if (!dry && !push && e.selfAdv !== true && isOwnAdvance(e, t)) {
         await d.ref.update({ selfAdv: true, selfAdvBy: 'auto:bridge' });
       }
       out.waiting++; continue;
@@ -182,10 +189,11 @@ async function run({ dry = false } = {}) {
       const advId = `adv-${e.date}-falcon-${e.id}`;
       // our own earlier push (a run that died after the Attendance write, before marking the Falcon line — 09-10-2026,
       // Telegram unreachable from the factory network) is NOT a "possible duplicate": it is this very advance
-      const mineRow = existing.find(a => a.id === advId);
+      // any row this line ever posted — the id carries the date, so a line re-dated after a posting must still find it
+      const mineRow = existing.find(a => a.id === advId) || existing.find(a => String(a.id || '').endsWith(`-falcon-${e.id}`));
       // our id is already in Attendance: it is this advance ONLY if the money matches too. Anything else (an amount
       // changed after an earlier posting) is never marked done on a guess — the owner looks at it (Codex 11-10-2026).
-      if (mineRow && Number(mineRow.amount) !== Number(e.amount)) {
+      if (mineRow && (Number(mineRow.amount) !== Number(e.amount) || String(mineRow.date).slice(0, 10) !== e.date)) {
         await d.ref.update({ advPush: { target: 'attendance', code: t.code, name: t.name, status: 'mismatch', error: `Attendance mein ₹${Number(mineRow.amount) || 0} hai, yahan ₹${Number(e.amount) || 0} — owner dekhe`, at: now } });
         await sendTech(`Falcon advance ${esc(label)}: Attendance mein ₹${Number(mineRow.amount) || 0} pehle se gaya hua hai, line ab ₹${Number(e.amount) || 0} hai — owner check kare`).catch((x) => console.error('tech alert failed:', x.message));
         out.flagged++; continue;
