@@ -63,7 +63,12 @@ export function computePay({ emp, att, daysInMonth, elapsedDays, fullMonth, adva
     : Math.max(0, (att.workHrs || 0) - lunchDeductHrs) / dailyStdHrs;
   // Days the monthly BASE is paid on. The screen's "Paid days" shows this same figure (owner 2026-10-11:
   // seema read 27.5 on screen while paid on 28.5 — the portal had dropped 04-Sep from her counts).
-  const monthlyBaseDays = att.noRecord ? 0                 // no attendance this month (joined later) -> pay 0, never a full month
+  // ZERO PRESENT = ZERO PAY (owner 2026-10-11): a monthly worker who did not work a single day in the
+  // month is paid 0 days. The portal under-counts absents for no-shows (Sep-2026: 6 workers with no
+  // punch at all had only 7-8 absents recorded, so "month − absents" would have paid them 22-23 days).
+  // A worked Saturday counts as coming; the owner's days box (override) sets presentDays, so it still wins.
+  const neverCame = (Number(att.presentDays || 0) + Number(att.weeklyOffPresent || 0)) <= 0;
+  const monthlyBaseDays = (att.noRecord || neverCame) ? 0  // no attendance this month (joined later / never came) -> pay 0, never a full month
     : Math.max(0, effElapsed - absentForBase - unpaidSat);
   const base = emp.type === 'daily'
     ? rate * dailyEquivDays
