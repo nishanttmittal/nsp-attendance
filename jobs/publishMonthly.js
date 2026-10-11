@@ -8,7 +8,7 @@ const fs = require('fs');
 const { session, setField, downloadMonthly } = require('./lib/realtime');
 const { parseSummary, range } = require('./salaryData');
 const { db } = require('./lib/firestore');
-const { sendTelegram } = require('./lib/notify');
+const { sendTelegram } = require('./lib/notify').channel('attendance');
 
 const pad = n => String(n).padStart(2, '0');
 const fmt = d => `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()}`;

@@ -15,7 +15,7 @@
 //   node jobs/falconAdvanceBridge.js --dry   → shows what it would do
 const { db } = require('./lib/firestore');
 const { handle } = require('./worker');
-const { sendTech } = require('./lib/notify');
+const { sendTech } = require('./lib/notify').channel('advance');
 
 const WELD = /weld|वेल्ड/i;
 const CONTRACTOR_FROM = '2026-10-08'; // Karigar / thekedar lines are bridged from the day the tile went live, never older ones

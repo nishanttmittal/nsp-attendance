@@ -2,7 +2,7 @@
 // understaffed departments (<50% present/total). One Telegram message.
 const { session } = require('./lib/realtime');
 const { gatherState } = require('./getState');
-const { sendTelegram } = require('./lib/notify');
+const { sendTelegram } = require('./lib/notify').channel('attendance');
 
 (async () => {
   const { browser, page } = await session();

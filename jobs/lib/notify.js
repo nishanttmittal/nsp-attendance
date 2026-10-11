@@ -8,6 +8,16 @@ try { local = JSON.parse(fs.readFileSync(path.resolve(__dirname, '..', 'telegram
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN || local.TELEGRAM_BOT_TOKEN;
 const CHAT_ID = process.env.TELEGRAM_CHAT_ID || local.TELEGRAM_CHAT_ID;
 
+// Separate bots per topic (owner 11-10-2026: "seperate bot for attendance, advance and order and other
+// factory notifications"). A topic with no token of its own falls back to TOKEN (the NSP OPS bot), so
+// nothing is lost while a bot is not set up yet. Same chat ids for every bot — each person presses Start once per bot.
+const TOPIC_TOKENS = {};
+for (const t of ['ATTENDANCE', 'ADVANCE', 'ORDERS']) {
+  const v = process.env['TELEGRAM_BOT_TOKEN_' + t] || local['TELEGRAM_BOT_TOKEN_' + t];
+  if (v) TOPIC_TOKENS[t.toLowerCase()] = v;
+}
+const tokenFor = topic => (topic && TOPIC_TOKENS[topic]) || TOKEN;
+
 // recipients = owner (env CHAT_ID) + any managers with a telegramChatId in att_users
 async function recipients() {
   const set = new Set();
@@ -45,7 +55,8 @@ async function enqueueWhatsApp(text) {
 
 // Technical/ops alerts (owner 07-10-2026: "very simple reports on my WhatsApp") — Telegram ONLY,
 // never mirrored to the owner's WhatsApp. Use for watchdogs, portal/sync failures, backups, price feeds.
-async function sendTech(text) {
+async function sendTech(text, topic) {
+  const TOKEN = tokenFor(topic);
   // owner 07-10-2026: "i should receive it one at 11 am and other at 6pm" — every tech alert is also
   // queued into att_alert_state/tech_digest; techDigest.js sends ONE plain WhatsApp message at 11:00 and 18:00.
   try {
@@ -69,7 +80,8 @@ async function sendTech(text) {
 // HTML-escaped first, so a "<" or "&" inside a product/worker name can never be parsed as markup
 // (push security review 07-10-2026: entities were decoded in sendTech and then reached the HTML sink).
 function escapeHtml(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
-async function sendPlain(text) {
+async function sendPlain(text, topic) {
+  const TOKEN = tokenFor(topic);
   const wa = await enqueueWhatsApp(text);   // callers that must not lose the message check this
   if (!TOKEN) { console.log('[DRY plain — no token] would send:\n' + text); return { dry: true }; }
   const ids = await recipients();
@@ -82,7 +94,8 @@ async function sendPlain(text) {
   return { ok: true, wa };
 }
 
-async function sendTelegram(text) {
+async function sendTelegram(text, topic) {
+  const TOKEN = tokenFor(topic);
   await enqueueWhatsApp(text); // also deliver on WhatsApp (best-effort, never throws)
   if (!TOKEN) { console.log('[DRY notify — no token] would send:\n' + text); return { dry: true }; }
   const rcpts = await recipients();
@@ -99,7 +112,8 @@ async function sendTelegram(text) {
   return last;
 }
 
-async function sendTelegramDocument(filePath, caption = '') {
+async function sendTelegramDocument(filePath, caption = '', topic) {
+  const TOKEN = tokenFor(topic);
   if (!TOKEN || !CHAT_ID) { console.log('[DRY notify] would send document:', filePath); return { dry: true }; }
   const buf = fs.readFileSync(filePath);
   const form = new FormData();
@@ -112,4 +126,12 @@ async function sendTelegramDocument(filePath, caption = '') {
   return body;
 }
 
-module.exports = { sendTelegram, sendTelegramDocument, sendTech, sendPlain };
+// channel('attendance') → the same four senders, bound to that topic's bot.
+const channel = topic => ({
+  sendTelegram: text => sendTelegram(text, topic),
+  sendPlain: text => sendPlain(text, topic),
+  sendTech: text => sendTech(text, topic),
+  sendTelegramDocument: (filePath, caption = '') => sendTelegramDocument(filePath, caption, topic),
+});
+
+module.exports = { sendTelegram, sendTelegramDocument, sendTech, sendPlain, channel };

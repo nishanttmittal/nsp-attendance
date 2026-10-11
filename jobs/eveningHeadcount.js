@@ -2,7 +2,7 @@
 // plus present count, per-dept, and the day's late-comers. Run by GH Actions cron ~17:40.
 const { session } = require('./lib/realtime');
 const { gatherState } = require('./getState');
-const { sendPlain: sendTelegram, sendTech } = require('./lib/notify'); // plain text: WA as-is, Telegram escaped
+const { sendPlain: sendTelegram, sendTech } = require('./lib/notify').channel('attendance'); // plain text: WA as-is, Telegram escaped
 
 function composeMessage(s) {
   // owner 07-10-2026: simple — one line for the kitchen, one for the floor
