@@ -3,7 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const { db } = require('./lib/firestore');
-const { sendTelegramDocument } = require('./lib/notify');
+const { sendTelegramDocument } = require('./lib/notify').channel('tech');
 
 const COLS = ['att_employees', 'att_salary', 'att_attendance', 'att_advances', 'att_increments', 'att_loans', 'att_fines', 'att_month_locks', 'att_users', 'att_meta'];
 const REASON = process.env.REASON || 'daily';

@@ -12,7 +12,7 @@ const CHAT_ID = process.env.TELEGRAM_CHAT_ID || local.TELEGRAM_CHAT_ID;
 // factory notifications"). A topic with no token of its own falls back to TOKEN (the NSP OPS bot), so
 // nothing is lost while a bot is not set up yet. Same chat ids for every bot — each person presses Start once per bot.
 const TOPIC_TOKENS = {};
-for (const t of ['ATTENDANCE', 'ADVANCE', 'ORDERS']) {
+for (const t of ['ATTENDANCE', 'ADVANCE', 'ORDERS', 'TECH', 'LEADS', 'QUALITY']) {
   const v = process.env['TELEGRAM_BOT_TOKEN_' + t] || local['TELEGRAM_BOT_TOKEN_' + t];
   if (v) TOPIC_TOKENS[t.toLowerCase()] = v;
 }
@@ -56,7 +56,7 @@ async function enqueueWhatsApp(text) {
 // Technical/ops alerts (owner 07-10-2026: "very simple reports on my WhatsApp") — Telegram ONLY,
 // never mirrored to the owner's WhatsApp. Use for watchdogs, portal/sync failures, backups, price feeds.
 async function sendTech(text, topic) {
-  const TOKEN = tokenFor(topic);
+  const TOKEN = tokenFor(topic || 'tech');   // technical alerts → the (muted) Tech bot unless a topic claims them
   // owner 07-10-2026: "i should receive it one at 11 am and other at 6pm" — every tech alert is also
   // queued into att_alert_state/tech_digest; techDigest.js sends ONE plain WhatsApp message at 11:00 and 18:00.
   try {

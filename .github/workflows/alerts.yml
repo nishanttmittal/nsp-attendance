@@ -49,6 +49,9 @@ jobs:
           TELEGRAM_BOT_TOKEN_ATTENDANCE: ${{ secrets.TELEGRAM_BOT_TOKEN_ATTENDANCE }}
           TELEGRAM_BOT_TOKEN_ADVANCE: ${{ secrets.TELEGRAM_BOT_TOKEN_ADVANCE }}
           TELEGRAM_BOT_TOKEN_ORDERS: ${{ secrets.TELEGRAM_BOT_TOKEN_ORDERS }}
+          TELEGRAM_BOT_TOKEN_TECH: ${{ secrets.TELEGRAM_BOT_TOKEN_TECH }}
+          TELEGRAM_BOT_TOKEN_LEADS: ${{ secrets.TELEGRAM_BOT_TOKEN_LEADS }}
+          TELEGRAM_BOT_TOKEN_QUALITY: ${{ secrets.TELEGRAM_BOT_TOKEN_QUALITY }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
           BACKUP_DEPLOY_KEY: ${{ secrets.BACKUP_DEPLOY_KEY }}
@@ -98,10 +101,13 @@ jobs:
           TELEGRAM_BOT_TOKEN_ATTENDANCE: ${{ secrets.TELEGRAM_BOT_TOKEN_ATTENDANCE }}
           TELEGRAM_BOT_TOKEN_ADVANCE: ${{ secrets.TELEGRAM_BOT_TOKEN_ADVANCE }}
           TELEGRAM_BOT_TOKEN_ORDERS: ${{ secrets.TELEGRAM_BOT_TOKEN_ORDERS }}
+          TELEGRAM_BOT_TOKEN_TECH: ${{ secrets.TELEGRAM_BOT_TOKEN_TECH }}
+          TELEGRAM_BOT_TOKEN_LEADS: ${{ secrets.TELEGRAM_BOT_TOKEN_LEADS }}
+          TELEGRAM_BOT_TOKEN_QUALITY: ${{ secrets.TELEGRAM_BOT_TOKEN_QUALITY }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           SCHED: ${{ github.event.schedule }}
           TASK: ${{ github.event.inputs.task }}
         run: |
-          curl -s "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+          curl -s "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN_TECH:-$TELEGRAM_BOT_TOKEN}/sendMessage" \
             -d chat_id="${TELEGRAM_CHAT_ID}" \
             -d text="⚠️ Scheduled job FAILED: ${TASK:-$SCHED} (nsp-attendance Actions) — backups/alerts may not have run."
