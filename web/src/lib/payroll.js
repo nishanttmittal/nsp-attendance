@@ -21,7 +21,7 @@ export function effectiveAmount(emp, toDate) {
 }
 
 // One employee's pay for the period. att = {presentDays,absentDays,otHrs,lateHrs,earlyHrs}.
-export function computePay({ emp, att, daysInMonth, elapsedDays, fullMonth, advancesThisMonth = 0, advanceBalanceIn = 0, advanceRecover = 0, fines = 0, loanInstallment = 0, bonus = 0, restoreSaturdayDays = 0, graceDays = 0, payPerfectBonus = false, latePenaltyDays = 0, weeklyOffDockDays = 0, openingBalance = 0, monthStart, toDate }) {
+export function computePay({ emp, att, daysInMonth, elapsedDays, fullMonth, advancesThisMonth = 0, advanceBalanceIn = 0, advanceRecover = 0, fines = 0, pfCut = 0, loanInstallment = 0, bonus = 0, restoreSaturdayDays = 0, graceDays = 0, payPerfectBonus = false, latePenaltyDays = 0, weeklyOffDockDays = 0, openingBalance = 0, monthStart, toDate }) {
   const eff = effectiveAmount(emp, toDate);
   const rate = eff.amount;
   const perDay = emp.type === 'daily' ? rate : rate / daysInMonth;
@@ -112,7 +112,10 @@ export function computePay({ emp, att, daysInMonth, elapsedDays, fullMonth, adva
   const earnings = base + otPay + perfectBonus + restoreSaturdayPay + gracePay + Number(bonus || 0);
   // Fines/penalties are the only "fixed" cuts now. Loan installments are GONE as a separate concept
   // (owner 2026-07-13): loans + advances are ONE running account, so any loan is just an advance.
-  const fixed = Number(fines || 0) + latePenalty + weeklyOffDock;
+  // PF cut (owner 2026-10-11): an amount the OWNER types per worker/month (md.pfCut) — PF paid for the
+  // worker, taken off what he is handed at settlement. Never computed here; 0 unless he enters it.
+  const pfCutN = Math.max(0, Number(pfCut || 0));
+  const fixed = Number(fines || 0) + latePenalty + weeklyOffDock + pfCutN;
   // ONE advance account (owner 2026-07-13, welder-Hisab model): the FULL outstanding advance is cut at
   // every settle — this month's new advances + any advance still carried in (advanceBalanceIn, the last
   // remnant of the old two-rail system, consumed ONCE here then zeroed). No per-month "advance cut" tab.
@@ -159,7 +162,7 @@ export function computePay({ emp, att, daysInMonth, elapsedDays, fullMonth, adva
     graceDays: graceDaysN, gracePay: round(gracePay),
     otHrs: round(att.otHrs || 0), otHrsNet: round(netOtHrs),
     base: round(base), otPay: round(otPay), perfectBonus: round(perfectBonus), perfectEligible, perfectBonusDay: round(perDay), bonus: round(Number(bonus || 0)),
-    fines: round(Number(fines || 0)), loanInstallment: round(Number(loanInstallment || 0)),
+    fines: round(Number(fines || 0)), pfCut: round(pfCutN), loanInstallment: round(Number(loanInstallment || 0)),
     latePenalty: round(latePenalty), latePenaltyDays: Number(latePenaltyDays || 0),
     weeklyOffDock: round(weeklyOffDock), weeklyOffDockDays: Number(weeklyOffDockDays || 0), suggestedDockDays,
     advanceDue: round(advanceDue), advanceRecovered: round(advanceRecovered),

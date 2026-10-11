@@ -43,7 +43,7 @@ export function paymentBreakdown(pay) {
   return {
     base: pay.base, otPay: pay.otPay, otHrsNet: pay.otHrsNet, perfectBonus: pay.perfectBonus,
     gracePay: pay.gracePay, graceDays: pay.graceDays, restoreSaturdayPay: pay.restoreSaturdayPay,
-    restoreSaturdayDays: pay.restoreSaturdayDays, bonus: pay.bonus, fines: pay.fines,
+    restoreSaturdayDays: pay.restoreSaturdayDays, bonus: pay.bonus, fines: pay.fines, pfCut: pay.pfCut || 0,
     advanceDue: pay.advanceDue, advanceRecovered: pay.advanceRecovered,
     net: pay.net, openingBalance: pay.openingBalance, presentDays: pay.presentDays, absentDays: pay.absentDays,
   };
@@ -166,7 +166,7 @@ export function payFor(emp, attMap, mk, ctx, graceDelta = 0, punchDoc = null) {
   const pay = computePay({
     emp, att: effAtt, ...ctx,
     advancesThisMonth, advanceBalanceIn,
-    fines: Number(md.fine || 0), bonus: Number(md.bonus || 0),
+    fines: Number(md.fine || 0), pfCut: Number(md.pfCut || 0), bonus: Number(md.bonus || 0),
     restoreSaturdayDays: Number(md.restoreSaturdays || 0),
     graceDays: md.gracePaid ? Number(graceDelta || 0) : 0,   // owner opted in for this worker/month
     payPerfectBonus: !!md.perfectBonusPaid,                  // full-attendance bonus: owner adds/rejects per worker
