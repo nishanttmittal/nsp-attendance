@@ -18,8 +18,26 @@ for (const t of ['ATTENDANCE', 'ADVANCE', 'ORDERS', 'TECH', 'LEADS', 'QUALITY'])
 }
 const tokenFor = topic => (topic && TOPIC_TOKENS[topic]) || TOKEN;
 
+// A topic can post into a Telegram GROUP instead of the owner's direct chat (so the manager who must act sees it
+// too): set TELEGRAM_CHAT_ID_<TOPIC> to the group's id. It REPLACES the direct chat for that topic — no doubles.
+const TOPIC_CHATS = {};
+for (const t of ['ATTENDANCE', 'ADVANCE', 'ORDERS', 'TECH', 'LEADS', 'QUALITY']) {
+  const v = process.env['TELEGRAM_CHAT_ID_' + t] || local['TELEGRAM_CHAT_ID_' + t];
+  if (v) TOPIC_CHATS[t.toLowerCase()] = String(v);
+}
+
+// "Open app" button under an alert (Telegram only; the WhatsApp copy is plain text and unchanged).
+const APP = 'https://unico-operations.firebaseapp.com';
+const TOPIC_BUTTON = {
+  attendance: { text: 'Open Attendance app', url: APP + '/attendance/' },
+  advance: { text: 'Open Salary / Advance', url: APP + '/attendance/' },
+  orders: { text: 'Open Orders app', url: APP + '/orders/' },
+};
+const buttonFor = topic => (topic && TOPIC_BUTTON[topic] ? { reply_markup: { inline_keyboard: [[TOPIC_BUTTON[topic]]] } } : {});
+
 // recipients = owner (env CHAT_ID) + any managers with a telegramChatId in att_users
-async function recipients() {
+async function recipients(topic) {
+  if (topic && TOPIC_CHATS[topic]) return [TOPIC_CHATS[topic]];
   const set = new Set();
   if (CHAT_ID) set.add(String(CHAT_ID));
   try {
@@ -66,11 +84,11 @@ async function sendTech(text, topic) {
       { items: FieldValue.arrayUnion({ at: new Date().toISOString(), text: plain.slice(0, 600) }) }, { merge: true });
   } catch (e) { console.error('tech digest queue failed (non-fatal):', e.message); }
   if (!TOKEN) { console.log('[DRY tech — no token] would send:\n' + text); return { dry: true }; }
-  const ids = await recipients();
+  const ids = await recipients(topic);
   for (const chat_id of ids) {
     try {
       await fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chat_id, text, parse_mode: 'HTML', disable_web_page_preview: true }) });
+        body: JSON.stringify({ chat_id, text, parse_mode: 'HTML', disable_web_page_preview: true, ...buttonFor(topic) }) });
     } catch (e) { console.error('tech telegram failed:', e.message); }
   }
   return { ok: true };
@@ -84,11 +102,11 @@ async function sendPlain(text, topic) {
   const TOKEN = tokenFor(topic);
   const wa = await enqueueWhatsApp(text);   // callers that must not lose the message check this
   if (!TOKEN) { console.log('[DRY plain — no token] would send:\n' + text); return { dry: true }; }
-  const ids = await recipients();
+  const ids = await recipients(topic);
   for (const chat_id of ids) {
     try {
       await fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chat_id, text: escapeHtml(text), parse_mode: 'HTML', disable_web_page_preview: true }) });
+        body: JSON.stringify({ chat_id, text: escapeHtml(text), parse_mode: 'HTML', disable_web_page_preview: true, ...buttonFor(topic) }) });
     } catch (e) { console.error('plain telegram failed:', e.message); }
   }
   return { ok: true, wa };
@@ -98,13 +116,13 @@ async function sendTelegram(text, topic) {
   const TOKEN = tokenFor(topic);
   await enqueueWhatsApp(text); // also deliver on WhatsApp (best-effort, never throws)
   if (!TOKEN) { console.log('[DRY notify — no token] would send:\n' + text); return { dry: true }; }
-  const rcpts = await recipients();
+  const rcpts = await recipients(topic);
   if (!rcpts.length) { console.log('[DRY notify — no chat id] would send:\n' + text); return { dry: true }; }
   let last;
   for (const chat of rcpts) {
     const res = await fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: chat, text, parse_mode: 'HTML', disable_web_page_preview: true }),
+      body: JSON.stringify({ chat_id: chat, text, parse_mode: 'HTML', disable_web_page_preview: true, ...buttonFor(topic) }),
     });
     last = await res.json().catch(() => ({}));
     if (!res.ok || !last.ok) console.error('Telegram send to ' + chat + ' failed: ' + JSON.stringify(last));
@@ -117,7 +135,7 @@ async function sendTelegramDocument(filePath, caption = '', topic) {
   if (!TOKEN || !CHAT_ID) { console.log('[DRY notify] would send document:', filePath); return { dry: true }; }
   const buf = fs.readFileSync(filePath);
   const form = new FormData();
-  form.append('chat_id', CHAT_ID);
+  form.append('chat_id', (topic && TOPIC_CHATS[topic]) || CHAT_ID);
   if (caption) form.append('caption', caption);
   form.append('document', new Blob([buf]), path.basename(filePath));
   const res = await fetch(`https://api.telegram.org/bot${TOKEN}/sendDocument`, { method: 'POST', body: form });

@@ -53,6 +53,10 @@ jobs:
           TELEGRAM_BOT_TOKEN_LEADS: ${{ secrets.TELEGRAM_BOT_TOKEN_LEADS }}
           TELEGRAM_BOT_TOKEN_QUALITY: ${{ secrets.TELEGRAM_BOT_TOKEN_QUALITY }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_CHAT_ID_ATTENDANCE: ${{ secrets.TELEGRAM_CHAT_ID_ATTENDANCE }}
+          TELEGRAM_CHAT_ID_ADVANCE: ${{ secrets.TELEGRAM_CHAT_ID_ADVANCE }}
+          TELEGRAM_CHAT_ID_ORDERS: ${{ secrets.TELEGRAM_CHAT_ID_ORDERS }}
+          TELEGRAM_CHAT_ID_LEADS: ${{ secrets.TELEGRAM_CHAT_ID_LEADS }}
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
           BACKUP_DEPLOY_KEY: ${{ secrets.BACKUP_DEPLOY_KEY }}
           METALS_DEV_API_KEY: ${{ secrets.METALS_DEV_API_KEY }}
@@ -105,6 +109,10 @@ jobs:
           TELEGRAM_BOT_TOKEN_LEADS: ${{ secrets.TELEGRAM_BOT_TOKEN_LEADS }}
           TELEGRAM_BOT_TOKEN_QUALITY: ${{ secrets.TELEGRAM_BOT_TOKEN_QUALITY }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_CHAT_ID_ATTENDANCE: ${{ secrets.TELEGRAM_CHAT_ID_ATTENDANCE }}
+          TELEGRAM_CHAT_ID_ADVANCE: ${{ secrets.TELEGRAM_CHAT_ID_ADVANCE }}
+          TELEGRAM_CHAT_ID_ORDERS: ${{ secrets.TELEGRAM_CHAT_ID_ORDERS }}
+          TELEGRAM_CHAT_ID_LEADS: ${{ secrets.TELEGRAM_CHAT_ID_LEADS }}
           SCHED: ${{ github.event.schedule }}
           TASK: ${{ github.event.inputs.task }}
         run: |
