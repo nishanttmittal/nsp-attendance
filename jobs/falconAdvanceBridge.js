@@ -55,8 +55,17 @@ async function claim(f, ref, target, same) {
   return f.runTransaction(async (tx) => {
     const cur = (await tx.get(ref)).data();
     if (!cur || cur.status !== 'active' || cur.hisab != null || cur.approval !== 'ok' || !same(cur)) return false;
-    if (cur.advPush && cur.advPush.status !== 'posting') return false;
-    tx.update(ref, { advPush: { ...target, status: 'posting', at: new Date().toISOString() } });
+    const p = cur.advPush;
+    if (p && p.status !== 'posting') return false;
+    // resuming an earlier claim: it must be the SAME claim — same target, same worker, same money, same date. If the
+    // line was changed after that claim (possible only while a phone still runs rules without the 'posting' lock),
+    // nothing is posted; the line is parked for the owner (security check 12-10-2026: no posting on a drifted line).
+    if (p && (p.target !== target.target || (p.code || '') !== (target.code || '') || (p.name || '') !== (target.name || '')
+      || Number(p.amount) !== Number(cur.amount) || p.date !== cur.date)) {
+      tx.update(ref, { advPush: { ...p, status: 'mismatch', error: 'Line badal gayi jab advance ja raha tha — owner dekhe' } });
+      return false;
+    }
+    if (!p) tx.update(ref, { advPush: { ...target, amount: Number(cur.amount), date: cur.date, status: 'posting', at: new Date().toISOString() } });
     return true;
   });
 }
@@ -120,7 +129,7 @@ async function run({ dry = false } = {}) {
     if (!welder) continue;                                           // some other contractor — nothing to post
     const who = nameOf[e.by] || e.by;
     if (dry) { console.log(`[dry] Karigar tile ₹${e.amount} ${e.detail} (${who}, ${e.date}) → welder ${welder}`); continue; }
-    if (!(await claim(f, d.ref, { target: 'welder', name: welder }, (c) => c.amount === e.amount && c.date === e.date && c.detail === e.detail))) { out.waiting++; continue; }
+    if (!(await claim(f, d.ref, { target: 'welder', name: welder }, (c) => c.kind === 'other' && c.head === 'Contractor' && c.by === e.by && c.amount === e.amount && c.date === e.date && c.detail === e.detail))) { out.waiting++; continue; }
     const refId = await queueWelder(f, e, welder, who);
     await d.ref.update({ advPush: { target: 'welder', name: welder, ref: refId, status: 'queued', at: now } });
     out.queuedWelder++;
@@ -162,7 +171,7 @@ async function run({ dry = false } = {}) {
     // The list above was read a moment ago. Read THIS line again just before acting on it: if it was cancelled, edited,
     // closed or already handled in between, leave it for the next cycle — never push a line that has since changed
     // (review 09-10-2026: a cancel landing between the read and the push would leave the deduction without its line).
-    const sameAdv = (c) => c.amount === e.amount && c.date === e.date && (c.advFor?.name || '') === (e.advFor?.name || '');
+    const sameAdv = (c) => c.kind === 'adv' && c.by === e.by && c.amount === e.amount && c.date === e.date && (c.advFor?.name || '') === (e.advFor?.name || '') && (c.advFor?.code || '') === (e.advFor?.code || '');
     if (t.target === 'none') {
       const cur = (await d.ref.get()).data();
       if (!cur || cur.status !== 'active' || cur.hisab != null || cur.approval !== 'ok' || (cur.advPush && cur.advPush.status !== 'posting') || !sameAdv(cur)) { out.waiting++; continue; }
@@ -177,8 +186,8 @@ async function run({ dry = false } = {}) {
       // our id is already in Attendance: it is this advance ONLY if the money matches too. Anything else (an amount
       // changed after an earlier posting) is never marked done on a guess — the owner looks at it (Codex 11-10-2026).
       if (mineRow && Number(mineRow.amount) !== Number(e.amount)) {
-        await d.ref.update({ advPush: { target: 'attendance', code: t.code, name: t.name, status: 'mismatch', error: `Attendance mein ₹${mineRow.amount} hai, yahan ₹${e.amount} — owner dekhe`, at: now } });
-        await sendTech(`Falcon advance ${esc(label)}: Attendance mein ₹${mineRow.amount} pehle se gaya hua hai, line ab ₹${e.amount} hai — owner check kare`).catch((x) => console.error('tech alert failed:', x.message));
+        await d.ref.update({ advPush: { target: 'attendance', code: t.code, name: t.name, status: 'mismatch', error: `Attendance mein ₹${Number(mineRow.amount) || 0} hai, yahan ₹${Number(e.amount) || 0} — owner dekhe`, at: now } });
+        await sendTech(`Falcon advance ${esc(label)}: Attendance mein ₹${Number(mineRow.amount) || 0} pehle se gaya hua hai, line ab ₹${Number(e.amount) || 0} hai — owner check kare`).catch((x) => console.error('tech alert failed:', x.message));
         out.flagged++; continue;
       }
       const mine = !!mineRow;
