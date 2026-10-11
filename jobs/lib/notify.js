@@ -121,16 +121,13 @@ async function sendTelegram(text, topic) {
   if (!TOKEN) { console.log('[DRY notify — no token] would send:\n' + text); return { dry: true }; }
   const rcpts = await recipients();
   if (!rcpts.length) { console.log('[DRY notify — no chat id] would send:\n' + text); return { dry: true }; }
-  let last;
-  for (const chat of rcpts) {
-    const res = await fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: chat, text, parse_mode: 'HTML', disable_web_page_preview: true, ...buttonFor(topic) }),
-    });
-    last = await res.json().catch(() => ({}));
-    if (!res.ok || !last.ok) console.error('Telegram send to ' + chat + ' failed: ' + JSON.stringify(last));
+  // Never throws and never hangs (20 s limit): a Telegram outage must not mark a job failed AFTER its
+  // pay / advance / attendance write already succeeded — that led to retries that repeated or dropped the alert.
+  let sent = 0;
+  for (const chat_id of rcpts) {
+    if (await post(TOKEN, { chat_id, text, parse_mode: 'HTML', disable_web_page_preview: true, ...buttonFor(topic) }, 'notify')) sent++;
   }
-  return last;
+  return { ok: sent > 0, sent };
 }
 
 async function sendTelegramDocument(filePath, caption = '', topic) {
