@@ -134,6 +134,11 @@ function OwnerSalary({ user }) {
       const bonusAdd = bonusDay ? perDay : 0;
       const cashN = Number(cash) || 0;
       const acctN = Number(account) || 0;
+      if (cashN < 0 || acctN < 0) { alert('Cash and Account cannot be below 0.'); return; }
+      // Fresh check BEFORE anything is saved (Codex + Grok review 2026-10-12): if this month was already
+      // paid from another phone/tab, stop — do not save the PF, do not show "paid" for a second time.
+      const curMd = ((await loadEmployee(code))?.months || {})[mk] || {};
+      if (curMd.locked || curMd.payment) { alert(`${r.emp.name || code}: ${mk} is already paid & locked (from another phone or tab).\n\nNothing was saved now. Close and reopen the Salary tab to see it.`); setPayC(null); return; }
       // PF typed in the pay sheet (owner 2026-10-12: "no separate column for pf in settle and lock").
       // It is the month's PF cut (months[mk].pfCut): saved on the month first, then the payable is
       // reduced by the CHANGE vs what the engine already cut — so PF is never taken twice.
@@ -153,6 +158,7 @@ function OwnerSalary({ user }) {
       // A later month is already paid — its opening balance is baked into its frozen payment, so
       // locking this one would desync the chain. Skip the queue too (the robot would redo it).
       if (res?.nextLocked) { alert(`Cannot lock ${mk} — ${res.nextLocked} is already paid & locked.\n\nReopen ${res.nextLocked} first, then lock ${mk}.`); return; }
+      if (res?.alreadyLocked) { alert(`${mk} was already locked — nothing was saved now.`); setPayC(null); return; }
       queueLock(code, mk, { ...args, breakdown }, user.email).catch(() => {});   // register + Telegram (snapshot rides along)
       // FAST: update ONLY this worker (1 read) instead of reloading the whole roster.
       setPayC(null);
@@ -431,12 +437,20 @@ function FastPaySheet({ payC, mk, busy, onChange, onCancel, onConfirm }) {
   const beforePf = Math.round((basePayable + pfWas + (bonusDay ? perDay : 0)) * 100) / 100;
   const effPayable = Math.round((beforePf - pfN) * 100) / 100;   // payable incl. bonus day, after PF
   const pfRec = r.emp.pf && mk ? r.emp.pf[mk] : null;            // PF deposited for him this month (consultant's sheet)
+  // Move `bump` rupees into (or out of) the two pay boxes. Cash takes it first (account, when it is an
+  // account-only pay); whatever one box cannot absorb comes off the other, so a split payment never
+  // ends up above what is due (review 2026-10-12: ₹100 cash + ₹900 account, PF ₹200 → was ₹900 paid).
+  const spread = (bump) => {
+    let c = Number(cash) || 0, a = Number(account) || 0;
+    if (c === 0 && a > 0) a += bump; else c += bump;
+    if (c < 0) { a += c; c = 0; }
+    if (a < 0) { c += a; a = 0; }
+    const r2 = (x) => String(Math.max(0, Math.round(x * 100) / 100));
+    return { cash: r2(c), account: r2(a) };
+  };
   const setPf = (v) => {
     const nv = Math.max(0, Math.round(Number(v) || 0));
-    const bump = pfN - nv;                                       // PF up → pay less, PF down → pay more
-    const cN = Number(cash) || 0, aN = Number(account) || 0;
-    if (cN === 0 && aN > 0) onChange({ ...payC, pf: v, account: String(Math.max(0, Math.round((aN + bump) * 100) / 100)) });
-    else onChange({ ...payC, pf: v, cash: String(Math.max(0, Math.round((cN + bump) * 100) / 100)) });
+    onChange({ ...payC, pf: v, ...spread(pfN - nv) });           // PF up → pay less, PF down → pay more
   };
   // PAY SLIP ON THE PAY SHEET (owner 2026-10-12: "while paying salary i must see days overtime total
   // salary and advance and after that net salary ... because people ask for gross salary and i have to
@@ -473,7 +487,11 @@ function FastPaySheet({ payC, mk, busy, onChange, onCancel, onConfirm }) {
           {otherCuts > 0 && <div className="flex justify-between px-3 py-1.5"><span className="text-slate-600">Fine / cut</span><b className="text-rose-600">− {rupee(otherCuts)}</b></div>}
           {Math.abs(opening) >= 0.5 && <div className="flex justify-between px-3 py-1.5"><span className="text-slate-600">Last month balance</span><b className={opening < 0 ? 'text-rose-600' : 'text-emerald-700'}>{opening < 0 ? '− ' : '+ '}{rupee(Math.abs(opening))}</b></div>}
           {Math.abs(other) >= 0.5 && <div className="flex justify-between px-3 py-1.5"><span className="text-slate-600">Other</span><b className={other < 0 ? 'text-rose-600' : 'text-emerald-700'}>{other < 0 ? '− ' : '+ '}{rupee(Math.abs(other))}</b></div>}
-          <div className="flex justify-between px-3 py-2 bg-emerald-50 rounded-b-xl"><span className="font-bold text-emerald-900">Net salary</span><b className="text-emerald-900 text-lg">{owes && beforePf < 0 ? '− ' : ''}{rupee(Math.abs(beforePf))}</b></div>
+          {pfN > 0 ? <>
+            <div className="flex justify-between px-3 py-1.5"><span className="text-slate-600">Net salary <span className="text-[11px] text-slate-400">(before PF)</span></span><b className="text-slate-900">{beforePf < 0 ? '− ' : ''}{rupee(Math.abs(beforePf))}</b></div>
+            <div className="flex justify-between px-3 py-1.5"><span className="text-slate-600">PF <span className="text-[11px] text-slate-400">(into his PF account)</span></span><b className="text-indigo-700">− {rupee(pfN)}</b></div>
+            <div className="flex justify-between px-3 py-2 bg-emerald-50 rounded-b-xl"><span className="font-bold text-emerald-900">In hand</span><b className="text-emerald-900 text-lg">{effPayable < 0 ? '− ' : ''}{rupee(Math.abs(effPayable))}</b></div>
+          </> : <div className="flex justify-between px-3 py-2 bg-emerald-50 rounded-b-xl"><span className="font-bold text-emerald-900">Net salary</span><b className="text-emerald-900 text-lg">{beforePf < 0 ? '− ' : ''}{rupee(Math.abs(beforePf))}</b></div>}
         </div>
 
         {/* BONUS DAY — tick on top; adds one day's pay and bumps the pay field to cover it.
@@ -491,12 +509,7 @@ function FastPaySheet({ payC, mk, busy, onChange, onCancel, onConfirm }) {
             <input type="checkbox" className="w-6 h-6 accent-amber-600" checked={!!bonusDay} disabled={busy}
               onChange={(e) => {
                 const on = e.target.checked;
-                const bump = on ? perDay : -perDay;
-                const cashN = Number(cash) || 0;
-                const acctN = Number(account) || 0;
-                // adjust whichever field holds the money (account for an account-only pay)
-                if (cashN === 0 && acctN > 0) onChange({ ...payC, bonusDay: on, account: String(Math.max(0, Math.round((acctN + bump) * 100) / 100)) });
-                else onChange({ ...payC, bonusDay: on, cash: String(Math.max(0, Math.round((cashN + bump) * 100) / 100)) });
+                onChange({ ...payC, bonusDay: on, ...spread(on ? perDay : -perDay) });
               }} />
           </label>
         )}

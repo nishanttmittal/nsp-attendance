@@ -69,7 +69,7 @@ export default function PfPaid() {
         <div className="font-bold text-emerald-900">🏦 PF paid — worker-wise</div>
         <p className="text-[11px] text-emerald-800 mt-0.5">
           What goes into each worker's PF account for the month: <b>his 12%</b> (cut from salary) + <b>company 12%</b>.
-          Figures are from the consultant's salary sheet. View only — nothing here changes pay.
+          Figures are from the consultant's salary sheet and are view only. The one thing that changes pay is the <b>PF cut</b> box on each card: what you type there comes off that worker's salary.
         </p>
       </div>
 

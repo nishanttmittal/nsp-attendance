@@ -134,6 +134,7 @@ export default function Person({ code, mk, user, onBack }) {
     act(() => saveMonth(code, mk, { otCredits: next }));
   };
   const doLock = (cash, account, reason) => act(async () => {
+    if (Number(cash) < 0 || Number(account) < 0) { alert('Cash and Account cannot be below 0.'); return; }
     if (needsManualDays(emp, mk)) { alert(`Enter ${emp.name}'s days first (Adjust this month → Override days / OT) — locking now would close the month at 0 days.`); return; }
     if (isLoader(emp) && !window.confirm(`${emp.name} is a loader — he is paid on hisab dates in the 🚚 Loading tab, not month-wise.\n\nLock this month anyway (only for closing the register)?`)) return;
     // Snapshot the salary breakdown AT LOCK so the paid month always shows these exact figures, immune
@@ -144,6 +145,7 @@ export default function Person({ code, mk, user, onBack }) {
     // Refused because a LATER month is already paid — locking would rewrite its opening balance while
     // its payment stays frozen. Don't queue the robot either, or it would do exactly that in 5 minutes.
     if (res?.nextLocked) { alert(`Cannot lock ${mk} — ${res.nextLocked} is already paid & locked.\n\nReopen ${res.nextLocked} first, then lock ${mk}.`); return; }
+    if (res?.alreadyLocked) { alert(`${mk} was already locked — nothing was saved now.`); return; }
     // background (best-effort): the robot adds the salary-register snapshot + Telegram alert.
     queueLock(code, mk, { cash, account, payable: pay.payable, advanceCarry: pay.advanceBalanceCarried, breakdown, reason }, user.email).catch(() => {});
   });
@@ -215,7 +217,7 @@ export default function Person({ code, mk, user, onBack }) {
           return <Row k="Weekly off (paid)" v={`${sat} Sat${att.weeklyOffPresent ? ` · worked ${att.weeklyOffPresent} → +OT` : ''}`} />;
         })()}
         {pay.unpaidWorkedSat > 0 && <Row k="Worked Sat (OT only)" v={`${pay.unpaidWorkedSat} — week not earned (4+ absences): day unpaid, OT kept`} />}
-        {emp.type !== 'daily' && !pay.noAttendance && <Row k="Paid days" v={`${Math.max(0, (pay.payableDays || 0) - (pay.absentDays || 0))} of ${ctx.daysInMonth} (weekly-offs included)`} />}
+        {emp.type !== 'daily' && !pay.noAttendance && <Row k="Paid days" v={`${pay.paidDays ?? Math.max(0, (pay.payableDays || 0) - (pay.absentDays || 0))} of ${ctx.daysInMonth} (weekly-offs included)`} />}
         {emp.type === 'daily'
           ? <Row k="Paid on hours" v={`${r1(pay.workHrs || 0)}h worked − ${r1(0.5 * (pay.presentDays || 0))}h lunch ÷ ${pay.dailyStdHrs || 11} = ${r1(pay.equivalentDays || 0)} days · overtime is already inside these hours, so there is no separate OT`} />
           : <Row k="Overtime" v={`${pay.otHrsNet}h paid`} />}
