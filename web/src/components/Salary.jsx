@@ -1214,6 +1214,8 @@ function ReportModal({ user, mk, rows, onClose }) {
         advance: adv.bank + adv.cash,
         payable: p.payable ?? r.pay.payable,
         net: p.breakdown?.net ?? p.net ?? r.pay.net,
+        pf: Number(p.breakdown?.pfCut || 0),
+        totalPay: Number(p.cash || 0) + Number(p.account || 0) + Number(p.breakdown?.pfCut || 0),   // PF + cash + bank (owner 2026-10-12)
         cash: p.cash || 0,
         account: p.account || 0,
         carried: p.closing ?? r.pay.advanceBalanceCarried,

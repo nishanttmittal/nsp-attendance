@@ -261,12 +261,13 @@ async function handle(type, p) {
       const regRef = db().collection('att_meta').doc('salary_register_' + p.month);
       const reg = (await regRef.get()).data() || { month: p.month, byCode: {} };
       reg.byCode = reg.byCode || {};
-      reg.byCode[p.code] = { name: e.name || p.code, dept: e.dept || '', net: paid, cash, account, carry: closing, mode: 'lock', date, by: p._by || 'owner' };
+      reg.byCode[p.code] = { name: e.name || p.code, dept: e.dept || '', net: paid, cash, account, pf: Number(md.payment?.breakdown?.pfCut || p.breakdown?.pfCut || 0), carry: closing, mode: 'lock', date, by: p._by || 'owner' };
       reg.total = Object.values(reg.byCode).reduce((s, x) => s + Number(x.net || 0), 0);
       reg.count = Object.keys(reg.byCode).length; reg.updatedAt = new Date().toISOString();
       await regRef.set(reg);
     } catch (e2) { console.error('register write failed:', e2.message); }
-    await advBot.sendTelegram(H`🔒 Locked <b>${e.name || p.code}</b> ${p.month}: paid ₹${paid.toLocaleString('en-IN')} (cash ${cash} + acct ${account})${closing ? ` · carry ₹${closing.toLocaleString('en-IN')} → next month` : ''} · by ${p._by || 'owner'}${p.reason ? ` · ${p.reason}` : ''}`).catch(() => {});
+    const pfLeg = Number(md.payment?.breakdown?.pfCut || p.breakdown?.pfCut || 0);   // PF paid at settle (owner 2026-10-12: PF + cash + bank = total pay)
+    await advBot.sendTelegram(H`🔒 Locked <b>${e.name || p.code}</b> ${p.month}: ${pfLeg > 0 ? `total pay ₹${(paid + pfLeg).toLocaleString('en-IN')} (PF ${pfLeg} + cash ${cash} + acct ${account})` : `paid ₹${paid.toLocaleString('en-IN')} (cash ${cash} + acct ${account})`}${closing ? ` · carry ₹${closing.toLocaleString('en-IN')} → next month` : ''} · by ${p._by || 'owner'}${p.reason ? ` · ${p.reason}` : ''}`).catch(() => {});
     return `locked ${p.month}: paid ${paid}, carry ${closing} (register+alert)`;
   }
   if (type === 'unlock_month') {   // reopen a locked month: clear the payment + revert the carried balance

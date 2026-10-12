@@ -98,19 +98,20 @@ export function lockedRegisterPdf(rows, monthLabel) {
   doc.setTextColor(0);
   autoTable(doc, {
     startY: 26,
-    head: [['Name', 'Salary', 'Days', 'OT (h)', 'Advance', 'Payable', 'Net', 'Cash paid', 'Account paid', 'Carried fwd']],
-    body: rows.map(r => [r.name, rs(r.salary), r.days, r.ot, rs(r.advance), rs(r.payable), rs(r.net), rs(r.cash), rs(r.account), rs(r.carried)]),
+    head: [['Name', 'Salary', 'Days', 'OT (h)', 'Advance', 'Payable', 'Net', 'PF', 'Cash paid', 'Account paid', 'Total pay', 'Carried fwd']],
+    body: rows.map(r => [r.name, rs(r.salary), r.days, r.ot, rs(r.advance), rs(r.payable), rs(r.net), rs(r.pf || 0), rs(r.cash), rs(r.account), rs(r.totalPay ?? (Number(r.cash || 0) + Number(r.account || 0))), rs(r.carried)]),
     theme: 'striped', styles: { fontSize: 8 }, headStyles: { fillColor: [192, 57, 43] },
   });
   const t = rows.reduce((a, r) => ({
     salary: a.salary + Number(r.salary || 0),
     payable: a.payable + Number(r.payable || 0), net: a.net + Number(r.net || 0),
     cash: a.cash + Number(r.cash || 0), account: a.account + Number(r.account || 0),
+    pf: a.pf + Number(r.pf || 0), totalPay: a.totalPay + Number(r.totalPay ?? (Number(r.cash || 0) + Number(r.account || 0))),
     advance: a.advance + Number(r.advance || 0), carried: a.carried + Number(r.carried || 0),
-  }), { salary: 0, payable: 0, net: 0, cash: 0, account: 0, advance: 0, carried: 0 });
+  }), { salary: 0, payable: 0, net: 0, cash: 0, account: 0, pf: 0, totalPay: 0, advance: 0, carried: 0 });
   const y = (doc.lastAutoTable?.finalY || 30) + 8;
   doc.setFontSize(10);
-  doc.text(`TOTALS  -  Payable ${rs(t.payable)}   Net ${rs(t.net)}   Cash paid ${rs(t.cash)}   Account paid ${rs(t.account)}   Advance ${rs(t.advance)}   Carried ${rs(t.carried)}`, 14, y);
+  doc.text(`TOTALS  -  Payable ${rs(t.payable)}   Net ${rs(t.net)}   PF ${rs(t.pf)}   Cash paid ${rs(t.cash)}   Account paid ${rs(t.account)}   Total pay ${rs(t.totalPay)}   Advance ${rs(t.advance)}   Carried ${rs(t.carried)}`, 14, y);
   return doc;
 }
 
