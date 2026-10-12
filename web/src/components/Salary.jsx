@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { advanceStatement, isContractorPaid, needsManualDays, loadEmployees, loadAllAttendance, loadAllPunches, loadEmployee, saveEmployee, loadPayout, loadAdvanceBalances, queueAdvance, pendingAdvances, prunePendingAdvances, enteredBy, addAdvanceDirect, loadRoster, loadAttendanceReview, addMonthFine, saveMonth, istMonth, queueJob, lockMonthDirect, unlockMonthDirect, queueLock, queueUnlock, addManualWorker, pushWorkerProfile, advanceMonth, attributeAdvanceMk, settleCashClash, settleClashMessage, MACHINE_DEPTS, MACHINE_SHIFTS, MACHINE_GENDERS, DEPT_DEFAULT_SHIFT } from '../lib/data';
 import { monthOptions, monthCtx, payFor, rupee, paymentBreakdown } from '../lib/paycalc';
+import { slipLines, slipWhy } from '../lib/paySlip';
 import { SHIFT_HOURS } from '../lib/payroll';
 import Person from './Person.jsx';
 import SelfPunchCard from './SelfPunchCard.jsx';
@@ -125,8 +126,18 @@ function OwnerSalary({ user }) {
   // Settle & lock a month. Supports a SPLIT payment (part cash + part account together) and an
   // optional owner-granted BONUS DAY (+1 day's pay) ticked right in the pay sheet. Nothing is
   // auto-applied — the owner sets cash, account, and the bonus tick before locking.
-  async function doFastLock(r, cash, account, bonusDay, pf) {
+  // Next worker for "Pay & next": the next row BELOW this one in the list on screen that still needs
+  // paying here — not settled, not just paid, not a loader (hisab tab), days entered, and something due.
+  const mkRef = useRef(mk); mkRef.current = mk;
+  const nextToPay = (code) => {
+    const i = visible.findIndex((x) => x.emp.code === code);
+    return visible.slice(i + 1).find((x) => !isSettled(x) && !justPaid[x.emp.code] && !isLoader(x.emp) && !needsManualDays(x.emp, mk) && Number(x.pay.payable || 0) > 0) || null;
+  };
+  async function doFastLock(r, cash, account, bonusDay, pf, andNext) {
     const code = r.emp.code;
+    // The sheet was opened for one month; never lock it into another (review 2026-10-12).
+    if (payC && payC.mk && payC.mk !== mk) { alert('The month was changed while this sheet was open. Nothing was saved — open the worker again.'); setPayC(null); return; }
+    const nextRow = andNext ? nextToPay(code) : null;
     setBusy(code);
     try {
       const pay = r.pay;
@@ -161,10 +172,14 @@ function OwnerSalary({ user }) {
       if (res?.alreadyLocked) { alert(`${mk} was already locked — nothing was saved now.`); setPayC(null); return; }
       queueLock(code, mk, { ...args, breakdown }, user.email).catch(() => {});   // register + Telegram (snapshot rides along)
       // FAST: update ONLY this worker (1 read) instead of reloading the whole roster.
-      setPayC(null);
+      // Pay & next keeps the (busy) sheet up until the next worker is ready, so nothing behind it —
+      // the month picker above all — can be touched in between.
+      if (!nextRow) setPayC(null);
       setJustPaid((p) => ({ ...p, [code]: cashN + acctN <= 0 ? 'settled' : cashN > 0 && acctN > 0 ? 'split' : (acctN > 0 ? 'account' : 'cash') }));
       const fresh = await loadEmployee(code).catch(() => null);
       if (fresh) setEmps((prev) => prev.map((e) => (e.code === code ? fresh : e)));
+      if (nextRow && mkRef.current === mk) payNow(nextRow, acctN > 0 && cashN === 0 ? 'account' : 'cash', { name: r.emp.name || code, total: cashN + acctN + pfN });
+      else if (nextRow) setPayC(null);
     } finally { setBusy(''); }
   }
   // Tap a row's Cash/Account → open the pay sheet PRE-FILLED with the full payable in that method
@@ -172,12 +187,12 @@ function OwnerSalary({ user }) {
   // OWNER RULE (2026-07-17): full attendance = +1 day's pay → 🎯 comes PRE-TICKED for eligible
   // workers (full month, zero absent), amount included in the prefill; owner unticks to refuse.
   // Skipped when the bonus is already in payable via md.perfectBonusPaid (would double it).
-  const payNow = (r, mode) => {
+  const payNow = (r, mode, prev = null) => {
     if (needsManualDays(r.emp, mk)) { alert(`Enter ${r.emp.name}'s days for this month first — paying now would lock the month at 0 days.`); return; }
     if (isLoader(r.emp)) { alert(`${r.emp.name} is a loader — pay him from the 🚚 Loading hisab tab (cleared-till dates), not here.`); return; }
     const bonus = !!r.pay.perfectEligible && !(r.pay.perfectBonus > 0) && (r.pay.perDay || 0) > 0;
     const full = String(Math.max(0, Math.round(((r.pay.payable || 0) + (bonus ? r.pay.perDay : 0)) * 100) / 100));
-    setPayC({ r, cash: mode === 'account' ? '0' : full, account: mode === 'account' ? full : '0', bonusDay: bonus, pf: r.pay.pfCut ? String(r.pay.pfCut) : '' });
+    setPayC({ r, cash: mode === 'account' ? '0' : full, account: mode === 'account' ? full : '0', bonusDay: bonus, pf: r.pay.pfCut ? String(r.pay.pfCut) : '', prev, mk });
   };
   // Undo a just-paid worker (mis-tap): instant unlock + refresh just that row.
   async function undoPay(r) {
@@ -320,7 +335,7 @@ function OwnerSalary({ user }) {
         </div>
       )}
       {showReport && <ReportModal user={user} mk={mk} rows={rows} onClose={() => setShowReport(false)} />}
-      {payC && <FastPaySheet payC={payC} mk={mk} busy={!!busy} onChange={setPayC} onCancel={() => setPayC(null)} onConfirm={doFastLock} />}
+      {payC && <FastPaySheet payC={payC} mk={mk} busy={!!busy} hasNext={!!nextToPay(payC.r.emp.code)} onChange={setPayC} onCancel={() => setPayC(null)} onConfirm={doFastLock} />}
       {peekCode && (() => { const pr = rows.find((x) => x.emp.code === peekCode); return pr ? (
         <QuickPeek r={pr} review={reviewDoc} mk={mk}
           onPay={(mode) => { setPeekCode(''); payNow(pr, mode); }}
@@ -425,8 +440,8 @@ function QuickPeek({ r, review, mk, onPay, onFull, onCut, onBonus, onClose }) {
 
 // Settle & lock sheet. Owner can SPLIT one payment across Cash + Account (both fields at once) and
 // tick a BONUS DAY (+1 day's pay) on top. Amount fields are front-and-centre, above the Pay button.
-function FastPaySheet({ payC, mk, busy, onChange, onCancel, onConfirm }) {
-  const { r, cash, account, bonusDay, pf } = payC;
+function FastPaySheet({ payC, mk, busy, hasNext, onChange, onCancel, onConfirm }) {
+  const { r, cash, account, bonusDay, pf, prev } = payC;
   const pay = r.pay;
   const perDay = Number(pay.perDay || 0);
   const basePayable = pay.payable || 0;
@@ -448,9 +463,12 @@ function FastPaySheet({ payC, mk, busy, onChange, onCancel, onConfirm }) {
     const r2 = (x) => String(Math.max(0, Math.round(x * 100) / 100));
     return { cash: r2(c), account: r2(a) };
   };
+  // The boxes follow the amount actually DUE (never below 0), not the raw PF/bonus change — so typing a
+  // PF bigger than the salary and then correcting it cannot leave cash above what is in hand.
+  const due = (x) => Math.max(0, x);
   const setPf = (v) => {
     const nv = Math.max(0, Math.round(Number(v) || 0));
-    onChange({ ...payC, pf: v, ...spread(pfN - nv) });           // PF up → pay less, PF down → pay more
+    onChange({ ...payC, pf: v, ...spread(due(beforePf - nv) - due(effPayable)) });   // PF up → pay less, PF down → pay more
   };
   // PAY SLIP ON THE PAY SHEET (owner 2026-10-12: "while paying salary i must see days overtime total
   // salary and advance and after that net salary ... because people ask for gross salary and i have to
@@ -459,12 +477,11 @@ function FastPaySheet({ payC, mk, busy, onChange, onCancel, onConfirm }) {
   const n = (v) => Number(v || 0);
   const isDaily = r.emp.type === 'daily';
   const daysShown = isDaily ? (pay.equivalentDays ?? pay.presentDays) : (pay.paidDays ?? pay.presentDays);
-  const extras = Math.round((n(pay.perfectBonus) + n(pay.bonus) + n(pay.gracePay) + n(pay.restoreSaturdayPay) + (bonusDay ? perDay : 0)) * 100) / 100;
-  const gross = Math.round((n(pay.base) + n(pay.otPay) + extras) * 100) / 100;
-  const advCut = n(pay.advanceRecovered);
-  const otherCuts = Math.round((n(pay.fines) + n(pay.latePenalty) + n(pay.weeklyOffDock) + n(pay.loanInstallment)) * 100) / 100;
-  const opening = n(pay.openingBalance);
-  const other = Math.round((beforePf - (gross - advCut - otherCuts + opening)) * 100) / 100;
+  const { gross, extras, advCut, cuts: otherCuts, opening, other } = slipLines(pay, { bonusDayAdd: bonusDay ? perDay : 0, pfTyped: pfN });
+  // "Why" lines (owner 2026-10-12: explain each worker without leaving the sheet): which days were absent
+  // or half, single punches, and every advance with its date. Collapsed; display only.
+  const why = slipWhy(r.detail, r.advs);
+  const whyCount = why.absent.length + why.half.length + why.single.length + why.advances.length;
   const owes = effPayable < 0;
   const cashN = Number(cash) || 0;
   const acctN = Number(account) || 0;
@@ -474,6 +491,7 @@ function FastPaySheet({ payC, mk, busy, onChange, onCancel, onConfirm }) {
     <div className="fixed inset-0 z-50 bg-black/40 flex items-end sm:items-center justify-center p-4" onClick={() => busy ? null : onCancel()}>
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-5 space-y-3 max-h-[92vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="text-center">
+          {prev && <p className="text-[11px] text-emerald-700 mb-1">✅ {prev.name} paid {rupee(prev.total)} — Undo is on his row</p>}
           <p className="font-bold text-slate-900 text-xl">{r.emp.name || r.emp.code}</p>
           <p className="text-xs text-slate-500 mt-0.5">Rate {rupee(pay.effectiveRate || 0)}{isDaily ? '/day' : '/month'}{owes ? ' — he owes us' : ''}</p>
         </div>
@@ -494,6 +512,26 @@ function FastPaySheet({ payC, mk, busy, onChange, onCancel, onConfirm }) {
           </> : <div className="flex justify-between px-3 py-2 bg-emerald-50 rounded-b-xl"><span className="font-bold text-emerald-900">Net salary</span><b className="text-emerald-900 text-lg">{beforePf < 0 ? '− ' : ''}{rupee(Math.abs(beforePf))}</b></div>}
         </div>
 
+        {whyCount > 0 && (
+          <details className="rounded-xl border border-slate-200 text-[13px] text-slate-700">
+            <summary className="px-3 py-2 font-semibold text-slate-700 cursor-pointer select-none">Why? <span className="font-normal text-slate-500">{[why.absent.length ? `${why.absent.length} absent` : '', why.half.length ? `${why.half.length} half` : '', why.single.length ? `${why.single.length} single punch` : '', why.advances.length ? `${why.advances.length} advance${why.advances.length === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · ')}</span></summary>
+            <div className="px-3 pb-2 space-y-1.5">
+              {why.absent.length > 0 && <p><b>Absent:</b> {why.absent.join(', ')}</p>}
+              {why.half.length > 0 && <p><b>Half day:</b> {why.half.join(', ')}</p>}
+              {why.single.length > 0 && <p><b>Single punch:</b> {why.single.join(', ')}</p>}
+              {why.holidays.length > 0 && <p><b>Holiday (paid):</b> {why.holidays.join(', ')}</p>}
+              {why.advances.length > 0 && <div><b>Advance:</b>{why.advances.map((a, i) => (
+                <div key={i} className="flex justify-between"><span className="text-slate-600">{a.date}{a.note ? ` · ${String(a.note).slice(0, 24)}` : ''}</span><span>{rupee(a.amount)}</span></div>
+              ))}</div>}
+            </div>
+          </details>
+        )}
+        {owes && (
+          <p className="bg-rose-50 border border-rose-200 rounded-xl px-3 py-2 text-[13px] text-rose-800">
+            He already owes <b>{rupee(Math.abs(effPayable))}</b> this month (advance is more than salary).{total > 0 ? <> Paying <b>{rupee(total)}</b> now makes it <b>{rupee(Math.abs(closing))}</b>.</> : null}
+          </p>
+        )}
+
         {/* BONUS DAY — tick on top; adds one day's pay and bumps the pay field to cover it.
             Pre-ticked when the worker earned it (full attendance — owner rule); untick to refuse.
             If the bonus is ALREADY in the payable (worker-page setting, e.g. Balaji), say so
@@ -509,7 +547,7 @@ function FastPaySheet({ payC, mk, busy, onChange, onCancel, onConfirm }) {
             <input type="checkbox" className="w-6 h-6 accent-amber-600" checked={!!bonusDay} disabled={busy}
               onChange={(e) => {
                 const on = e.target.checked;
-                onChange({ ...payC, bonusDay: on, ...spread(on ? perDay : -perDay) });
+                onChange({ ...payC, bonusDay: on, ...spread(due(beforePf + (on ? perDay : -perDay) - pfN) - due(effPayable)) });
               }} />
           </label>
         )}
@@ -539,6 +577,14 @@ function FastPaySheet({ payC, mk, busy, onChange, onCancel, onConfirm }) {
           className="w-full bg-emerald-600 text-white rounded-2xl py-4 text-lg font-bold shadow-lg shadow-emerald-300 disabled:opacity-50 disabled:shadow-none active:bg-emerald-700 active:scale-95 transition-all">
           {busy ? 'Paying…' : pfN > 0 ? `Pay ${rupee(total)} + PF ${rupee(pfN)} & lock` : `Pay ${rupee(total)} & lock`}
         </button>
+        {/* PAY & NEXT (owner 2026-10-12: "pay instantly") — same lock, then the next unpaid worker's sheet
+            opens by itself. The plain button above still pays and closes, exactly as before. */}
+        {hasNext && (
+          <button disabled={busy} onClick={() => onConfirm(r, cashN, acctN, !!bonusDay, pfN, true)}
+            className="w-full bg-white border-2 border-emerald-600 text-emerald-700 rounded-2xl py-3 text-base font-bold disabled:opacity-50 active:bg-emerald-50 active:scale-95 transition-all">
+            Pay &amp; next ➜
+          </button>
+        )}
         <button disabled={busy} onClick={onCancel} className="w-full text-sm text-slate-500 py-2 disabled:opacity-50">Cancel</button>
       </div>
     </div>
