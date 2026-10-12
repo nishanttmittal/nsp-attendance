@@ -53,6 +53,9 @@ function resolveTarget(advFor, roster, welders) {
   const bare = name.replace(/\b(ji|bhai|sir)\b/g, ' ').replace(/\s+/g, ' ').trim().split(' ')[0];
   const sameAsWelder = welders.find(w => norm(w) === bare);
   if (sameAsWelder && !WELD.test(name)) return { target: 'none', why: `${sameAsWelder} welder (thekedar) ya factory ka ${sameAsWelder}? Naam list se chuno` };
+  // a contractor's man typed by hand exactly as in the list (no code on the line): same route as a list pick
+  const typedStaff = roster.filter(r => r.active !== false && !r.welder && norm(r.name) === name);
+  if (typedStaff.length === 1 && staffOf(typedStaff[0])) return staffOf(typedStaff[0]);
   if (WELD.test(name)) {
     const w = welders.find(w => name.includes(norm(w))) || welders.find(w => name.startsWith(norm(w).slice(0, 3)));
     // Hindi names: जितेंद्र / नवीन map on the first letters of the Latin name only if the owner keeps the welder list to these two
