@@ -111,7 +111,8 @@ export function lockedRegisterPdf(rows, monthLabel) {
   }), { salary: 0, payable: 0, net: 0, cash: 0, account: 0, pf: 0, totalPay: 0, advance: 0, carried: 0 });
   const y = (doc.lastAutoTable?.finalY || 30) + 8;
   doc.setFontSize(10);
-  doc.text(`TOTALS  -  Payable ${rs(t.payable)}   Net ${rs(t.net)}   PF ${rs(t.pf)}   Cash paid ${rs(t.cash)}   Account paid ${rs(t.account)}   Total pay ${rs(t.totalPay)}   Advance ${rs(t.advance)}   Carried ${rs(t.carried)}`, 14, y);
+  doc.text(`TOTALS  -  Payable ${rs(t.payable)}   Net ${rs(t.net)}   Advance ${rs(t.advance)}   Carried ${rs(t.carried)}`, 14, y);
+  doc.text(`PAID  -  PF ${rs(t.pf)}   Cash ${rs(t.cash)}   Account ${rs(t.account)}   Total pay ${rs(t.totalPay)}`, 14, y + 6);
   return doc;
 }
 
