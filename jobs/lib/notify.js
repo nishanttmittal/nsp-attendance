@@ -103,30 +103,35 @@ async function sendTech(text, topic) {
 // HTML-escaped first, so a "<" or "&" inside a product/worker name can never be parsed as markup
 // (push security review 07-10-2026: entities were decoded in sendTech and then reached the HTML sink).
 function escapeHtml(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
-async function sendPlain(text, topic) {
+// QUIET sends (owner 13-10-2026: "Per-worker detail and all system messages go only to Telegram"): pass
+// { wa: false } and the message goes to Telegram ONLY. If Telegram does not take it (no token, refused,
+// network), it falls back to WhatsApp so a quiet message is never lost.
+async function sendPlain(text, topic, { wa: toWa = true } = {}) {
   const TOKEN = tokenFor(topic);
-  const wa = await enqueueWhatsApp(text, { plain: true });   // callers that must not lose the message check this
-  if (!TOKEN) { console.log('[DRY plain — no token] would send:\n' + text); return { dry: true }; }
+  let wa = toWa ? await enqueueWhatsApp(text, { plain: true }) : undefined;   // callers that must not lose the message check this
+  if (!TOKEN) { if (!toWa) wa = await enqueueWhatsApp(text, { plain: true }); console.log('[DRY plain — no token] would send:\n' + text); return { dry: true, wa }; }
   const ids = await recipients();
   let sent = 0;
   for (const chat_id of ids) {
     if (await post(TOKEN, { chat_id, text: escapeHtml(text), parse_mode: 'HTML', disable_web_page_preview: true, ...buttonFor(topic) }, 'plain')) sent++;
   }
+  if (!toWa && sent === 0) wa = await enqueueWhatsApp(text, { plain: true });
   return { ok: sent > 0, sent, wa };
 }
 
-async function sendTelegram(text, topic) {
+async function sendTelegram(text, topic, { wa: toWa = true } = {}) {
   const TOKEN = tokenFor(topic);
-  await enqueueWhatsApp(text); // also deliver on WhatsApp (best-effort, never throws)
-  if (!TOKEN) { console.log('[DRY notify — no token] would send:\n' + text); return { dry: true }; }
+  if (toWa) await enqueueWhatsApp(text); // also deliver on WhatsApp (best-effort, never throws)
+  if (!TOKEN) { if (!toWa) await enqueueWhatsApp(text); console.log('[DRY notify — no token] would send:\n' + text); return { dry: true }; }
   const rcpts = await recipients();
-  if (!rcpts.length) { console.log('[DRY notify — no chat id] would send:\n' + text); return { dry: true }; }
+  if (!rcpts.length) { if (!toWa) await enqueueWhatsApp(text); console.log('[DRY notify — no chat id] would send:\n' + text); return { dry: true }; }
   // Never throws and never hangs (20 s limit): a Telegram outage must not mark a job failed AFTER its
   // pay / advance / attendance write already succeeded — that led to retries that repeated or dropped the alert.
   let sent = 0;
   for (const chat_id of rcpts) {
     if (await post(TOKEN, { chat_id, text, parse_mode: 'HTML', disable_web_page_preview: true, ...buttonFor(topic) }, 'notify')) sent++;
   }
+  if (!toWa && sent === 0) await enqueueWhatsApp(text);   // quiet message Telegram did not take → WhatsApp, never lost
   return { ok: sent > 0, sent };
 }
 
@@ -148,6 +153,8 @@ async function sendTelegramDocument(filePath, caption = '', topic) {
 const channel = topic => ({
   sendTelegram: text => sendTelegram(text, topic),
   sendPlain: text => sendPlain(text, topic),
+  sendQuiet: text => sendTelegram(text, topic, { wa: false }),        // Telegram only (WhatsApp only if Telegram fails)
+  sendPlainQuiet: text => sendPlain(text, topic, { wa: false }),
   sendTech: text => sendTech(text, topic),
   sendTelegramDocument: (filePath, caption = '') => sendTelegramDocument(filePath, caption, topic),
 });

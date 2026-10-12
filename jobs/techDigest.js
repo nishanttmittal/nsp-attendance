@@ -1,9 +1,10 @@
 // TECH DIGEST — owner 07-10-2026: the technical / exception alerts (floor update didn't run, app gone
 // quiet, price health, settings guard, backups, 4-late-marks, missed punch, long absence) are NOT sent
-// one by one; they are collected by sendTech() and sent as ONE plain WhatsApp message at 11:00 and 18:00.
+// one by one; they are collected by sendTech() and sent as ONE plain message at 11:00 and 18:00 (Tech bot on Telegram only since 13-10-2026).
 // DRY=1 prints and does not clear the queue.
 const { db } = require('./lib/firestore');
-const { sendPlain: sendTelegram } = require('./lib/notify').channel('tech'); // plain text: WA as-is, Telegram escaped
+// owner 13-10-2026: "all system messages go only to Telegram" — Tech bot only; WhatsApp only if Telegram does not take it.
+const { sendPlainQuiet: sendTelegram } = require('./lib/notify').channel('tech');
 const { dmy } = require('./lib/simple');
 const MAX_ITEMS = 12;
 function firstLine(t) { return String(t).split('\n').map(x => x.trim()).filter(Boolean)[0] || ''; }
@@ -44,8 +45,8 @@ function compact(t) {
   const msg = L.join('\n');
   if (process.env.DRY) { console.log(msg); return; }
   const r = await sendTelegram(msg);
-  if (r && r.wa === false) {   // WhatsApp copy could not be queued — keep the items for the next slot, never drop silently
-    console.error('tech digest: WhatsApp enqueue failed — queue kept for the next run');
+  if (!(r && (r.ok || r.wa))) {   // neither Telegram nor the WhatsApp fallback took it — keep the items for the next slot, never drop silently
+    console.error('tech digest: not delivered — queue kept for the next run');
     await ref.set({ lastError: new Date().toISOString() }, { merge: true });
     return;
   }

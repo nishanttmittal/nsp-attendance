@@ -90,7 +90,7 @@ async function handle(type, p) {
         }
       }
     } catch (e) { console.error('missed-list cleanup failed:', e.message); }
-    await attBot.sendTelegram(H`✏️ Punch correction: ${p.emp} on ${p.date} (in ${p.in || '—'}/out ${p.out || '—'})${p.reason ? ' — ' + p.reason : ''}.`);
+    await attBot.sendQuiet(H`✏️ Punch correction: ${p.emp} on ${p.date} (in ${p.in || '—'}/out ${p.out || '—'})${p.reason ? ' — ' + p.reason : ''}.`);
     return 'punch inserted + day reprocessed + logged + removed from list';
   }
   if (type === 'backup') {
@@ -106,7 +106,7 @@ async function handle(type, p) {
       return `cardno ${p.cardno} already on the machine roster — skipped (duplicate guard)`;
     }
     run('onboardEmployee.js', { NAME: p.name, CARDNO: p.cardno, DEPT: p.dept, SHIFT: p.shift, GENDER: p.gender, DRY: 'false' });
-    await attBot.sendTelegram(H`🧑‍🏭 New employee added: ${p.name} (${p.cardno}) · ${p.dept} · ${p.shift}.`);
+    await attBot.sendQuiet(H`🧑‍🏭 New employee added: ${p.name} (${p.cardno}) · ${p.dept} · ${p.shift}.`);
     return 'employee created on machine';
   }
   if (type === 'push_employee_edit') {   // owner edited profile in app → push to the machine
@@ -117,19 +117,19 @@ async function handle(type, p) {
     if (p.gender) env.PE_GENDER = p.gender;
     run('pushEmployeeEdit.js', env);
     const bits = [p.name ? 'name “' + p.name + '”' : '', p.dept ? 'dept ' + p.dept : '', p.shift ? 'shift ' + p.shift : '', p.gender ? p.gender : ''].filter(Boolean).join(' · ');
-    await attBot.sendTelegram(H`✏️ Updated on machine: ${p.code}${bits ? ' · ' + bits : ''}.`);
+    await attBot.sendQuiet(H`✏️ Updated on machine: ${p.code}${bits ? ' · ' + bits : ''}.`);
     return 'profile pushed to machine';
   }
   if (type === 'resign_employee') {
     // Owner rule (2026-07-12): KEEP the worker's record INACTIVE with name + paid history so the owner
     // can always look up whom he paid & when. NO att_archive snapshot (removed) — the live inactive
     // record + the monthly salary_register ARE the permanent record. Machine removal stays manual.
-    await attBot.sendTelegram(H`👋 ${p.code} marked resigned — kept inactive in the salary sheet (name + paid history retained). Machine removal is manual.`).catch(() => {});
+    await attBot.sendQuiet(H`👋 ${p.code} marked resigned — kept inactive in the salary sheet (name + paid history retained). Machine removal is manual.`).catch(() => {});
     return 'resigned: kept inactive in salary sheet (no archive; machine NOT touched)';
   }
   if (type === 'reprocess_period') {
     run('reprocessRange.js', { FROM: p.from, TO: p.to });
-    await attBot.sendTelegram(H`🔄 Reprocessed attendance ${p.from} → ${p.to}.`);
+    await attBot.sendQuiet(H`🔄 Reprocessed attendance ${p.from} → ${p.to}.`);
     return 'reprocessed ' + p.from + '..' + p.to;
   }
   if (type === 'weeklyoff_audit') {   // worked-but-unearned Saturdays → unpaidWorkedSat (OT-only rule)
@@ -145,7 +145,7 @@ async function handle(type, p) {
     const [my, mm] = String(p.month || curMk).split('-').map(Number);
     const offset = (cy * 12 + cm) - (my * 12 + mm);     // 0 = current month, 1 = last month, …
     const n = await scanMissed(Math.max(0, offset));
-    await attBot.sendTelegram(H`🔍 Rescanned ${p.month || curMk}: ${n} missed punch(es) found — see the Problems tab.`);
+    await attBot.sendQuiet(H`🔍 Rescanned ${p.month || curMk}: ${n} missed punch(es) found — see the Problems tab.`);
     return `scanned ${p.month}: ${n}`;
   }
   if (type === 'mark_paid') {    // pay a salary — supports PART payments (e.g. cash today + bank next day)
@@ -210,10 +210,10 @@ async function handle(type, p) {
     const remaining = Math.max(0, due - paidSoFar);
     if (fullyPaid) {
       const extra = Math.max(0, paidSoFar - due);
-      await advBot.sendTelegram(H`💵 Paid in full: <b>${e.name || p.code}</b> ₹${paidSoFar.toLocaleString('en-IN')} (${months[p.month].payment.mode}) · ${p.month}${extra > 0 ? ` · ₹${extra.toLocaleString('en-IN')} extra → advance carried forward` : ''}${payments.length > 1 ? ` · ${payments.length} parts` : ''}${p.remark ? ` · ${p.remark}` : ''} · by ${p._by || 'manager'}`);
+      await advBot.sendQuiet(H`💵 Paid in full: <b>${e.name || p.code}</b> ₹${paidSoFar.toLocaleString('en-IN')} (${months[p.month].payment.mode}) · ${p.month}${extra > 0 ? ` · ₹${extra.toLocaleString('en-IN')} extra → advance carried forward` : ''}${payments.length > 1 ? ` · ${payments.length} parts` : ''}${p.remark ? ` · ${p.remark}` : ''} · by ${p._by || 'manager'}`);
       return extra > 0 ? `paid in full (₹${extra} extra → advance)` : 'paid in full';
     }
-    await advBot.sendTelegram(H`💵 Part paid: <b>${e.name || p.code}</b> ₹${thisAmt.toLocaleString('en-IN')} (${p.mode || 'cash'}) · ${p.month} · ₹${remaining.toLocaleString('en-IN')} still pending${p.remark ? ` · ${p.remark}` : ''} · by ${p._by || 'manager'}`);
+    await advBot.sendQuiet(H`💵 Part paid: <b>${e.name || p.code}</b> ₹${thisAmt.toLocaleString('en-IN')} (${p.mode || 'cash'}) · ${p.month} · ₹${remaining.toLocaleString('en-IN')} still pending${p.remark ? ` · ${p.remark}` : ''} · by ${p._by || 'manager'}`);
     return `part paid ₹${thisAmt} · ₹${remaining} pending`;
   }
   if (type === 'lock_month') {   // CASHIER settle (owner 2026-07-12): record cash+account, freeze the
@@ -267,7 +267,7 @@ async function handle(type, p) {
       await regRef.set(reg);
     } catch (e2) { console.error('register write failed:', e2.message); }
     const pfLeg = Number(md.payment?.breakdown?.pfCut || p.breakdown?.pfCut || 0);   // PF paid at settle (owner 2026-10-12: PF + cash + bank = total pay)
-    await advBot.sendTelegram(H`🔒 Locked <b>${e.name || p.code}</b> ${p.month}: ${pfLeg > 0 ? `total pay ₹${(paid + pfLeg).toLocaleString('en-IN')} (PF ${pfLeg} + cash ${cash} + acct ${account})` : `paid ₹${paid.toLocaleString('en-IN')} (cash ${cash} + acct ${account})`}${closing ? ` · carry ₹${closing.toLocaleString('en-IN')} → next month` : ''} · by ${p._by || 'owner'}${p.reason ? ` · ${p.reason}` : ''}`).catch(() => {});
+    await advBot.sendQuiet(H`🔒 Locked <b>${e.name || p.code}</b> ${p.month}: ${pfLeg > 0 ? `total pay ₹${(paid + pfLeg).toLocaleString('en-IN')} (PF ${pfLeg} + cash ${cash} + acct ${account})` : `paid ₹${paid.toLocaleString('en-IN')} (cash ${cash} + acct ${account})`}${closing ? ` · carry ₹${closing.toLocaleString('en-IN')} → next month` : ''} · by ${p._by || 'owner'}${p.reason ? ` · ${p.reason}` : ''}`).catch(() => {});
     return `locked ${p.month}: paid ${paid}, carry ${closing} (register+alert)`;
   }
   if (type === 'unlock_month') {   // reopen a locked month: clear the payment + revert the carried balance
@@ -373,7 +373,7 @@ async function handle(type, p) {
     // notifyOnly (2026-07-22): the OWNER app already wrote this advance directly (addAdvanceDirect)
     // for instant display; this job exists only to fire the Telegram alert in the background.
     if (p.notifyOnly) {
-      await advBot.sendTelegram(H`💸 Advance ₹${p.advance.amount} to <b>${empData.name || p.code}</b>${empData.name ? ` (${p.code})` : ''} (${p.advance.mode}) by ${p.advance.paidBy || '?'}.${clashWarn}`);
+      await (clashWarn ? advBot.sendTelegram : advBot.sendQuiet)(H`💸 Advance ₹${p.advance.amount} to <b>${empData.name || p.code}</b>${empData.name ? ` (${p.code})` : ''} (${p.advance.mode}) by ${p.advance.paidBy || '?'}.${clashWarn}`);
       return already ? 'advance already applied — notified' : 'advance notified';
     }
     // DEDUPE (fix 2026-07-18): a stale-recovery re-run (runner killed after the write, before
@@ -383,7 +383,7 @@ async function handle(type, p) {
     }
     advances.push(p.advance);
     await ref.set({ advances }, { merge: true });
-    await advBot.sendTelegram(H`💸 Advance ₹${p.advance.amount} to <b>${empData.name || p.code}</b>${empData.name ? ` (${p.code})` : ''} (${p.advance.mode}) by ${p.advance.paidBy || '?'}.${clashWarn}`);
+    await (clashWarn ? advBot.sendTelegram : advBot.sendQuiet)(H`💸 Advance ₹${p.advance.amount} to <b>${empData.name || p.code}</b>${empData.name ? ` (${p.code})` : ''} (${p.advance.mode}) by ${p.advance.paidBy || '?'}.${clashWarn}`);
     return 'advance added';
   }
   if (type === 'extra_photo') {  // owner 01-10-2026 "add photos if available": optional photo of extra loaders

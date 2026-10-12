@@ -34,24 +34,63 @@ async function platingLines(fdb, day) {
   for (const l of inn) lines.push(`← back ${l}`);
   return lines;
 }
-async function advanceLines(fdb, day) {
-  const s = await fdb.collection('att_salary').get(); const rows = [];
-  s.forEach(d => { const e = d.data(); for (const a of (e.advances || [])) if (String(a.date || '').slice(0, 10) === day) rows.push(`${(e.name || d.id).trim()} ${inr(a.amount)}`); });
-  return rows;
+// Advances + salary locks since the last digest (owner 13-10-2026: "at end of day one list of advance sent
+// to my whatsapp" — the one-by-one advance / locked alerts now go to Telegram only). An advance is listed
+// ONCE: ids already listed are remembered in att_alert_state/evening_digest, so one entered after 20:15
+// (or back-dated up to 3 days) comes in the next evening's list with its date instead of vanishing.
+const STATE = fdb => fdb.collection('att_alert_state').doc('evening_digest');
+const istDay = iso => new Date(new Date(iso).getTime() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
+const addDays = (day, n) => new Date(Date.parse(day + 'T00:00:00Z') + n * 86400000).toISOString().slice(0, 10);
+async function moneyLines(fdb, day) {
+  const st = ((await STATE(fdb).get()).data()) || {};
+  const first = !Array.isArray(st.advIds);            // first run: only today's, and remember the recent ones as already listed
+  const seen = new Set(st.advIds || []);
+  const since = st.lastRunAt || (day + 'T00:00:00+05:30');
+  const from = addDays(day, -3);
+  const s = await fdb.collection('att_salary').get();
+  const adv = [], ids = [], seed = []; let advTotal = 0, locks = 0, lockTotal = 0;
+  s.forEach(d => { const e = d.data(); const name = (e.name || d.id).trim();
+    for (const a of (e.advances || [])) {
+      const ad = String(a.date || '').slice(0, 10);
+      if (first && a.id && ad >= addDays(day, -7) && ad < day) seed.push(a.id);
+      const due = ad === day ? !(a.id && seen.has(a.id)) : (!first && a.id && !seen.has(a.id) && ad >= from && ad < day);
+      if (!due) continue;
+      adv.push(`${name} ${inr(a.amount)}${ad === day ? '' : ` (${dmy(ad)})`}`); advTotal += Number(a.amount) || 0; if (a.id) ids.push(a.id);
+    }
+    for (const md of Object.values(e.months || {})) {
+      if (!md || !md.locked || !md.lockedAt || md.lockedAt <= new Date(since).toISOString() || istDay(md.lockedAt) > day) continue;
+      const pay = md.payment || {}; locks++; lockTotal += (Number(pay.net) || 0) + (Number((pay.breakdown || {}).pfCut) || 0);
+    }
+  });
+  return { adv, advTotal, locks, lockTotal, save: { advIds: [...(st.advIds || []), ...seed, ...ids].slice(-600), lastRunAt: new Date().toISOString(), lastDay: day } };
 }
-async function build(day = istToday()) {
+async function build(day = istToday(), out = {}) {
   const fdb = db();
-  const [weld, plate, adv] = await Promise.all([weldingLines(fdb, day), platingLines(fdb, day), advanceLines(fdb, day)]);
+  const [weld, plate, money] = await Promise.all([weldingLines(fdb, day), platingLines(fdb, day), moneyLines(fdb, day)]);
+  out.save = money.save;
   const L = [`🌙 Aaj ka hisab — ${dmy(day)}`];
   L.push('Welding: ' + (weld.length ? '' : 'koi challan nahi')); for (const l of weld) L.push('  ' + l);
   L.push('Chrome plating: ' + (plate.length ? '' : 'kuch nahi')); for (const l of plate) L.push('  ' + l);
-  L.push('Advance diya: ' + (adv.length ? adv.join(', ') : 'nahi'));
+  L.push(money.adv.length ? `Advance diya: ${money.adv.length} · ${inr(money.advTotal)}` : 'Advance diya: nahi'); for (const l of money.adv) L.push('  ' + l);
+  if (money.locks) L.push(`Salary lock: ${money.locks} staff · ${inr(money.lockTotal)}`);
   return L.join('\n');
 }
 module.exports = { build };
 if (require.main === module) {
-  build(process.env.DATE || istToday()).then(async t => {
+  (async () => {
+    // A late run (the GitHub fallback has arrived after midnight) belongs to the day that just ended; and a day
+    // already sent is never sent twice. DATE=… (a manual re-run) skips both checks and does not touch the state.
+    const manual = process.env.DATE;
+    const now = new Date(Date.now() + 5.5 * 3600 * 1000);
+    const day = manual || (now.getUTCHours() < 12 ? addDays(istToday(), -1) : istToday());
+    if (!manual && !process.env.DRY) {
+      const st = ((await STATE(db()).get()).data()) || {};
+      if (st.lastDay === day) { console.log('evening digest already sent for ' + day + ' — skipped'); return; }
+    }
+    const out = {}; const t = await build(day, out);
     if (process.env.DRY) { console.log(t); return; }
-    await sendTelegram(t); console.log('sent evening digest');
-  }).catch(e => { console.error(e); process.exit(1); });
+    const r = await sendTelegram(t);
+    if (!manual && !(r && r.wa === false)) await STATE(db()).set(out.save, { merge: true });   // not marked listed if WhatsApp did not take it
+    console.log('sent evening digest');
+  })().catch(e => { console.error(e); process.exit(1); });
 }
