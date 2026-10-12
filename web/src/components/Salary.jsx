@@ -10,6 +10,11 @@ import { payslipAllPdf, lockedRegisterPdf, sharePdf, advanceSplit, advancesPdf, 
 import { shareCheckSheet, shareSalaryRegisterXlsx } from '../lib/checksheet';
 import WorkerSummary from './WorkerSummary.jsx';
 
+// PF paid for the worker at settle (owner 2026-10-12: "amount in PF column should be added to total pay").
+// payment.net stays the money actually handed over (cash + account); TOTAL PAY = that + the PF cut.
+const pfPaid = (md) => Number(md?.payment?.breakdown?.pfCut || 0);
+const paidWithPf = (md) => Number(md?.payment?.net || 0) + pfPaid(md);
+
 // SALARY — owner ticks person by person; manager sees ticked list and marks PAID.
 export default function Salary({ user }) {
   return user.role === 'admin' ? <OwnerSalary user={user} /> : <ManagerSalary user={user} />;
@@ -102,8 +107,9 @@ function OwnerSalary({ user }) {
     .filter((r) => justPaid[r.emp.code] ? true : filter === 'all' ? true : filter === 'paid' ? isSettled(r) : !isSettled(r));
   const noSalary = emps.filter((e) => !(e.amount || e.wage));
   // month payroll totals: payable for the unsettled, actual paid for the locked
-  const totalPayable = rows.reduce((s, r) => s + Number((r.md.locked || r.md.payment) ? (r.md.payment?.net || 0) : (r.pay.payable || 0)), 0);
-  const paidNet = locked.reduce((s, r) => s + Number(r.md.payment?.net || 0), 0);
+  const totalPayable = rows.reduce((s, r) => s + Number((r.md.locked || r.md.payment) ? paidWithPf(r.md) : (r.pay.payable || 0)), 0);
+  const paidNet = locked.reduce((s, r) => s + paidWithPf(r.md), 0);   // total pay incl. PF
+  const salPf = rows.reduce((s, r) => s + pfPaid(r.md), 0);
   const pendingNet = rows.filter((r) => !(r.md.locked || r.md.payment)).reduce((s, r) => s + Number(r.pay.payable || 0), 0);
   // Total money GIVEN OUT this month = advances handed out during the month (ALL people, even
   // no-salary ones — an advance is cash out regardless) + salary actually paid (locked payment
@@ -233,6 +239,7 @@ function OwnerSalary({ user }) {
           <div className="mt-2 pt-2 border-t border-slate-100 text-xs text-slate-600 space-y-1">
             <div className="flex justify-between"><span>💵 Cash out <span className="text-slate-400">(salary {rupee(salCash)} + adv {rupee(advCash)})</span></span><b className="text-slate-800">{rupee(salCash + advCash)}</b></div>
             <div className="flex justify-between"><span>🏦 Account out <span className="text-slate-400">(salary {rupee(salAcct)} + adv {rupee(advancesOut - advCash)})</span></span><b className="text-slate-800">{rupee(salAcct + (advancesOut - advCash))}</b></div>
+            {salPf > 0 && <div className="flex justify-between"><span>🏛 PF <span className="text-slate-400">(cut from salaries, paid into PF accounts — not cash)</span></span><b className="text-indigo-700">{rupee(salPf)}</b></div>}
             <div className="text-slate-500">📝 {advEntries.length} advance{advEntries.length === 1 ? '' : 's'} given · {locked.length} salar{locked.length === 1 ? 'y' : 'ies'} paid &amp; locked</div>
           </div>
         )}
@@ -358,7 +365,8 @@ function QuickPeek({ r, review, mk, onPay, onFull, onCut, onBonus, onClose }) {
         <div className="text-center">
           <p className="font-bold text-slate-900 text-xl">{emp.name || emp.code}</p>
           <p className="text-xs text-slate-500 mt-0.5">{emp.dept || ''} · {att.presentDays || 0} days · OT {(pay.otHrsNet ?? Math.max(0, (att.otHrs || 0) - lateHrs)).toFixed(1)}h</p>
-          <p className={`text-3xl font-extrabold mt-1 ${settled ? 'text-emerald-700' : 'text-slate-900'}`}>{settled ? '✅ ' + rupee(md.payment?.net || 0) : rupee(pay.payable || 0)}</p>
+          <p className={`text-3xl font-extrabold mt-1 ${settled ? 'text-emerald-700' : 'text-slate-900'}`}>{settled ? '✅ ' + rupee(paidWithPf(md)) : rupee(pay.payable || 0)}</p>
+          {settled && pfPaid(md) > 0 && <p className="text-[11px] text-indigo-700">cash/bank {rupee(md.payment?.net || 0)} + PF {rupee(pfPaid(md))}</p>}
           {settled && <p className="text-[11px] text-emerald-700">already paid & locked</p>}
         </div>
         <div className="space-y-1.5">
@@ -486,12 +494,12 @@ function FastPaySheet({ payC, mk, busy, onChange, onCancel, onConfirm }) {
 
         {pfRec && <p className="text-[11px] text-center text-indigo-700">PF deposited for him this month: his 12% {rupee(pfRec.ee)} + company 12% {rupee(pfRec.er)} = <b>{rupee(Number(pfRec.ee || 0) + Number(pfRec.er || 0))}</b></p>}
         <p className="text-xs text-center text-slate-600">
-          {pfN > 0 ? <>PF <b className="text-indigo-700">{rupee(pfN)}</b> · </> : null}Paying now <b className="text-slate-900">{rupee(total)}</b> · Balance <b className={closing >= 0 ? 'text-rose-600' : 'text-emerald-700'}>{closing >= 0 ? '+' : ''}{rupee(closing)}</b> {closing >= 0 ? 'stays owed to him' : 'he owes us'} → carries next month.
+          {pfN > 0 ? <>Total pay <b className="text-slate-900">{rupee(total + pfN)}</b> = PF <b className="text-indigo-700">{rupee(pfN)}</b> + </> : null}{pfN > 0 ? 'cash/bank' : 'Paying now'} <b className="text-slate-900">{rupee(total)}</b> · Balance <b className={closing >= 0 ? 'text-rose-600' : 'text-emerald-700'}>{closing >= 0 ? '+' : ''}{rupee(closing)}</b> {closing >= 0 ? 'stays owed to him' : 'he owes us'} → carries next month.
         </p>
 
         <button disabled={busy} onClick={() => onConfirm(r, cashN, acctN, !!bonusDay, pfN)}
           className="w-full bg-emerald-600 text-white rounded-2xl py-4 text-lg font-bold shadow-lg shadow-emerald-300 disabled:opacity-50 disabled:shadow-none active:bg-emerald-700 active:scale-95 transition-all">
-          {busy ? 'Paying…' : `Pay ${rupee(total)} & lock`}
+          {busy ? 'Paying…' : pfN > 0 ? `Pay ${rupee(total)} + PF ${rupee(pfN)} & lock` : `Pay ${rupee(total)} & lock`}
         </button>
         <button disabled={busy} onClick={onCancel} className="w-full text-sm text-slate-500 py-2 disabled:opacity-50">Cancel</button>
       </div>
@@ -585,8 +593,9 @@ function OwnerRow({ r, mk, busy, justPaidMode, user, onName, onPay, onUndo, onAd
         </div>
         <div className="text-right shrink-0">
           <div className={`font-extrabold text-xl ${isLocked ? 'text-emerald-700' : owes ? 'text-amber-700' : 'text-rose-600'}`}>
-            {isLocked ? rupee(md.payment?.net || 0) : owes ? `owes ${rupee(Math.abs(payable))}` : rupee(payable)}
+            {isLocked ? rupee(paidWithPf(md)) : owes ? `owes ${rupee(Math.abs(payable))}` : rupee(payable)}
           </div>
+          {isLocked && pfPaid(md) > 0 && <div className="text-[11px] text-indigo-700">incl. PF {rupee(pfPaid(md))}</div>}
           {isLocked && !justPaidMode && <span className="text-[11px] text-emerald-700 font-medium">🔒 Locked{md.payment?.closing ? ` · bal ${md.payment.closing >= 0 ? '+' : ''}${rupee(md.payment.closing)}` : ''}</span>}
         </div>
       </div>

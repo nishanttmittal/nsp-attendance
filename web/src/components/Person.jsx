@@ -524,8 +524,9 @@ function SettleLockCard({ pay, md, busy, onLock, onUnlock, onSetPf, pfRec }) {
     return (
       <div className="bg-green-50 border border-green-200 rounded-xl shadow p-4">
         <div className="font-bold text-green-800">🔒 Locked</div>
-        <Row k="Paid" v={`${rupee(p.net)} (cash ${rupee(p.cash)} + account ${rupee(p.account)})`} />
-        {Number(p.breakdown?.pfCut || 0) > 0 && <Row k="PF cut (into his PF account)" v={rupee(p.breakdown.pfCut)} />}
+        {Number(p.breakdown?.pfCut || 0) > 0
+          ? <Row k="Total pay" v={`${rupee(Number(p.net || 0) + Number(p.breakdown.pfCut))} (PF ${rupee(p.breakdown.pfCut)} + cash ${rupee(p.cash)} + account ${rupee(p.account)})`} />
+          : <Row k="Paid" v={`${rupee(p.net)} (cash ${rupee(p.cash)} + account ${rupee(p.account)})`} />}
         <Row k="Payable was" v={rupee(p.payable)} />
         <Row k="Balance carried" v={`${(p.closing || 0) >= 0 ? '+' : ''}${rupee(p.closing)} → next month`} />
         <p className="text-xs text-gray-500 mt-1">{p.date} · by {String(p.by || '').split('@')[0]}{p.reason ? ` · “${p.reason}”` : ''}</p>
