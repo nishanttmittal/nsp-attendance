@@ -132,11 +132,17 @@ async function run({ dry = false } = {}) {
   // selfCode is on file for him yet (Grok review 12-10-2026 — without it such a line carried no red mark at all)
   const first = (x) => norm(x).split(' ')[0] || '';
   const selfNamesOf = Object.fromEntries(users.docs.map(d => [d.id, [d.data().name, ...(d.data().selfNames || [])].map(first).filter(Boolean)]));
-  const isOwnAdvance = (e, t) => roleOfUser[e.by] === 'spender' && (
-    // his own Attendance code, whichever way the line is routed (a contractor's man goes to the Welder app and
-    // carries his code as staffCode — the check must not depend on the target: commit security review 13-10-2026)
-    (!!selfCodeOf[e.by] && (t.code === selfCodeOf[e.by] || t.staffCode === selfCodeOf[e.by]))
-    || ((!selfCodeOf[e.by] || !(e.advFor && e.advFor.code)) && (selfNamesOf[e.by] || []).includes(first(e.advFor && e.advFor.name))));
+  // Whose advance is it? Decided from what the line RESOLVED to, not from the code the phone wrote on it (commit security
+  // review 13-10-2026: a junk code on the line switched the name check off while the name still routed the money):
+  //  · resolved to a worker (Attendance code, or a contractor's man → staffCode) → own if that is his own code;
+  //  · resolved to nobody in particular (typed name, contractor route, unmatched) or he has no selfCode on file →
+  //    own if the first name is one of his own names.
+  const isOwnAdvance = (e, t) => {
+    if (roleOfUser[e.by] !== 'spender') return false;
+    const who = t.code || t.staffCode || '', mine = selfCodeOf[e.by] || '';
+    if (mine && who) return who === mine;
+    return (selfNamesOf[e.by] || []).includes(first(e.advFor && e.advFor.name));
+  };
   const roleOfUser = Object.fromEntries(users.docs.map(d => [d.id, d.data().active === true ? d.data().role : '']));
   // (owner 09-10-2026 23:24: Anshul ji may pass it too — the OK must come from staff, never from the worker himself)
   const isOwner = (email) => email === 'nspenterprises24@gmail.com' || ['owner', 'incharge'].includes(roleOfUser[email]);
