@@ -260,7 +260,7 @@ export default function Person({ code, mk, user, onBack }) {
           LOCKED month must always show it, else they have no 🔓 Unlock anywhere (owner hit this
           2026-08-12: "not able to unlock loading staff"). */}
       {(emp.type !== 'daily' || md.locked || md.payment) && (
-        <SettleLockCard pay={pay} md={md} busy={busy} onLock={doLock} onUnlock={doUnlock} />
+        <SettleLockCard pay={pay} md={md} busy={busy} onLock={doLock} onUnlock={doUnlock} onSetPf={(v) => act(() => saveMonth(code, mk, { pfCut: v }))} pfRec={emp.pf ? emp.pf[mk] : null} />
       )}
 
       {/* Daily wagers used to be excluded here entirely, so their in/out times were invisible even
@@ -501,15 +501,22 @@ function SettleResign({ emp, mk, attMap, ctx, disabled, today, graceDelta, punch
 
 // Cashier settle: shows salary + opening balance = payable; owner enters cash + account paid and
 // LOCKS the month (freezes it, carries the balance to next month). Unlock reopens it. Reason required.
-function SettleLockCard({ pay, md, busy, onLock, onUnlock }) {
+function SettleLockCard({ pay, md, busy, onLock, onUnlock, onSetPf, pfRec }) {
   const [cash, setCash] = useState('');
+  // PF box (owner 2026-10-12): the month's PF cut (md.pfCut). Typed here, saved on the month, and the
+  // payable below drops by it. Lock is refused while the typed figure is not yet saved.
+  const pfSaved = Number(md.pfCut || 0);
+  const [pfV, setPfV] = useState(pfSaved ? String(pfSaved) : '');
+  const pfTyped = Math.max(0, Math.round(Number(pfV) || 0));
+  const pfDirty = pfTyped !== pfSaved;
   const [account, setAccount] = useState('');
   const [unlockAsk, setUnlockAsk] = useState(false);
   const [unlockReason, setUnlockReason] = useState('');
   const opening = pay.openingBalance || 0;
   const payable = pay.payable || 0;
   const advCut = pay.advanceRecovered || 0;                 // full outstanding advance, auto-cut at settle
-  const salaryThisMonth = Math.round(((pay.net || 0) + advCut) * 100) / 100;  // earnings − fines, before advance
+  const pfCut = Number(pay.pfCut || 0);
+  const salaryThisMonth = Math.round(((pay.net || 0) + advCut + pfCut) * 100) / 100;  // earnings − fines, before advance and before PF
   const paid = (Number(cash) || 0) + (Number(account) || 0);
   const closing = Math.round((payable - paid) * 100) / 100;
   if (md.locked) {
@@ -518,6 +525,7 @@ function SettleLockCard({ pay, md, busy, onLock, onUnlock }) {
       <div className="bg-green-50 border border-green-200 rounded-xl shadow p-4">
         <div className="font-bold text-green-800">🔒 Locked</div>
         <Row k="Paid" v={`${rupee(p.net)} (cash ${rupee(p.cash)} + account ${rupee(p.account)})`} />
+        {Number(p.breakdown?.pfCut || 0) > 0 && <Row k="PF cut (into his PF account)" v={rupee(p.breakdown.pfCut)} />}
         <Row k="Payable was" v={rupee(p.payable)} />
         <Row k="Balance carried" v={`${(p.closing || 0) >= 0 ? '+' : ''}${rupee(p.closing)} → next month`} />
         <p className="text-xs text-gray-500 mt-1">{p.date} · by {String(p.by || '').split('@')[0]}{p.reason ? ` · “${p.reason}”` : ''}</p>
@@ -537,15 +545,21 @@ function SettleLockCard({ pay, md, busy, onLock, onUnlock }) {
     <div className="bg-white rounded-xl shadow p-4 space-y-2">
       <div className="font-bold text-gray-800">💵 Settle &amp; lock</div>
       <div className="flex justify-between text-sm"><span className="text-gray-500">Salary this month</span><span className="text-gray-800">{rupee(salaryThisMonth)}</span></div>
+      {pfCut > 0 && <div className="flex justify-between text-sm"><span className="text-gray-500">− PF (into his PF account)</span><span className="text-indigo-700">{rupee(pfCut)}</span></div>}
       {advCut > 0 && <div className="flex justify-between text-sm"><span className="text-gray-500">− Advance (full)</span><span className="text-amber-700">{rupee(advCut)}</span></div>}
       {opening !== 0 && <div className="flex justify-between text-sm"><span className="text-gray-500">Carried balance</span><span className={opening > 0 ? 'text-red-700' : 'text-green-700'}>{opening > 0 ? '+' : ''}{rupee(opening)} {opening > 0 ? '(owed to him)' : '(he owes)'}</span></div>}
       <div className="flex justify-between text-base font-bold border-t pt-1"><span>{payable >= 0 ? 'Payable now' : 'He owes'}</span><span className={payable >= 0 ? 'text-red-700' : 'text-green-700'}>{rupee(Math.abs(payable))}</span></div>
-      <div className="grid grid-cols-2 gap-2 pt-1">
+      <div className="grid grid-cols-3 gap-2 pt-1">
+        <label className="text-xs text-gray-500">PF ₹<input type="number" min="0" placeholder="0" value={pfV} disabled={!!busy} onChange={(e) => setPfV(e.target.value)}
+          onBlur={() => { if (pfDirty && onSetPf) onSetPf(pfTyped); }}
+          className="mt-0.5 w-full border-2 border-indigo-400 rounded-lg px-2 py-2 text-base font-bold text-gray-800" /></label>
         <label className="text-xs text-gray-500">Cash paid ₹<input type="number" value={cash} onChange={(e) => setCash(e.target.value)} className="mt-0.5 w-full border rounded-lg px-2 py-2 text-base font-bold text-gray-800" /></label>
         <label className="text-xs text-gray-500">Account paid ₹<input type="number" value={account} onChange={(e) => setAccount(e.target.value)} className="mt-0.5 w-full border rounded-lg px-2 py-2 text-base font-bold text-gray-800" /></label>
       </div>
       <p className="text-xs text-gray-600">{paid > 0 ? `Paying ${rupee(paid)} → ` : 'Paying nothing → '}balance <b className={closing >= 0 ? 'text-red-700' : 'text-green-700'}>{closing >= 0 ? '+' : ''}{rupee(closing)}</b> {closing >= 0 ? 'stays owed to him' : 'he owes us'}, carries to next month.</p>
-      <button disabled={!!busy} onClick={() => onLock(Number(cash) || 0, Number(account) || 0, `Salary lock`)}
+      {pfRec && <p className="text-[11px] text-indigo-700">PF deposited for him this month: his 12% {rupee(pfRec.ee)} + company 12% {rupee(pfRec.er)} = <b>{rupee(Number(pfRec.ee || 0) + Number(pfRec.er || 0))}</b></p>}
+      {pfDirty && <p className="text-[11px] text-amber-700">PF {rupee(pfTyped)} is not saved yet — tap outside the PF box, check "Payable now", then lock.</p>}
+      <button disabled={!!busy} onClick={() => { if (pfDirty) { if (onSetPf) onSetPf(pfTyped); return; } onLock(Number(cash) || 0, Number(account) || 0, `Salary lock${pfSaved > 0 ? ` · PF ₹${pfSaved}` : ''}`); }}
         className="w-full bg-green-700 text-white rounded-xl py-3 font-semibold disabled:opacity-50">🔒 Lock month</button>
     </div>
   );

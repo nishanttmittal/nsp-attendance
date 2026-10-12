@@ -119,7 +119,7 @@ function OwnerSalary({ user }) {
   // Settle & lock a month. Supports a SPLIT payment (part cash + part account together) and an
   // optional owner-granted BONUS DAY (+1 day's pay) ticked right in the pay sheet. Nothing is
   // auto-applied — the owner sets cash, account, and the bonus tick before locking.
-  async function doFastLock(r, cash, account, bonusDay) {
+  async function doFastLock(r, cash, account, bonusDay, pf) {
     const code = r.emp.code;
     setBusy(code);
     try {
@@ -128,13 +128,21 @@ function OwnerSalary({ user }) {
       const bonusAdd = bonusDay ? perDay : 0;
       const cashN = Number(cash) || 0;
       const acctN = Number(account) || 0;
-      const payable = Math.round(((pay.payable || 0) + bonusAdd) * 100) / 100;
+      // PF typed in the pay sheet (owner 2026-10-12: "no separate column for pf in settle and lock").
+      // It is the month's PF cut (months[mk].pfCut): saved on the month first, then the payable is
+      // reduced by the CHANGE vs what the engine already cut — so PF is never taken twice.
+      const pfWas = Number(pay.pfCut || 0);
+      const pfN = pf == null ? pfWas : Math.max(0, Math.round(Number(pf) || 0));
+      const pfDelta = pfN - pfWas;
+      if (pfDelta !== 0) await saveMonth(code, mk, { pfCut: pfN });
+      const payable = Math.round(((pay.payable || 0) - pfDelta + bonusAdd) * 100) / 100;
       // bonus day is baked into THIS payment's snapshot only (payable + breakdown), never into the
       // stored month — so an Undo returns the worker to clean pay with no lingering bonus.
-      const breakdown = bonusDay
-        ? { ...paymentBreakdown(pay), bonus: Math.round(((pay.bonus || 0) + perDay) * 100) / 100, net: Math.round(((pay.net || 0) + perDay) * 100) / 100 }
-        : paymentBreakdown(pay);
-      const args = { cash: cashN, account: acctN, payable, advanceCarry: pay.advanceBalanceCarried, reason: `Salary ${mk}${bonusDay ? ' +bonus day' : ''}` };
+      const bd0 = paymentBreakdown(pay);
+      const breakdown = { ...bd0, pfCut: pfN,
+        bonus: bonusDay ? Math.round(((pay.bonus || 0) + perDay) * 100) / 100 : bd0.bonus,
+        net: Math.round(((pay.net || 0) - pfDelta + bonusAdd) * 100) / 100 };
+      const args = { cash: cashN, account: acctN, payable, advanceCarry: pay.advanceBalanceCarried, reason: `Salary ${mk}${bonusDay ? ' +bonus day' : ''}${pfN > 0 ? ` · PF ₹${pfN}` : ''}` };
       const res = await lockMonthDirect(code, mk, { ...args, breakdown }, user.email);   // instant freeze + carry
       // A later month is already paid — its opening balance is baked into its frozen payment, so
       // locking this one would desync the chain. Skip the queue too (the robot would redo it).
@@ -157,7 +165,7 @@ function OwnerSalary({ user }) {
     if (isLoader(r.emp)) { alert(`${r.emp.name} is a loader — pay him from the 🚚 Loading hisab tab (cleared-till dates), not here.`); return; }
     const bonus = !!r.pay.perfectEligible && !(r.pay.perfectBonus > 0) && (r.pay.perDay || 0) > 0;
     const full = String(Math.max(0, Math.round(((r.pay.payable || 0) + (bonus ? r.pay.perDay : 0)) * 100) / 100));
-    setPayC({ r, cash: mode === 'account' ? '0' : full, account: mode === 'account' ? full : '0', bonusDay: bonus });
+    setPayC({ r, cash: mode === 'account' ? '0' : full, account: mode === 'account' ? full : '0', bonusDay: bonus, pf: r.pay.pfCut ? String(r.pay.pfCut) : '' });
   };
   // Undo a just-paid worker (mis-tap): instant unlock + refresh just that row.
   async function undoPay(r) {
@@ -403,12 +411,25 @@ function QuickPeek({ r, review, mk, onPay, onFull, onCut, onBonus, onClose }) {
 
 // Settle & lock sheet. Owner can SPLIT one payment across Cash + Account (both fields at once) and
 // tick a BONUS DAY (+1 day's pay) on top. Amount fields are front-and-centre, above the Pay button.
-function FastPaySheet({ payC, busy, onChange, onCancel, onConfirm }) {
-  const { r, cash, account, bonusDay } = payC;
+function FastPaySheet({ payC, mk, busy, onChange, onCancel, onConfirm }) {
+  const { r, cash, account, bonusDay, pf } = payC;
   const pay = r.pay;
   const perDay = Number(pay.perDay || 0);
   const basePayable = pay.payable || 0;
-  const effPayable = Math.round((basePayable + (bonusDay ? perDay : 0)) * 100) / 100;   // payable incl. bonus day
+  // PF box: basePayable already has the saved PF cut (pay.pfCut) taken off — add it back to show the
+  // amount BEFORE PF, then take off whatever is typed now.
+  const pfWas = Number(pay.pfCut || 0);
+  const pfN = Math.max(0, Math.round(Number(pf) || 0));
+  const beforePf = Math.round((basePayable + pfWas + (bonusDay ? perDay : 0)) * 100) / 100;
+  const effPayable = Math.round((beforePf - pfN) * 100) / 100;   // payable incl. bonus day, after PF
+  const pfRec = r.emp.pf && mk ? r.emp.pf[mk] : null;            // PF deposited for him this month (consultant's sheet)
+  const setPf = (v) => {
+    const nv = Math.max(0, Math.round(Number(v) || 0));
+    const bump = pfN - nv;                                       // PF up → pay less, PF down → pay more
+    const cN = Number(cash) || 0, aN = Number(account) || 0;
+    if (cN === 0 && aN > 0) onChange({ ...payC, pf: v, account: String(Math.max(0, Math.round((aN + bump) * 100) / 100)) });
+    else onChange({ ...payC, pf: v, cash: String(Math.max(0, Math.round((cN + bump) * 100) / 100)) });
+  };
   const owes = effPayable < 0;
   const cashN = Number(cash) || 0;
   const acctN = Number(account) || 0;
@@ -419,7 +440,7 @@ function FastPaySheet({ payC, busy, onChange, onCancel, onConfirm }) {
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-5 space-y-3" onClick={(e) => e.stopPropagation()}>
         <div className="text-center">
           <p className="font-bold text-slate-900 text-xl">{r.emp.name || r.emp.code}</p>
-          <p className="text-xs text-slate-500 mt-0.5">Payable {rupee(Math.abs(effPayable))}{owes ? ' — he owes us' : ''}{bonusDay ? ` · incl. +${rupee(perDay)} bonus` : ''}</p>
+          <p className="text-xs text-slate-500 mt-0.5">Payable {rupee(Math.abs(effPayable))}{owes ? ' — he owes us' : ''}{bonusDay ? ` · incl. +${rupee(perDay)} bonus` : ''}{pfN > 0 ? ` · after PF ${rupee(pfN)} (before PF ${rupee(beforePf)})` : ''}</p>
         </div>
 
         {/* BONUS DAY — tick on top; adds one day's pay and bumps the pay field to cover it.
@@ -447,8 +468,12 @@ function FastPaySheet({ payC, busy, onChange, onCancel, onConfirm }) {
           </label>
         )}
 
-        {/* SPLIT — Cash + Account, both editable at once */}
-        <div className="grid grid-cols-2 gap-2">
+        {/* SPLIT — PF + Cash + Account, all editable at once. PF is not handed over: it goes to his PF account. */}
+        <div className="grid grid-cols-3 gap-2">
+          <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide text-center">🏛 PF ₹
+            <input type="number" inputMode="numeric" min="0" placeholder="0" value={pf ?? ''} disabled={busy} onChange={(e) => setPf(e.target.value)} onFocus={(e) => e.target.select()}
+              className="mt-1 w-full border-2 border-indigo-500 rounded-xl px-2 py-3 text-2xl font-bold text-slate-900 text-center focus:outline-none focus:ring-2 focus:ring-indigo-300" />
+          </label>
           <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide text-center">💵 Cash ₹
             <input type="number" inputMode="numeric" autoFocus value={cash} onChange={(e) => onChange({ ...payC, cash: e.target.value })} onFocus={(e) => e.target.select()}
               className="mt-1 w-full border-2 border-emerald-600 rounded-xl px-2 py-3 text-2xl font-bold text-slate-900 text-center focus:outline-none focus:ring-2 focus:ring-emerald-400" />
@@ -459,11 +484,12 @@ function FastPaySheet({ payC, busy, onChange, onCancel, onConfirm }) {
           </label>
         </div>
 
+        {pfRec && <p className="text-[11px] text-center text-indigo-700">PF deposited for him this month: his 12% {rupee(pfRec.ee)} + company 12% {rupee(pfRec.er)} = <b>{rupee(Number(pfRec.ee || 0) + Number(pfRec.er || 0))}</b></p>}
         <p className="text-xs text-center text-slate-600">
-          Paying now <b className="text-slate-900">{rupee(total)}</b> · Balance <b className={closing >= 0 ? 'text-rose-600' : 'text-emerald-700'}>{closing >= 0 ? '+' : ''}{rupee(closing)}</b> {closing >= 0 ? 'stays owed to him' : 'he owes us'} → carries next month.
+          {pfN > 0 ? <>PF <b className="text-indigo-700">{rupee(pfN)}</b> · </> : null}Paying now <b className="text-slate-900">{rupee(total)}</b> · Balance <b className={closing >= 0 ? 'text-rose-600' : 'text-emerald-700'}>{closing >= 0 ? '+' : ''}{rupee(closing)}</b> {closing >= 0 ? 'stays owed to him' : 'he owes us'} → carries next month.
         </p>
 
-        <button disabled={busy} onClick={() => onConfirm(r, cashN, acctN, !!bonusDay)}
+        <button disabled={busy} onClick={() => onConfirm(r, cashN, acctN, !!bonusDay, pfN)}
           className="w-full bg-emerald-600 text-white rounded-2xl py-4 text-lg font-bold shadow-lg shadow-emerald-300 disabled:opacity-50 disabled:shadow-none active:bg-emerald-700 active:scale-95 transition-all">
           {busy ? 'Paying…' : `Pay ${rupee(total)} & lock`}
         </button>
