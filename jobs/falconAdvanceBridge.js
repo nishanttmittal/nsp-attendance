@@ -39,7 +39,7 @@ function resolveTarget(advFor, roster, welders) {
     const named = STAFF_OF[r.code] && welders.includes(STAFF_OF[r.code]) ? [STAFF_OF[r.code]] : null;
     const boss = named || welders.filter(w => norm(r.name).split(' ').includes(norm(w)));
     if (!boss.length) return null;   // a welder with no contractor in his name (rakesh singh welder …) is the factory's own man → Attendance
-    return boss.length === 1 ? { target: 'welder', name: boss[0], staff: r.name } : { target: 'none', why: `${r.name}: do thekedar ke naam hain — owner dekhe` };
+    return boss.length === 1 ? { target: 'welder', name: boss[0], staff: r.name, staffCode: r.code } : { target: 'none', why: `${r.name}: do thekedar ke naam hain — owner dekhe` };
   };
   const byCode = code ? roster.find(r => r.code === code && r.active !== false) : null;
   // a welding contractor picked from the list (roster row written by falconRoster.js with `welder`) → his Welder-app
@@ -133,7 +133,9 @@ async function run({ dry = false } = {}) {
   const first = (x) => norm(x).split(' ')[0] || '';
   const selfNamesOf = Object.fromEntries(users.docs.map(d => [d.id, [d.data().name, ...(d.data().selfNames || [])].map(first).filter(Boolean)]));
   const isOwnAdvance = (e, t) => roleOfUser[e.by] === 'spender' && (
-    (t.target === 'attendance' && !!selfCodeOf[e.by] && t.code === selfCodeOf[e.by])
+    // his own Attendance code, whichever way the line is routed (a contractor's man goes to the Welder app and
+    // carries his code as staffCode — the check must not depend on the target: commit security review 13-10-2026)
+    (!!selfCodeOf[e.by] && (t.code === selfCodeOf[e.by] || t.staffCode === selfCodeOf[e.by]))
     || ((!selfCodeOf[e.by] || !(e.advFor && e.advFor.code)) && (selfNamesOf[e.by] || []).includes(first(e.advFor && e.advFor.name))));
   const roleOfUser = Object.fromEntries(users.docs.map(d => [d.id, d.data().active === true ? d.data().role : '']));
   // (owner 09-10-2026 23:24: Anshul ji may pass it too — the OK must come from staff, never from the worker himself)
@@ -219,9 +221,9 @@ async function run({ dry = false } = {}) {
       }
       out.flagged++; continue;
     }
-    if (t.target === 'attendance' && selfCodeOf[e.by] && t.code === selfCodeOf[e.by] && roleOfUser[e.by] === 'spender' && !isOwner(e.approvedBy || '')) {
+    if (selfCodeOf[e.by] && (t.code === selfCodeOf[e.by] || t.staffCode === selfCodeOf[e.by]) && roleOfUser[e.by] === 'spender' && !isOwner(e.approvedBy || '')) {
       if (!dry && !e.advPush) {
-        await d.ref.update({ advPush: { target: 'attendance', code: t.code, name: t.name, status: 'self-needs-owner', error: 'Khud ka advance — Nishant ji / Anshul ji pass karenge', at: now } });
+        await d.ref.update({ advPush: { target: t.target, code: t.code || t.staffCode || '', name: t.name || '', status: 'self-needs-owner', error: 'Khud ka advance — Nishant ji / Anshul ji pass karenge', at: now } });
         await sendTech(`Falcon: ₹${e.amount} ${esc(e.advFor?.name || e.detail)} (${esc(who)}, ${e.date}) — khud ka advance, staff ke OK ke bina Attendance mein nahi gaya`).catch((x) => console.error('tech alert failed:', x.message));
       }
       out.flagged++; continue;
