@@ -438,6 +438,19 @@ function FastPaySheet({ payC, mk, busy, onChange, onCancel, onConfirm }) {
     if (cN === 0 && aN > 0) onChange({ ...payC, pf: v, account: String(Math.max(0, Math.round((aN + bump) * 100) / 100)) });
     else onChange({ ...payC, pf: v, cash: String(Math.max(0, Math.round((cN + bump) * 100) / 100)) });
   };
+  // PAY SLIP ON THE PAY SHEET (owner 2026-10-12: "while paying salary i must see days overtime total
+  // salary and advance and after that net salary ... because people ask for gross salary and i have to
+  // return to their page"). Display only — every figure comes from the same `pay` the amount uses; any
+  // part not itemised lands in "Other" so the lines always add up to Net salary.
+  const n = (v) => Number(v || 0);
+  const isDaily = r.emp.type === 'daily';
+  const daysShown = isDaily ? (pay.equivalentDays ?? pay.presentDays) : (pay.paidDays ?? pay.presentDays);
+  const extras = Math.round((n(pay.perfectBonus) + n(pay.bonus) + n(pay.gracePay) + n(pay.restoreSaturdayPay) + (bonusDay ? perDay : 0)) * 100) / 100;
+  const gross = Math.round((n(pay.base) + n(pay.otPay) + extras) * 100) / 100;
+  const advCut = n(pay.advanceRecovered);
+  const otherCuts = Math.round((n(pay.fines) + n(pay.latePenalty) + n(pay.weeklyOffDock) + n(pay.loanInstallment)) * 100) / 100;
+  const opening = n(pay.openingBalance);
+  const other = Math.round((beforePf - (gross - advCut - otherCuts + opening)) * 100) / 100;
   const owes = effPayable < 0;
   const cashN = Number(cash) || 0;
   const acctN = Number(account) || 0;
@@ -445,10 +458,22 @@ function FastPaySheet({ payC, mk, busy, onChange, onCancel, onConfirm }) {
   const closing = Math.round((effPayable - total) * 100) / 100;
   return (
     <div className="fixed inset-0 z-50 bg-black/40 flex items-end sm:items-center justify-center p-4" onClick={() => busy ? null : onCancel()}>
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-5 space-y-3" onClick={(e) => e.stopPropagation()}>
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-5 space-y-3 max-h-[92vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="text-center">
           <p className="font-bold text-slate-900 text-xl">{r.emp.name || r.emp.code}</p>
-          <p className="text-xs text-slate-500 mt-0.5">Payable {rupee(Math.abs(effPayable))}{owes ? ' — he owes us' : ''}{bonusDay ? ` · incl. +${rupee(perDay)} bonus` : ''}{pfN > 0 ? ` · after PF ${rupee(pfN)} (before PF ${rupee(beforePf)})` : ''}</p>
+          <p className="text-xs text-slate-500 mt-0.5">Rate {rupee(pay.effectiveRate || 0)}{isDaily ? '/day' : '/month'}{owes ? ' — he owes us' : ''}</p>
+        </div>
+
+        <div className="rounded-xl border border-slate-200 text-sm divide-y divide-slate-100">
+          <div className="flex justify-between px-3 py-1.5"><span className="text-slate-600">Days <b className="text-slate-900">{daysShown}</b>{!isDaily && pay.presentDays != null ? <span className="text-[11px] text-slate-400"> (present {pay.presentDays})</span> : null}</span><b className="text-slate-900">{rupee(n(pay.base))}</b></div>
+          <div className="flex justify-between px-3 py-1.5"><span className="text-slate-600">Overtime <b className="text-slate-900">{n(pay.otHrsNet)} h</b></span><b className="text-slate-900">{rupee(n(pay.otPay))}</b></div>
+          {extras > 0 && <div className="flex justify-between px-3 py-1.5"><span className="text-slate-600">Bonus / allowance</span><b className="text-slate-900">{rupee(extras)}</b></div>}
+          <div className="flex justify-between px-3 py-2 bg-slate-50"><span className="font-bold text-slate-900">Total salary</span><b className="text-slate-900 text-base">{rupee(gross)}</b></div>
+          <div className="flex justify-between px-3 py-1.5"><span className="text-slate-600">Advance</span><b className="text-rose-600">− {rupee(advCut)}</b></div>
+          {otherCuts > 0 && <div className="flex justify-between px-3 py-1.5"><span className="text-slate-600">Fine / cut</span><b className="text-rose-600">− {rupee(otherCuts)}</b></div>}
+          {Math.abs(opening) >= 0.5 && <div className="flex justify-between px-3 py-1.5"><span className="text-slate-600">Last month balance</span><b className={opening < 0 ? 'text-rose-600' : 'text-emerald-700'}>{opening < 0 ? '− ' : '+ '}{rupee(Math.abs(opening))}</b></div>}
+          {Math.abs(other) >= 0.5 && <div className="flex justify-between px-3 py-1.5"><span className="text-slate-600">Other</span><b className={other < 0 ? 'text-rose-600' : 'text-emerald-700'}>{other < 0 ? '− ' : '+ '}{rupee(Math.abs(other))}</b></div>}
+          <div className="flex justify-between px-3 py-2 bg-emerald-50 rounded-b-xl"><span className="font-bold text-emerald-900">Net salary</span><b className="text-emerald-900 text-lg">{owes && beforePf < 0 ? '− ' : ''}{rupee(Math.abs(beforePf))}</b></div>
         </div>
 
         {/* BONUS DAY — tick on top; adds one day's pay and bumps the pay field to cover it.
