@@ -30,7 +30,13 @@ export function computePay({ emp, att, daysInMonth, elapsedDays, fullMonth, adva
   if (monthStart && toDate) {
     let start = monthStart, end = toDate;
     if (emp.joinDate) { const j = new Date(emp.joinDate); if (j > start) start = j; }
-    if (emp.exitDate) { const x = new Date(emp.exitDate); if (x < end) end = x; }
+    // REJOINED worker (fix 2026-10-12, virender welder: left 13-Aug, back 01-Sep as a contract welder):
+    // the old exit date clamped every later month to 0 days, so his attendance showed "0d". From the
+    // rejoin date onward he is employed again — count from rejoinDate and ignore the earlier exitDate.
+    const rj = emp.rejoinDate ? new Date(emp.rejoinDate) : null;
+    const rejoined = !!rj && end >= rj && (!emp.exitDate || rj > new Date(emp.exitDate));
+    if (rejoined) { if (rj > start) start = rj; }
+    else if (emp.exitDate) { const x = new Date(emp.exitDate); if (x < end) end = x; }
     effElapsed = Math.max(0, Math.round((end - start) / DAY) + 1);
   }
   // Owner rule (2026-06-14): a Saturday WORKED in a week that didn't earn the weekly-off
