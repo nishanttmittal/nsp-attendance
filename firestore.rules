@@ -264,10 +264,13 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
     match /apps/welder/adjustments/{id}     { allow read: if wUser(); allow write: if wOwner(); }
     // pay-sensitive: staff BLOCKED — manager/owner only
     match /apps/welder/rates/{id}        { allow read: if wManager(); allow write: if wOwner(); }
-    match /apps/welder/ledger/{id}       { allow read: if wManager(); allow write: if wOwner();
-      // the ONE ledger row a manager may add: the advance of a pending Welder-inbox item, same welder, same amount,
-      // id fixed to that item (so never twice), and only in the commit that marks the item accepted (owner 11-10-2026)
-      allow create: if wManager() && wInboxRow(id);
+    match /apps/welder/ledger/{id}       { allow read: if wManager(); allow update, delete: if wOwner();
+      // An "accept from the inbox" row (createdBy 'Hisab→Accept') is the advance of a pending Welder-inbox item: same
+      // welder, same amount, id fixed to that item (so never twice), only in the commit that marks the item accepted.
+      // That holds for the OWNER too (final review 12-10-2026: an owner phone on an old Welder build wrote the row
+      // under a random id first, so an item already accepted elsewhere could be added a second time). Any other
+      // ledger row stays the owner's to write; a manager may add only the accept row (owner 11-10-2026).
+      allow create: if (wOwner() && request.resource.data.get('createdBy', '') != 'Hisab→Accept') || (wManager() && wInboxRow(id));
     }
     match /apps/welder/settlements/{id}  { allow read: if wManager(); allow write: if wOwner(); }
     match /apps/welder/payments/{id} {
@@ -495,7 +498,11 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
       // second phone still showing an item that was already accepted must not be able to accept it into the ledger again)
       allow update: if nonAnon() && bootstrapOwner()
         && (request.resource.data.status != 'accepted' || resource.data.status == 'pending'
-          || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['status', 'acceptedAt', 'acceptedBy']));
+          || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['status', 'acceptedAt', 'acceptedBy']))
+        // a WELDER item turns 'accepted' only together with its own ledger row 'hx_<id>' — for the owner as well, so an
+        // old Welder build (row under a random id, then this update) can neither double-add nor accept without a row
+        && (resource.data.get('target', '') != 'welder' || request.resource.data.status != 'accepted' || resource.data.status == 'accepted'
+          || existsAfter(/databases/$(database)/documents/apps/welder/ledger/$('hx_' + id)));
       // Welder MANAGER (owner 11-10-2026 "b": Anshul ji may accept incoming advances in the Welder app): sees and settles
       // WELDER-target items only. Accept is valid only together with that item's own ledger row ('hx_' + id, created
       // in the same commit — see wInboxRow); dismiss needs nothing else. Salary-target items stay owner-only.
