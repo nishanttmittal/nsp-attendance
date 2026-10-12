@@ -134,13 +134,16 @@ async function run({ dry = false } = {}) {
   const selfNamesOf = Object.fromEntries(users.docs.map(d => [d.id, [d.data().name, ...(d.data().selfNames || [])].map(first).filter(Boolean)]));
   // Whose advance is it? Decided from what the line RESOLVED to, not from the code the phone wrote on it (commit security
   // review 13-10-2026: a junk code on the line switched the name check off while the name still routed the money):
-  //  · resolved to a worker (Attendance code, or a contractor's man → staffCode) → own if that is his own code;
-  //  · resolved to nobody in particular (typed name, contractor route, unmatched) or he has no selfCode on file →
-  //    own if the first name is one of his own names.
+  //  · resolved to his own code (Attendance code, or a contractor's man → staffCode) → own;
   const isOwnAdvance = (e, t) => {
     if (roleOfUser[e.by] !== 'spender') return false;
     const who = t.code || t.staffCode || '', mine = selfCodeOf[e.by] || '';
-    if (mine && who) return who === mine;
+    if (mine && who === mine) return true;
+    // "not his own" is accepted only for a real LIST PICK of another worker (the code on the line is the very worker the
+    // line resolved to) by someone whose own code is on file. Everything else — a typed name, even one that happened to
+    // resolve to another worker of the same first name — still gets the first-name check, as before (fail closed).
+    const picked = !!(e.advFor && e.advFor.code) && e.advFor.code === who;
+    if (mine && picked) return false;
     return (selfNamesOf[e.by] || []).includes(first(e.advFor && e.advFor.name));
   };
   const roleOfUser = Object.fromEntries(users.docs.map(d => [d.id, d.data().active === true ? d.data().role : '']));
