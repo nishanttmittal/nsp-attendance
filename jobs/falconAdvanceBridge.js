@@ -15,6 +15,7 @@
 //   node jobs/falconAdvanceBridge.js --dry   → shows what it would do
 const { db } = require('./lib/firestore');
 const { handle } = require('./worker');
+const { FieldValue } = require('firebase-admin/firestore');
 const { sendTech } = require('./lib/notify').channel('advance');
 
 const WELD = /weld|वेल्ड/i;
@@ -55,6 +56,9 @@ async function claim(f, ref, target, same) {
   return f.runTransaction(async (tx) => {
     const cur = (await tx.get(ref)).data();
     if (!cur || cur.status !== 'active' || cur.hisab != null || cur.approval !== 'ok' || !same(cur)) return false;
+    // the owner pressed "Attendance mein daal diya" after this run read the list → it is done by hand, post nothing
+    // (Codex final review 12-10-2026: the claim did not look at advStatus)
+    if (cur.kind === 'adv' && cur.advStatus !== 'pending') return false;
     const p = cur.advPush;
     if (p && p.status !== 'posting') return false;
     // resuming an earlier claim: it must be the SAME claim — same target, same worker, same money, same date. If the
@@ -154,17 +158,41 @@ async function run({ dry = false } = {}) {
       else out.waiting++;
       continue;
     }
-    if (push && push.status !== 'posting') { out.waiting++; continue; } // flagged / rejected earlier — the owner handles it by hand
     const who = nameOf[e.by] || e.by;
     const t = resolveTarget(e.advFor, roster, welders);
+    // 'unmatched' = nothing was posted, only the name was not found. Once the name is corrected ("Entry badlo") and now
+    // resolves, the flag is taken off and the line goes through the normal path below (Codex final review 12-10-2026:
+    // such a line stayed stuck for ever). Every other flag means a posting may have happened → the owner handles it.
+    if (push && push.status === 'unmatched' && t.target !== 'none' && e.approval === 'ok' && !dry) {
+      const freed = await f.runTransaction(async (tx) => {
+        const c = (await tx.get(d.ref)).data();
+        if (!c || c.status !== 'active' || c.hisab != null || c.kind !== 'adv' || c.advStatus !== 'pending' || !c.advPush || c.advPush.status !== 'unmatched'
+          || (c.advFor?.name || '') !== (e.advFor?.name || '') || (c.advFor?.code || '') !== (e.advFor?.code || '')) return false;
+        tx.update(d.ref, { advPush: FieldValue.delete() });
+        return true;
+      });
+      if (!freed) { out.waiting++; continue; }
+      delete e.advPush;
+    } else if (push && push.status !== 'posting') { out.waiting++; continue; } // flagged / rejected earlier — the owner handles it by hand
+    const fresh = !e.advPush;   // no flag on the line (never handled, or just freed above)
     if (e.approval !== 'ok') {
       // Still waiting for the OK. If this is the worker's OWN advance and the phone did not mark it (a name typed in a
       // way the app did not recognise, or an altered app), mark it here so whoever passes it sees the red "Khud ka adv"
       // (Codex review 11-10-2026). Only the mark is written — no money, no approval.
-      if (!dry && !push && e.selfAdv !== true && isOwnAdvance(e, t)) {
+      if (!dry && fresh && e.selfAdv !== true && isOwnAdvance(e, t)) {
         await d.ref.update({ selfAdv: true, selfAdvBy: 'auto:bridge' });
       }
       out.waiting++; continue;
+    }
+    // passed, but it is the worker's OWN advance and the line never carried the red "Khud ka adv" mark (an old or altered
+    // app, passed before this job could mark it): whoever passed it did not see what it was → nothing is posted, the
+    // owner decides (Codex final review 12-10-2026)
+    if (fresh && e.selfAdv !== true && isOwnAdvance(e, t)) {
+      if (!dry) {
+        await d.ref.update({ selfAdv: true, selfAdvBy: 'auto:bridge', advPush: { target: t.target === 'attendance' ? 'attendance' : 'none', code: t.code || '', name: t.name || '', status: 'self-needs-owner', error: 'Khud ka advance bina nishaan ke pass hua — Nishant ji dekhen', at: now } });
+        await sendTech(`Falcon: ₹${e.amount} ${esc(e.advFor?.name || e.detail)} (${esc(who)}, ${e.date}) — khud ka advance bina "Khud ka adv" nishaan ke pass hua, Attendance mein nahi gaya. Owner dekhe.`).catch((x) => console.error('tech alert failed:', x.message));
+      }
+      out.flagged++; continue;
     }
     if (t.target === 'attendance' && selfCodeOf[e.by] && t.code === selfCodeOf[e.by] && roleOfUser[e.by] === 'spender' && !isOwner(e.approvedBy || '')) {
       if (!dry && !e.advPush) {
@@ -181,7 +209,7 @@ async function run({ dry = false } = {}) {
     const sameAdv = (c) => c.kind === 'adv' && c.by === e.by && c.amount === e.amount && c.date === e.date && (c.advFor?.name || '') === (e.advFor?.name || '') && (c.advFor?.code || '') === (e.advFor?.code || '');
     if (t.target === 'none') {
       const cur = (await d.ref.get()).data();
-      if (!cur || cur.status !== 'active' || cur.hisab != null || cur.approval !== 'ok' || (cur.advPush && cur.advPush.status !== 'posting') || !sameAdv(cur)) { out.waiting++; continue; }
+      if (!cur || cur.status !== 'active' || cur.hisab != null || cur.approval !== 'ok' || cur.advStatus !== 'pending' || (cur.advPush && cur.advPush.status !== 'posting') || !sameAdv(cur)) { out.waiting++; continue; }
     } else if (!(await claim(f, d.ref, t.target === 'attendance' ? { target: 'attendance', code: t.code, name: t.name } : { target: 'welder', name: t.name }, sameAdv))) { out.waiting++; continue; }
     if (t.target === 'attendance') {
       // already typed into Attendance by hand (same worker, same day, same amount)? then only mark the Falcon line — no second advance
