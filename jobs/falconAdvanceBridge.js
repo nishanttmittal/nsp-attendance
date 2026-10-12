@@ -19,6 +19,9 @@ const { FieldValue } = require('firebase-admin/firestore');
 const { sendTech } = require('./lib/notify').channel('advance');
 
 const WELD = /weld|वेल्ड/i;
+// contractor's men whose Attendance name does not carry the contractor (owner 13-10-2026 00:45: "rakesh singh welder
+// and kamtaprasad welder - 1st is Naveen welder other is Jitender welder")
+const STAFF_OF = { '00000077': 'Naveen', '00000302': 'Jitender' };
 const CONTRACTOR_FROM = '2026-10-08'; // Karigar / thekedar lines are bridged from the day the tile went live, never older ones
 const norm = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
 const esc = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); // names are phone-typed → never raw in Telegram HTML
@@ -33,7 +36,8 @@ function resolveTarget(advFor, roster, welders) {
   // from the CONTRACTOR's account in the Welder app (the man's name rides in the note), never from an Attendance salary.
   const staffOf = (r) => {
     if (String(r.dept || '').toUpperCase() !== 'WELDING') return null;
-    const boss = welders.filter(w => norm(r.name).split(' ').includes(norm(w)));
+    const named = STAFF_OF[r.code] && welders.includes(STAFF_OF[r.code]) ? [STAFF_OF[r.code]] : null;
+    const boss = named || welders.filter(w => norm(r.name).split(' ').includes(norm(w)));
     if (!boss.length) return null;   // a welder with no contractor in his name (rakesh singh welder …) is the factory's own man → Attendance
     return boss.length === 1 ? { target: 'welder', name: boss[0], staff: r.name } : { target: 'none', why: `${r.name}: do thekedar ke naam hain — owner dekhe` };
   };
