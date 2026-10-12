@@ -116,6 +116,7 @@ async function sendPlain(text, topic, { wa: toWa = true } = {}) {
     if (await post(TOKEN, { chat_id, text: escapeHtml(text), parse_mode: 'HTML', disable_web_page_preview: true, ...buttonFor(topic) }, 'plain')) sent++;
   }
   if (!toWa && sent === 0) wa = await enqueueWhatsApp(text, { plain: true });
+  if (!toWa && sent === 0 && !wa) console.error('ALERT NOT DELIVERED on Telegram or WhatsApp: ' + String(text).slice(0, 200));
   return { ok: sent > 0, sent, wa };
 }
 
@@ -131,8 +132,12 @@ async function sendTelegram(text, topic, { wa: toWa = true } = {}) {
   for (const chat_id of rcpts) {
     if (await post(TOKEN, { chat_id, text, parse_mode: 'HTML', disable_web_page_preview: true, ...buttonFor(topic) }, 'notify')) sent++;
   }
-  if (!toWa && sent === 0) await enqueueWhatsApp(text);   // quiet message Telegram did not take → WhatsApp, never lost
-  return { ok: sent > 0, sent };
+  let wa;
+  if (!toWa && sent === 0) {   // quiet message Telegram did not take → WhatsApp
+    wa = await enqueueWhatsApp(text);
+    if (!wa) console.error('ALERT NOT DELIVERED on Telegram or WhatsApp: ' + String(text).slice(0, 200));
+  }
+  return { ok: sent > 0, sent, wa };
 }
 
 async function sendTelegramDocument(filePath, caption = '', topic) {

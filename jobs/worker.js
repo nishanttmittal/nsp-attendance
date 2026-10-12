@@ -210,10 +210,10 @@ async function handle(type, p) {
     const remaining = Math.max(0, due - paidSoFar);
     if (fullyPaid) {
       const extra = Math.max(0, paidSoFar - due);
-      await advBot.sendQuiet(H`💵 Paid in full: <b>${e.name || p.code}</b> ₹${paidSoFar.toLocaleString('en-IN')} (${months[p.month].payment.mode}) · ${p.month}${extra > 0 ? ` · ₹${extra.toLocaleString('en-IN')} extra → advance carried forward` : ''}${payments.length > 1 ? ` · ${payments.length} parts` : ''}${p.remark ? ` · ${p.remark}` : ''} · by ${p._by || 'manager'}`);
+      await (p._by === BOOTSTRAP_OWNER ? advBot.sendQuiet : advBot.sendTelegram)(H`💵 Paid in full: <b>${e.name || p.code}</b> ₹${paidSoFar.toLocaleString('en-IN')} (${months[p.month].payment.mode}) · ${p.month}${extra > 0 ? ` · ₹${extra.toLocaleString('en-IN')} extra → advance carried forward` : ''}${payments.length > 1 ? ` · ${payments.length} parts` : ''}${p.remark ? ` · ${p.remark}` : ''} · by ${p._by || 'manager'}`);
       return extra > 0 ? `paid in full (₹${extra} extra → advance)` : 'paid in full';
     }
-    await advBot.sendQuiet(H`💵 Part paid: <b>${e.name || p.code}</b> ₹${thisAmt.toLocaleString('en-IN')} (${p.mode || 'cash'}) · ${p.month} · ₹${remaining.toLocaleString('en-IN')} still pending${p.remark ? ` · ${p.remark}` : ''} · by ${p._by || 'manager'}`);
+    await (p._by === BOOTSTRAP_OWNER ? advBot.sendQuiet : advBot.sendTelegram)(H`💵 Part paid: <b>${e.name || p.code}</b> ₹${thisAmt.toLocaleString('en-IN')} (${p.mode || 'cash'}) · ${p.month} · ₹${remaining.toLocaleString('en-IN')} still pending${p.remark ? ` · ${p.remark}` : ''} · by ${p._by || 'manager'}`);
     return `part paid ₹${thisAmt} · ₹${remaining} pending`;
   }
   if (type === 'lock_month') {   // CASHIER settle (owner 2026-07-12): record cash+account, freeze the
