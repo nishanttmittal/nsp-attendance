@@ -37,24 +37,23 @@ async function platingLines(fdb, day) {
 // Advances + salary locks since the last digest (owner 13-10-2026: "at end of day one list of advance sent
 // to my whatsapp" — the one-by-one advance / locked alerts now go to Telegram only). An advance is listed
 // ONCE: ids already listed are remembered in att_alert_state/evening_digest, so one entered after 20:15
-// (or back-dated up to 3 days) comes in the next evening's list with its date instead of vanishing.
+// (or back-dated to any earlier day) comes in the next evening's list with its date instead of vanishing.
+// "Entered when" is read from the 13-digit time inside the advance id (adv-…-<epoch ms>-…).
 const STATE = fdb => fdb.collection('att_alert_state').doc('evening_digest');
 const istDay = iso => new Date(new Date(iso).getTime() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
 const addDays = (day, n) => new Date(Date.parse(day + 'T00:00:00Z') + n * 86400000).toISOString().slice(0, 10);
 async function moneyLines(fdb, day) {
   const st = ((await STATE(fdb).get()).data()) || {};
-  const first = !Array.isArray(st.advIds);            // first run: only today's, and remember the recent ones as already listed
+  const startedMs = st.startedAt ? Date.parse(st.startedAt) : Infinity;   // before the first run only today's dated advances are listed
   const seen = new Set(st.advIds || []);
   const since = st.lastRunAt || (day + 'T00:00:00+05:30');
-  const from = addDays(day, -3);
+  const idMs = id => Number((String(id || '').match(/(?:^|-)(\d{13})(?:-|$)/) || [])[1]) || 0;
   const s = await fdb.collection('att_salary').get();
-  const adv = [], ids = [], seed = []; let advTotal = 0, locks = 0, lockTotal = 0;
+  const adv = [], ids = []; let advTotal = 0, locks = 0, lockTotal = 0;
   s.forEach(d => { const e = d.data(); const name = (e.name || d.id).trim();
     for (const a of (e.advances || [])) {
       const ad = String(a.date || '').slice(0, 10);
-      if (first && a.id && ad >= addDays(day, -7) && ad < day) seed.push(a.id);
-      const due = ad === day ? !(a.id && seen.has(a.id)) : (!first && a.id && !seen.has(a.id) && ad >= from && ad < day);
-      if (!due) continue;
+      if ((a.id && seen.has(a.id)) || !(ad === day || idMs(a.id) > startedMs)) continue;   // today's, or entered since the list began — never twice
       adv.push(`${name} ${inr(a.amount)}${ad === day ? '' : ` (${dmy(ad)})`}`); advTotal += Number(a.amount) || 0; if (a.id) ids.push(a.id);
     }
     for (const md of Object.values(e.months || {})) {
@@ -62,7 +61,7 @@ async function moneyLines(fdb, day) {
       const pay = md.payment || {}; locks++; lockTotal += (Number(pay.net) || 0) + (Number((pay.breakdown || {}).pfCut) || 0);
     }
   });
-  return { adv, advTotal, locks, lockTotal, save: { advIds: [...(st.advIds || []), ...seed, ...ids].slice(-600), lastRunAt: new Date().toISOString(), lastDay: day } };
+  return { adv, advTotal, locks, lockTotal, save: { advIds: [...(st.advIds || []), ...ids].slice(-600), startedAt: st.startedAt || new Date().toISOString(), lastRunAt: new Date().toISOString(), lastDay: day } };
 }
 async function build(day = istToday(), out = {}) {
   const fdb = db();
