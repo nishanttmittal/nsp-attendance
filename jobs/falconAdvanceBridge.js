@@ -29,8 +29,17 @@ function resolveTarget(advFor, roster, welders) {
   // the code comes from a phone, so it is honoured only when it still names the same worker (a renamed or tampered line
   // falls back to name matching) — security review 08-10
   const byCode = code ? roster.find(r => r.code === code && r.active !== false) : null;
+  // a welding contractor picked from the list (roster row written by falconRoster.js with `welder`) → his Welder-app
+  // account, never Attendance (owner 13-10-2026 "add welder names")
+  if (byCode && byCode.welder) return norm(byCode.name) === name && welders.includes(byCode.welder) ? { target: 'welder', name: byCode.welder } : { target: 'none', why: 'welder ka naam list se dobara chuno' };
   if (byCode && norm(byCode.name) === name) return { target: 'attendance', code, name: byCode.name };
   if (!name) return { target: 'none', why: 'naam khali' };
+  // "Naveen" / "Jitender ji" typed by hand: the contractor, or the factory worker of the same first name? Money is
+  // never sent on a guess (before 13-10-2026 a bare "Naveen" matched "naveen press" and went to his salary) — the line
+  // is held and the owner is told; the pick list has both, each unmistakable.
+  const bare = name.replace(/\b(ji|bhai|sir)\b/g, ' ').replace(/\s+/g, ' ').trim().split(' ')[0];
+  const sameAsWelder = welders.find(w => norm(w) === bare);
+  if (sameAsWelder && !WELD.test(name)) return { target: 'none', why: `${sameAsWelder} welder (thekedar) ya factory ka ${sameAsWelder}? Naam list se chuno` };
   if (WELD.test(name)) {
     const w = welders.find(w => name.includes(norm(w))) || welders.find(w => name.startsWith(norm(w).slice(0, 3)));
     // Hindi names: जितेंद्र / नवीन map on the first letters of the Latin name only if the owner keeps the welder list to these two
@@ -38,7 +47,7 @@ function resolveTarget(advFor, roster, welders) {
     const pick = w || (hindi && welders.includes(hindi) ? hindi : '');
     return pick ? { target: 'welder', name: pick } : { target: 'none', why: 'welder ka naam nahi pehchana' };
   }
-  const active = roster.filter(r => r.active !== false);
+  const active = roster.filter(r => r.active !== false && !r.welder);
   const exact = active.filter(r => norm(r.name) === name);
   if (exact.length === 1) return { target: 'attendance', code: exact[0].code, name: exact[0].name };
   const prefix = active.filter(r => norm(r.name).startsWith(name + ' '));

@@ -4,6 +4,12 @@
 // Runs daily from scheduler.js (08:05) and can be run by hand: node jobs/falconRoster.js
 const { db } = require('./lib/firestore');
 
+// Welding CONTRACTORS shown in the same pick list (owner 13-10-2026 "add welder names"): tapping one sends the advance
+// to that contractor's account in the Welder app, never to Attendance. Their names are also first names of factory
+// workers (naveen press, jitender loading …), so typing them by hand is ambiguous — the list entry is not.
+const WELDER_PICKS = ['Naveen', 'Jitender'];
+const welderRow = (w) => ({ code: 'W-' + w.toUpperCase(), name: `${w} welder (thekedar)`, dept: 'WELDER THEKEDAR', active: true, welder: w });
+
 async function mirrorRoster() {
   const fdb = db();
   const src = await fdb.collection('att_salary').get();
@@ -27,6 +33,14 @@ async function mirrorRoster() {
     n++; writes++;
     if (n >= 400) await flush();
   }
+  const inWelderApp = new Set((await fdb.collection('apps').doc('welder').collection('welders').get()).docs.map(d => d.data().name));
+  for (const w of WELDER_PICKS.filter(w => inWelderApp.has(w))) {
+    const row = welderRow(w), old = have[row.code];
+    seen.add(row.code);
+    if (old && old.name === row.name && old.dept === row.dept && old.active === true && old.welder === w) continue;
+    batch.set(dst.doc(row.code), { ...row, updatedAt: new Date() });
+    n++; writes++;
+  }
   // a worker deleted from att_salary disappears from the pick list (kept as inactive, never deleted)
   for (const id of Object.keys(have)) if (!seen.has(id) && have[id].active !== false) { batch.set(dst.doc(id), { active: false, updatedAt: new Date() }, { merge: true }); n++; writes++; }
   await flush();
@@ -34,5 +48,5 @@ async function mirrorRoster() {
   return { total: src.size, active, writes };
 }
 
-module.exports = { mirrorRoster };
+module.exports = { mirrorRoster, welderRow };
 if (require.main === module) mirrorRoster().then(() => process.exit(0)).catch(e => { console.error(e.message); process.exit(1); });
