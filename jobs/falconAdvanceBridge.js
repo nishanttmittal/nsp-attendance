@@ -28,11 +28,20 @@ function resolveTarget(advFor, roster, welders) {
   const name = norm(advFor?.name), code = String(advFor?.code || '');
   // the code comes from a phone, so it is honoured only when it still names the same worker (a renamed or tampered line
   // falls back to name matching) — security review 08-10
+  // A welding contractor's own man (Attendance dept WELDING, name carries the contractor: "pradeep welder naveen"):
+  // owner 13-10-2026 "IF AMOUNT IS PAID TO WELDER STAFF IT LANDS TO WELDER APP WITH THEIR NAME AS ADVANCE" → it is cut
+  // from the CONTRACTOR's account in the Welder app (the man's name rides in the note), never from an Attendance salary.
+  const staffOf = (r) => {
+    if (String(r.dept || '').toUpperCase() !== 'WELDING') return null;
+    const boss = welders.filter(w => norm(r.name).split(' ').includes(norm(w)));
+    if (!boss.length) return null;   // a welder with no contractor in his name (rakesh singh welder …) is the factory's own man → Attendance
+    return boss.length === 1 ? { target: 'welder', name: boss[0], staff: r.name } : { target: 'none', why: `${r.name}: do thekedar ke naam hain — owner dekhe` };
+  };
   const byCode = code ? roster.find(r => r.code === code && r.active !== false) : null;
   // a welding contractor picked from the list (roster row written by falconRoster.js with `welder`) → his Welder-app
   // account, never Attendance (owner 13-10-2026 "add welder names")
   if (byCode && byCode.welder) return norm(byCode.name) === name && welders.includes(byCode.welder) ? { target: 'welder', name: byCode.welder } : { target: 'none', why: 'welder ka naam list se dobara chuno' };
-  if (byCode && norm(byCode.name) === name) return { target: 'attendance', code, name: byCode.name };
+  if (byCode && norm(byCode.name) === name) return staffOf(byCode) || { target: 'attendance', code, name: byCode.name };
   if (!name) return { target: 'none', why: 'naam khali' };
   // "Naveen" / "Jitender ji" typed by hand: the contractor, or the factory worker of the same first name? Money is
   // never sent on a guess (before 13-10-2026 a bare "Naveen" matched "naveen press" and went to his salary) — the line
@@ -49,9 +58,9 @@ function resolveTarget(advFor, roster, welders) {
   }
   const active = roster.filter(r => r.active !== false && !r.welder);
   const exact = active.filter(r => norm(r.name) === name);
-  if (exact.length === 1) return { target: 'attendance', code: exact[0].code, name: exact[0].name };
+  if (exact.length === 1) return staffOf(exact[0]) || { target: 'attendance', code: exact[0].code, name: exact[0].name };
   const prefix = active.filter(r => norm(r.name).startsWith(name + ' '));
-  if (exact.length === 0 && prefix.length === 1) return { target: 'attendance', code: prefix[0].code, name: prefix[0].name };
+  if (exact.length === 0 && prefix.length === 1) return staffOf(prefix[0]) || { target: 'attendance', code: prefix[0].code, name: prefix[0].name };
   if (exact.length + prefix.length > 1) return { target: 'none', why: `ek se zyada worker: ${[...exact, ...prefix].map(r => r.name).join(' / ')}` };
   return { target: 'none', why: 'Attendance list mein yeh naam nahi' };
 }
@@ -85,13 +94,13 @@ async function claim(f, ref, target, same) {
 
 /** One inbox doc per Falcon line, whatever happens: fixed id (two runs at once cannot both add one — Codex 11-10-2026),
  *  after first looking for a doc queued by an older build under a random id. Returns the doc id. */
-async function queueWelder(f, e, welder, who) {
+async function queueWelder(f, e, welder, who, staff = '') {
   const col = f.collection('hisab_advance_outbox');
   const prior = await col.where('falconId', '==', e.id).limit(1).get();
   if (!prior.empty) return prior.docs[0].id;
   const id = 'fx_' + e.id;
   try {
-    await col.doc(id).create({ target: 'welder', name: welder, code: '', amount: Number(e.amount), date: e.date, note: `Falcon (${who}): ${e.detail || ''}`.trim(), status: 'pending', source: 'falcon', falconId: e.id, ts: Date.now() });
+    await col.doc(id).create({ target: 'welder', name: welder, code: '', amount: Number(e.amount), date: e.date, note: (staff ? `Staff advance — ${staff} · Falcon (${who})` : `Falcon (${who}): ${e.detail || ''}`).trim(), status: 'pending', source: 'falcon', falconId: e.id, ts: Date.now() });
   } catch (x) { if (x.code !== 6 && !/already exists/i.test(x.message || '')) throw x; }
   return id;
 }
@@ -269,8 +278,8 @@ async function run({ dry = false } = {}) {
         out.pushed++;
       }
     } else if (t.target === 'welder') {
-      const refId = await queueWelder(f, e, t.name, who);
-      await d.ref.update({ advPush: { target: 'welder', name: t.name, ref: refId, status: 'queued', at: now } });
+      const refId = await queueWelder(f, e, t.name, who, t.staff || '');
+      await d.ref.update({ advPush: { target: 'welder', name: t.name, ...(t.staff ? { staff: t.staff } : {}), ref: refId, status: 'queued', at: now } });
       out.queuedWelder++;
     } else {
       await d.ref.update({ advPush: { target: 'none', status: 'unmatched', error: t.why, at: now } });
