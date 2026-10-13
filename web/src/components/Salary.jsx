@@ -48,6 +48,9 @@ function OwnerSalary({ user }) {
   const [peekCode, setPeekCode] = useState('');      // 👀 quick problem-peek sheet (owner 2026-08-12: name tap = problems only, fast pay)
   const [reviewDoc, setReviewDoc] = useState(null);  // this month's to-handle list (for the peek)
   const ctx = useMemo(() => monthCtx(mk), [mk]);
+  // Current month for the Pay & next guard. MUST stay above the early returns below: a hook placed after
+  // them changed the hook count once the list loaded and crashed the Salary tab (13-10-2026, my mistake).
+  const mkRef = useRef(mk); mkRef.current = mk;
   // manual/off-machine workers — passed to the advance card so they can be picked for advances
   const manualPeople = useMemo(() => (emps || []).filter((e) => e.manual || e.appOnly).map((e) => ({ code: e.code, name: e.name || e.code, dept: e.dept || '' })), [emps]);
 
@@ -128,7 +131,6 @@ function OwnerSalary({ user }) {
   // auto-applied — the owner sets cash, account, and the bonus tick before locking.
   // Next worker for "Pay & next": the next row BELOW this one in the list on screen that still needs
   // paying here — not settled, not just paid, not a loader (hisab tab), days entered, and something due.
-  const mkRef = useRef(mk); mkRef.current = mk;
   const nextToPay = (code) => {
     const i = visible.findIndex((x) => x.emp.code === code);
     return visible.slice(i + 1).find((x) => !isSettled(x) && !justPaid[x.emp.code] && !isLoader(x.emp) && !needsManualDays(x.emp, mk) && Number(x.pay.payable || 0) > 0) || null;
