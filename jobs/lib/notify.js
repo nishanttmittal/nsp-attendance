@@ -111,12 +111,12 @@ async function sendPlain(text, topic, { wa: toWa = true } = {}) {
   let wa = toWa ? await enqueueWhatsApp(text, { plain: true }) : undefined;   // callers that must not lose the message check this
   if (!TOKEN) { if (!toWa) wa = await enqueueWhatsApp(text, { plain: true }); console.log('[DRY plain — no token] would send:\n' + text); return { dry: true, wa }; }
   const ids = await recipients();
-  let sent = 0;
+  let sent = 0, owner = false;   // owner = the OWNER's chat took it; a manager's copy alone does not count for a quiet message
   for (const chat_id of ids) {
-    if (await post(TOKEN, { chat_id, text: escapeHtml(text), parse_mode: 'HTML', disable_web_page_preview: true, ...buttonFor(topic) }, 'plain')) sent++;
+    if (await post(TOKEN, { chat_id, text: escapeHtml(text), parse_mode: 'HTML', disable_web_page_preview: true, ...buttonFor(topic) }, 'plain')) { sent++; if (String(chat_id) === String(CHAT_ID)) owner = true; }
   }
-  if (!toWa && sent === 0) wa = await enqueueWhatsApp(text, { plain: true });
-  if (!toWa && sent === 0 && !wa) console.error('ALERT NOT DELIVERED on Telegram or WhatsApp: ' + String(text).slice(0, 200));
+  if (!toWa && !owner) wa = await enqueueWhatsApp(text, { plain: true });
+  if (!toWa && !owner && !wa) console.error('ALERT NOT DELIVERED on Telegram or WhatsApp: ' + String(text).slice(0, 200));
   return { ok: sent > 0, sent, wa };
 }
 
@@ -128,12 +128,12 @@ async function sendTelegram(text, topic, { wa: toWa = true } = {}) {
   if (!rcpts.length) { if (!toWa) await enqueueWhatsApp(text); console.log('[DRY notify — no chat id] would send:\n' + text); return { dry: true }; }
   // Never throws and never hangs (20 s limit): a Telegram outage must not mark a job failed AFTER its
   // pay / advance / attendance write already succeeded — that led to retries that repeated or dropped the alert.
-  let sent = 0;
+  let sent = 0, owner = false;
   for (const chat_id of rcpts) {
-    if (await post(TOKEN, { chat_id, text, parse_mode: 'HTML', disable_web_page_preview: true, ...buttonFor(topic) }, 'notify')) sent++;
+    if (await post(TOKEN, { chat_id, text, parse_mode: 'HTML', disable_web_page_preview: true, ...buttonFor(topic) }, 'notify')) { sent++; if (String(chat_id) === String(CHAT_ID)) owner = true; }
   }
   let wa;
-  if (!toWa && sent === 0) {   // quiet message Telegram did not take → WhatsApp
+  if (!toWa && !owner) {   // quiet message Telegram did not take → WhatsApp
     wa = await enqueueWhatsApp(text);
     if (!wa) console.error('ALERT NOT DELIVERED on Telegram or WhatsApp: ' + String(text).slice(0, 200));
   }
