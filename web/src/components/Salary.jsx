@@ -497,17 +497,17 @@ function FastPaySheet({ payC, mk, busy, hasNext, onChange, onCancel, onConfirm }
         </div>
 
         <div className="rounded-xl border border-slate-200 text-sm divide-y divide-slate-100">
-          <div className="flex justify-between px-3 py-1.5"><span className="text-slate-600">Days <b className="text-slate-900">{daysShown}</b>{!isDaily && pay.presentDays != null ? <span className="text-[11px] text-slate-400"> (present {pay.presentDays})</span> : null}</span><b className="text-slate-900">{rupee(n(pay.base))}</b></div>
-          <div className="flex justify-between px-3 py-1.5"><span className="text-slate-600">Overtime <b className="text-slate-900">{n(pay.otHrsNet)} h</b></span><b className="text-slate-900">{rupee(n(pay.otPay))}</b></div>
-          {extras > 0 && <div className="flex justify-between px-3 py-1.5"><span className="text-slate-600">Bonus / allowance</span><b className="text-slate-900">{rupee(extras)}</b></div>}
+          <div className="flex justify-between px-3 py-1"><span className="text-slate-600">Days <b className="text-slate-900">{daysShown}</b>{!isDaily && pay.presentDays != null ? <span className="text-[11px] text-slate-400"> (present {pay.presentDays})</span> : null}</span><b className="text-slate-900">{rupee(n(pay.base))}</b></div>
+          <div className="flex justify-between px-3 py-1"><span className="text-slate-600">Overtime <b className="text-slate-900">{n(pay.otHrsNet)} h</b></span><b className="text-slate-900">{rupee(n(pay.otPay))}</b></div>
+          {extras > 0 && <div className="flex justify-between px-3 py-1"><span className="text-slate-600">Bonus / allowance</span><b className="text-slate-900">{rupee(extras)}</b></div>}
           <div className="flex justify-between px-3 py-2 bg-slate-50"><span className="font-bold text-slate-900">Total salary</span><b className="text-slate-900 text-base">{rupee(gross)}</b></div>
-          <div className="flex justify-between px-3 py-1.5"><span className="text-slate-600">Advance</span><b className="text-rose-600">− {rupee(advCut)}</b></div>
-          {otherCuts > 0 && <div className="flex justify-between px-3 py-1.5"><span className="text-slate-600">Fine / cut</span><b className="text-rose-600">− {rupee(otherCuts)}</b></div>}
-          {Math.abs(opening) >= 0.5 && <div className="flex justify-between px-3 py-1.5"><span className="text-slate-600">Last month balance</span><b className={opening < 0 ? 'text-rose-600' : 'text-emerald-700'}>{opening < 0 ? '− ' : '+ '}{rupee(Math.abs(opening))}</b></div>}
-          {Math.abs(other) >= 0.5 && <div className="flex justify-between px-3 py-1.5"><span className="text-slate-600">Other</span><b className={other < 0 ? 'text-rose-600' : 'text-emerald-700'}>{other < 0 ? '− ' : '+ '}{rupee(Math.abs(other))}</b></div>}
+          <div className="flex justify-between px-3 py-1"><span className="text-slate-600">Advance</span><b className="text-rose-600">− {rupee(advCut)}</b></div>
+          {otherCuts > 0 && <div className="flex justify-between px-3 py-1"><span className="text-slate-600">Fine / cut</span><b className="text-rose-600">− {rupee(otherCuts)}</b></div>}
+          {Math.abs(opening) >= 0.5 && <div className="flex justify-between px-3 py-1"><span className="text-slate-600">Last month balance</span><b className={opening < 0 ? 'text-rose-600' : 'text-emerald-700'}>{opening < 0 ? '− ' : '+ '}{rupee(Math.abs(opening))}</b></div>}
+          {Math.abs(other) >= 0.5 && <div className="flex justify-between px-3 py-1"><span className="text-slate-600">Other</span><b className={other < 0 ? 'text-rose-600' : 'text-emerald-700'}>{other < 0 ? '− ' : '+ '}{rupee(Math.abs(other))}</b></div>}
           {pfN > 0 ? <>
-            <div className="flex justify-between px-3 py-1.5"><span className="text-slate-600">Net salary <span className="text-[11px] text-slate-400">(before PF)</span></span><b className="text-slate-900">{beforePf < 0 ? '− ' : ''}{rupee(Math.abs(beforePf))}</b></div>
-            <div className="flex justify-between px-3 py-1.5"><span className="text-slate-600">PF <span className="text-[11px] text-slate-400">(into his PF account)</span></span><b className="text-indigo-700">− {rupee(pfN)}</b></div>
+            <div className="flex justify-between px-3 py-1"><span className="text-slate-600">Net salary <span className="text-[11px] text-slate-400">(before PF)</span></span><b className="text-slate-900">{beforePf < 0 ? '− ' : ''}{rupee(Math.abs(beforePf))}</b></div>
+            <div className="flex justify-between px-3 py-1"><span className="text-slate-600">PF <span className="text-[11px] text-slate-400">(into his PF account)</span></span><b className="text-indigo-700">− {rupee(pfN)}</b></div>
             <div className="flex justify-between px-3 py-2 bg-emerald-50 rounded-b-xl"><span className="font-bold text-emerald-900">In hand</span><b className="text-emerald-900 text-lg">{effPayable < 0 ? '− ' : ''}{rupee(Math.abs(effPayable))}</b></div>
           </> : <div className="flex justify-between px-3 py-2 bg-emerald-50 rounded-b-xl"><span className="font-bold text-emerald-900">Net salary</span><b className="text-emerald-900 text-lg">{beforePf < 0 ? '− ' : ''}{rupee(Math.abs(beforePf))}</b></div>}
         </div>
@@ -552,40 +552,44 @@ function FastPaySheet({ payC, mk, busy, hasNext, onChange, onCancel, onConfirm }
           </label>
         )}
 
+        {pfRec && <p className="text-[11px] text-center text-indigo-700">PF deposited for him this month: his 12% {rupee(pfRec.ee)} + company 12% {rupee(pfRec.er)} = <b>{rupee(Number(pfRec.ee || 0) + Number(pfRec.er || 0))}</b></p>}
+        {/* Pay buttons stay pinned to the bottom of the sheet (checked at iPhone size 2026-10-13: with the
+            slip above, the boxes and button had dropped below the screen). The slip scrolls above them. */}
+        <div className="sticky -bottom-5 -mx-5 px-5 pt-2 pb-5 bg-white border-t border-slate-100 space-y-2">
         {/* SPLIT — PF + Cash + Account, all editable at once. PF is not handed over: it goes to his PF account. */}
         <div className="grid grid-cols-3 gap-2">
           <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide text-center">🏛 PF ₹
             <input type="number" inputMode="numeric" min="0" placeholder="0" value={pf ?? ''} disabled={busy} onChange={(e) => setPf(e.target.value)} onFocus={(e) => e.target.select()}
-              className="mt-1 w-full border-2 border-indigo-500 rounded-xl px-2 py-3 text-2xl font-bold text-slate-900 text-center focus:outline-none focus:ring-2 focus:ring-indigo-300" />
+              className="mt-1 w-full border-2 border-indigo-500 rounded-xl px-1 py-3 text-xl font-bold text-slate-900 text-center focus:outline-none focus:ring-2 focus:ring-indigo-300" />
           </label>
           <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide text-center">💵 Cash ₹
             <input type="number" inputMode="numeric" autoFocus value={cash} onChange={(e) => onChange({ ...payC, cash: e.target.value })} onFocus={(e) => e.target.select()}
-              className="mt-1 w-full border-2 border-emerald-600 rounded-xl px-2 py-3 text-2xl font-bold text-slate-900 text-center focus:outline-none focus:ring-2 focus:ring-emerald-400" />
+              className="mt-1 w-full border-2 border-emerald-600 rounded-xl px-1 py-3 text-xl font-bold text-slate-900 text-center focus:outline-none focus:ring-2 focus:ring-emerald-400" />
           </label>
           <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide text-center">🏦 Account ₹
             <input type="number" inputMode="numeric" value={account} onChange={(e) => onChange({ ...payC, account: e.target.value })} onFocus={(e) => e.target.select()}
-              className="mt-1 w-full border-2 border-slate-700 rounded-xl px-2 py-3 text-2xl font-bold text-slate-900 text-center focus:outline-none focus:ring-2 focus:ring-slate-400" />
+              className="mt-1 w-full border-2 border-slate-700 rounded-xl px-1 py-3 text-xl font-bold text-slate-900 text-center focus:outline-none focus:ring-2 focus:ring-slate-400" />
           </label>
         </div>
 
-        {pfRec && <p className="text-[11px] text-center text-indigo-700">PF deposited for him this month: his 12% {rupee(pfRec.ee)} + company 12% {rupee(pfRec.er)} = <b>{rupee(Number(pfRec.ee || 0) + Number(pfRec.er || 0))}</b></p>}
         <p className="text-xs text-center text-slate-600">
           {pfN > 0 ? <>Total pay <b className="text-slate-900">{rupee(total + pfN)}</b> = PF <b className="text-indigo-700">{rupee(pfN)}</b> + </> : null}{pfN > 0 ? 'cash/bank' : 'Paying now'} <b className="text-slate-900">{rupee(total)}</b> · Balance <b className={closing >= 0 ? 'text-rose-600' : 'text-emerald-700'}>{closing >= 0 ? '+' : ''}{rupee(closing)}</b> {closing >= 0 ? 'stays owed to him' : 'he owes us'} → carries next month.
         </p>
 
         <button disabled={busy} onClick={() => onConfirm(r, cashN, acctN, !!bonusDay, pfN)}
-          className="w-full bg-emerald-600 text-white rounded-2xl py-4 text-lg font-bold shadow-lg shadow-emerald-300 disabled:opacity-50 disabled:shadow-none active:bg-emerald-700 active:scale-95 transition-all">
+          className="w-full bg-emerald-600 text-white rounded-2xl py-3 text-lg font-bold shadow-lg shadow-emerald-300 disabled:opacity-50 disabled:shadow-none active:bg-emerald-700 active:scale-95 transition-all">
           {busy ? 'Paying…' : pfN > 0 ? `Pay ${rupee(total)} + PF ${rupee(pfN)} & lock` : `Pay ${rupee(total)} & lock`}
         </button>
         {/* PAY & NEXT (owner 2026-10-12: "pay instantly") — same lock, then the next unpaid worker's sheet
             opens by itself. The plain button above still pays and closes, exactly as before. */}
         {hasNext && (
           <button disabled={busy} onClick={() => onConfirm(r, cashN, acctN, !!bonusDay, pfN, true)}
-            className="w-full bg-white border-2 border-emerald-600 text-emerald-700 rounded-2xl py-3 text-base font-bold disabled:opacity-50 active:bg-emerald-50 active:scale-95 transition-all">
+            className="w-full bg-white border-2 border-emerald-600 text-emerald-700 rounded-2xl py-2.5 text-base font-bold disabled:opacity-50 active:bg-emerald-50 active:scale-95 transition-all">
             Pay &amp; next ➜
           </button>
         )}
-        <button disabled={busy} onClick={onCancel} className="w-full text-sm text-slate-500 py-2 disabled:opacity-50">Cancel</button>
+        <button disabled={busy} onClick={onCancel} className="w-full text-sm text-slate-500 py-1 disabled:opacity-50">Cancel</button>
+        </div>
       </div>
     </div>
   );
