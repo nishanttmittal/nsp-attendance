@@ -77,6 +77,40 @@ const BATCHES = {
     { code: '00000127', name: 'kushal jitender welder', dept: 'WELDING', gender: 'Male', shift: 'GEN', type: 'monthly', amount: 16000, joinDate: '2026-09-04' },
     { code: '00000128', name: 'jenam powder',  dept: 'POWDER',  gender: 'Female', shift: 'GEN', type: 'monthly', amount: 8500,  joinDate: '2026-09-04' },
   ],
+  // Owner 2026-10-04 10:34 — eight named: "139-rijwana paravin powder-powder-female-8500 , 140-bibi
+  // rukhsar powder-powder-female-8500, 138-akhtarun nisha powder-powder-female-8500, 137-alok kumar
+  // fitting-fitting-male-10500 , 135-jundan kumar welder naveen-welder-male-17000 , 137-hardev welder
+  // naveen-welder-male-17000, 134-saujida fitting-fitting-female-8500, 133-sunil jitender welder-
+  // welder-male-17000". all eight are in this table:
+  // 136 + 137: the owner wrote 137 twice (alok kumar AND hardev) and never wrote 136, so both were
+  // held and asked. Owner 2026-10-04 10:41: "136-hardev" -> 136 = hardev, 137 = alok kumar.
+  // joinDate 136 = 30-09 (first punch 09:16-19:34); 137 has only a 19:40 enrolment in-punch on 30-09,
+  // so joinDate = the day he was named. OLD card 00000093 "hardev welder" (Rs 20,000) is NOT touched.
+  // 139 + 140 had no att_salary doc at 10:34 (the app had not pulled them yet); `gh workflow run
+  // alerts.yml -f task=sync-employees` brought both in (roster 78 -> 80) and they went in on a 2nd
+  // pass. Neither has a punch, so joinDate = the day they were named.
+  // Rs 17,000 for the three welders is the owner's stated figure — Rs 1,000 above the Rs 16,000 most
+  // Naveen/Jitender welders carry. Deliberate; do not "correct" it.
+  // joinDate = first real work day in att_punches: 133 = 25-09 (10:51-20:38, a full day), 134 = 28-09,
+  // 135 = 30-09. 138 has only a 19:32 enrolment in-punch on 01-10, so joinDate = the day she was named.
+  // 134 saujida also exists as OLD card 00000192 (Rs 8,000, Sept unsettled) — that card is NOT touched.
+  '2026-10-04': [
+    { code: '00000133', name: 'sunil jitender welder',     dept: 'WELDING', gender: 'Male',   shift: 'GEN', type: 'monthly', amount: 17000, joinDate: '2026-09-25' },
+    { code: '00000134', name: 'saujida fitting',           dept: 'FITTING', gender: 'Female', shift: 'GEN', type: 'monthly', amount: 8500,  joinDate: '2026-09-28' },
+    { code: '00000135', name: 'jundan kumar welder naveen', dept: 'WELDING', gender: 'Male',   shift: 'GEN', type: 'monthly', amount: 17000, joinDate: '2026-09-30' },
+    { code: '00000136', name: 'hardev welder naveen',      dept: 'WELDING', gender: 'Male',   shift: 'GEN', type: 'monthly', amount: 17000, joinDate: '2026-09-30' },
+    { code: '00000137', name: 'alok kumar fitting',        dept: 'FITTING', gender: 'Male',   shift: 'GEN', type: 'monthly', amount: 10500, joinDate: '2026-10-04' },
+    { code: '00000138', name: 'akhtarun nisha powder',     dept: 'POWDER',  gender: 'Female', shift: 'GEN', type: 'monthly', amount: 8500,  joinDate: '2026-10-04' },
+    { code: '00000139', name: 'rijwana paravin powder',    dept: 'POWDER',  gender: 'Female', shift: 'GEN', type: 'monthly', amount: 8500,  joinDate: '2026-10-04' },
+    { code: '00000140', name: 'bibi rukhsar powder',       dept: 'POWDER',  gender: 'Female', shift: 'GEN', type: 'monthly', amount: 8500,  joinDate: '2026-10-04' },
+  ],
+  // Owner 2026-10-15 01:23 (exact): "141-kamta prasad-male-welder jitender -salary-17000,gen".
+  // Card 00000141 had been punching since 06-10 as "00000141"/DEMO with no rate (nightly PAYROLL CONFIG
+  // warning: would be paid Rs 0). Name follows the Jitender-staff convention ("<name> jitender welder").
+  // joinDate = first real work day in att_punches: 06-10 (09:04-19:29); 09-10 has a lone 19:31 in-punch.
+  '2026-10-15': [
+    { code: '00000141', name: 'kamta prasad jitender welder', dept: 'WELDING', gender: 'Male', shift: 'GEN', type: 'monthly', amount: 17000, joinDate: '2026-10-06' },
+  ],
 };
 
 const BATCH = process.env.BATCH || Object.keys(BATCHES).sort().pop();
