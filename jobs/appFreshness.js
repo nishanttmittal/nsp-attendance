@@ -6,6 +6,7 @@ const { db } = require('./lib/firestore');
 const { sendTech: sendTelegram } = require('./lib/notify'); // tech-only since 07-10-2026 (owner: simple WhatsApp)
 
 // app → where its heartbeat lives + how many quiet days are normal before alarm.
+const PARKED_DAYS = 30;   // quiet longer than this = app not in use → no nightly alert (15-10-2026)
 const WATCH = [
   { app: 'Transport Freight', path: ['apps', 'transportfreight', 'entries'], days: 2 },
   { app: 'Welder', path: ['apps', 'welder', 'dispatches'], days: 2 },
@@ -78,8 +79,12 @@ async function payrollConfigWarnings() {
     const last = s && s.docs[0] ? s.docs[0].data().createdAt : null;
     const ageDays = last ? (now - Date.parse(last)) / 86400000 : Infinity;
     const line = `${w.app}: last entry ${last ? last.slice(0, 10) + ` (${ageDays.toFixed(1)}d ago)` : 'NONE with timestamp'}`;
-    console.log(line, ageDays > w.days ? '⚠ STALE' : 'ok');
-    if (ageDays > w.days) stale.push(`• <b>${w.app}</b> — nothing recorded for ${ageDays === Infinity ? '?' : Math.floor(ageDays)} days (limit ${w.days})`);
+    // 15-10-2026 owner: Plastic/Molding is parked ("will start using it after some time") — an app that
+    // has been quiet for > PARKED_DAYS is treated as not in use: logged, NOT alerted nightly. The watch
+    // resumes by itself the moment a new entry appears (age drops below the limit again).
+    const parked = ageDays > PARKED_DAYS;
+    console.log(line, parked ? '⏸ PARKED (no alert until it is used again)' : ageDays > w.days ? '⚠ STALE' : 'ok');
+    if (!parked && ageDays > w.days) stale.push(`• <b>${w.app}</b> — nothing recorded for ${ageDays === Infinity ? '?' : Math.floor(ageDays)} days (limit ${w.days})`);
   }
   const cfg = await payrollConfigWarnings();
   cfg.forEach(c => console.log('PAYROLL CONFIG ⚠', c.replace(/<[^>]+>/g, '')));
