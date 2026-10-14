@@ -963,7 +963,8 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
           && (role in ['owner', 'incharge'] || (o.by == me && request.time < o.createdAt + duration.value(24, 'h')))
           // an advance Attendance already holds, or one waiting in the Welder inbox, is corrected THERE first — cancelling
           // it here would refund Falcon while the salary deduction stays (review 09-10-2026)
-          && !fxAdvLocked(o)
+          // owner alone may cancel a line already sent (13-10-2026) — Falcon only, the other app is corrected there; never mid-send
+          && (!fxAdvLocked(o) || (role == 'owner' && o.get('advPush', {}).get('status', '') != 'posting'))
           && fxLastOp(o.by) == 'x:' + id)
         // owner marks an advance as entered in Attendance (no money field changes; balance untouched)
         || (role == 'owner' && o.kind == 'adv' && o.status == 'active' && o.advStatus == 'pending'
