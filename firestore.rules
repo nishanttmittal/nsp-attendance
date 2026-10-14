@@ -101,7 +101,25 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
     match /apps/platingjobwork/challans/{id} { allow read, write: if pUser(); }
     match /apps/platingjobwork/logs/{id}     { allow read, write: if pUser(); }
     match /apps/platingjobwork/meta/{id}     { allow read, write: if pUser(); }
-    match /apps/platingjobwork/incoming/{id} { allow read, write: if pUser(); }
+    match /apps/platingjobwork/incoming/{id} {
+      allow read, write: if pUser();
+      // A Welder-app login (contractor / staff) may only DROP a NEW pending item for its own welder challan — never read,
+      // change or delete one. Plating staff still Accept it there. (14-10-2026: every chrome challan Naveen / Jitender
+      // entered from their own login was refused here since 25-09 and needed a manual Re-sync.)
+      allow create: if wUser() && pFeedCreateOk(id);
+    }
+    function pFeedCreateOk(id) {
+      let r = request.resource.data;
+      return id.matches('^feed_[A-Za-z]+-[0-9]+$')
+        && r.keys().hasOnly(['id', 'status', 'date', 'party', 'gaadi', 'items', 'welderChallanNo', 'linkedChallanId', 'batchId',
+                             'sourceApp', 'destinationApp', 'parentTransactionId', 'createdAt', 'createdBy'])
+        && r.id == id && r.status == 'pending'
+        && r.welderChallanNo is string && id == 'feed_' + r.welderChallanNo
+        && r.destinationApp == 'platingjobwork'
+        && r.date is string && r.date.size() == 10 && r.date >= '2026-06-01'
+        && r.party is string && r.party.size() > 0 && r.party.size() <= 60
+        && r.items is list && r.items.size() > 0 && r.items.size() <= 50;
+    }
     match /apps/platingjobwork/users/{id}    { allow read: if pUser(); allow write: if pOwner(); }
 
     // ---- fitting role helpers ----
