@@ -485,31 +485,37 @@ async function selfHealFloor() {
   const pubToday = pubIst && pubIst.toISOString().slice(0, 10) === today;
   const pubMin = pubToday ? pubIst.getUTCHours() * 60 + pubIst.getUTCMinutes() : -1;
   if (pubToday && pubMin >= due.min) return;           // already pulled since the most recent due slot
-  // The due slot has no pull since it → GitHub cron missed it. Re-trigger (throttled 1/12min).
+  // The due slot has no pull since it → GitHub cron missed it (it fires hours late most days).
+  // 15-10-2026: the worker now PULLS THE FLOOR ITSELF (node publishState.js, same secrets + Chromium
+  // already installed by worker.yml). Before this it asked GitHub to start publish-state via
+  // DISPATCH_PAT — that token has been rejected (HTTP 401) since at least 14-10-2026, so every missed
+  // slot alerted the owner every hour and the floor tile stayed stale. No token, nothing to expire.
+  // Throttled 1/12 min; the Realtime login is serialized with the rest of this worker run.
   const ref = db().collection('att_alert_state').doc('floor_selfheal');
   const s = (await ref.get()).data() || {};
   const now = Date.now();
   const patch = {};
+  let pulled = false;
   if (now - (Date.parse(s.lastDispatch || 0) || 0) > 12 * 60 * 1000) {
-    const repo = process.env.GITHUB_REPOSITORY || 'nishanttmittal/nsp-attendance';
-    const pat = process.env.DISPATCH_PAT;
-    if (pat) {
-      try {
-        const r = await fetch(`https://api.github.com/repos/${repo}/dispatches`, {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${pat}`, Accept: 'application/vnd.github+json' },
-          body: JSON.stringify({ event_type: 'refresh_floor' }),
-        });
-        patch.lastDispatch = new Date(now).toISOString();
-        console.log(`self-heal: ${due.label} pull missing → refresh_floor dispatch HTTP ${r.status}`);
-      } catch (e) { console.error('self-heal dispatch failed:', e.message); }
-    } else { console.error('self-heal: DISPATCH_PAT missing — cannot re-trigger publish-state'); }
+    patch.lastDispatch = new Date(now).toISOString();
+    try {
+      const out = execFileSync(process.execPath, [path.join(__dirname, 'publishState.js')], {
+        timeout: 5 * 60 * 1000, env: process.env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      pulled = true;
+      patch.lastPull = new Date().toISOString();
+      console.log(`self-heal: ${due.label} pull missing → pulled the floor myself: ${String(out).trim().slice(0, 160)}`);
+    } catch (e) {
+      const err = String(e.stderr || e.message || e).trim().split('\n').slice(-1)[0].slice(0, 160);
+      patch.lastPullError = `${new Date().toISOString()} ${err}`;
+      console.error(`self-heal: ${due.label} pull missing → my own pull FAILED: ${err}`);
+    }
   }
-  // Only ping the owner if the slot has been missed for >30 min (i.e. the re-trigger isn't working —
-  // token dead / portal down), throttled to 1/hour, so a normal cron-miss self-heals silently.
-  if (nowMin - due.min > 30 && now - (Date.parse(s.lastAlert || 0) || 0) > 60 * 60 * 1000) {
+  // Only ping the owner if the slot has been missed for >30 min AND the self-pull is not working
+  // (portal down / password changed), throttled to 1/hour. A normal cron-miss now self-heals silently.
+  if (!pulled && nowMin - due.min > 30 && now - (Date.parse(s.lastAlert || 0) || 0) > 60 * 60 * 1000) {
     const last = pubAt ? new Date(pubAt + 5.5 * 3600 * 1000).toISOString().slice(11, 16) + ' IST' : 'never today';
-    await attBot.sendTech(H`⚠️ The ${due.label} floor update didn't run (last pull ${last}). Auto-retry isn't taking — check the biometric device / the app's data token.`).catch(() => {});
+    await attBot.sendTech(H`⚠️ The ${due.label} floor update didn't run (last pull ${last}). My own pull is failing too — check the biometric portal login / the device.`).catch(() => {});
     patch.lastAlert = new Date(now).toISOString();
   }
   if (Object.keys(patch).length) await ref.set(patch, { merge: true });

@@ -50,12 +50,15 @@ if (require.main === module) {
     try {
       if (MODE === 'morning') {
         const { date, list } = await yesterdayMisses(page);
-        const body = list.length ? list.map(r => `  • ${r.name} (${r.dept})`).join('\n') : '  • none 🎉';
+        // 15-10-2026 owner: an empty report is noise in the Tech digest — send only when someone is listed.
+        if (!list.length) { console.error(`[morning] yesterday ${date}: no missed punch — nothing sent`); return; }
+        const body = list.map(r => `  • ${r.name} (${r.dept})`).join('\n');
         await sendTelegram(`⏰ <b>Missed punch — ${date}</b> (single punch yesterday; review & correct)\n${body}\n\n<i>Fix via the app's manual-punch entry.</i>`);
         console.error(`[morning] yesterday ${date}: ${list.length} missed`);
       } else {
         const s = await gatherState(page);
         const list = (s.presentRows || []).filter(r => (r.inT && r.inT.trim()) && !(r.outT && r.outT.trim()));
+        if (!list.length) { console.error('[evening] nobody missing an OUT punch — nothing sent'); return; }
         await sendTelegram(composeEvening(list));
         console.error(`[evening] flagged ${list.length} of ${(s.presentRows || []).length} present`);
       }
