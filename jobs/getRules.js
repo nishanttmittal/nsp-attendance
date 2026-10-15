@@ -1,5 +1,7 @@
 // Pull the LIVE Firestore rules for the project and save them locally.
-// Writes ../firestore.rules (source of truth) + a timestamped backup in jobs/rules_backup/.
+// Writes ONLY a timestamped copy in jobs/rules_backup/ and reports whether it matches ../firestore.rules.
+// (Until 16-10-2026 it overwrote ../firestore.rules — the committed source of truth — which silently
+// discarded rules edits that were committed but not yet published. Pass --write to overwrite on purpose.)
 // Uses the firebase-admin service account — no interactive login needed.
 const fs = require('fs');
 const path = require('path');
@@ -27,9 +29,13 @@ async function main() {
   fs.mkdirSync(backupDir, { recursive: true });
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   fs.writeFileSync(path.join(backupDir, `firestore-${stamp}.rules`), content);
-  fs.writeFileSync(path.join(__dirname, '..', 'firestore.rules'), content);
+  const srcPath = path.join(__dirname, '..', 'firestore.rules');
+  const src = fs.existsSync(srcPath) ? fs.readFileSync(srcPath, 'utf8') : '';
+  const same = src === content;
+  if (process.argv.includes('--write')) fs.writeFileSync(srcPath, content);
   console.log(`Live ruleset: ${rulesetName}`);
-  console.log(`Saved -> firestore.rules  + backup rules_backup/firestore-${stamp}.rules  (${content.length} bytes)`);
+  console.log(`Saved -> rules_backup/firestore-${stamp}.rules  (${content.length} bytes)`);
+  console.log(same ? 'firestore.rules (repo) == live ✓' : (process.argv.includes('--write') ? 'firestore.rules OVERWRITTEN with live (--write)' : '⚠ firestore.rules (repo) DIFFERS from live — repo left untouched; `diff` them, publish with deployRules.js or pull with --write'));
 }
 
 if (require.main === module) main().catch(e => { console.error('ERR', e.response?.status, JSON.stringify(e.response?.data || e.message)); process.exit(1); });
