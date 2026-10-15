@@ -74,7 +74,13 @@ export function computePay({ emp, att, daysInMonth, elapsedDays, fullMonth, adva
   // punch at all had only 7-8 absents recorded, so "month − absents" would have paid them 22-23 days).
   // A worked Saturday counts as coming; the owner's days box (override) sets presentDays, so it still wins.
   const neverCame = (Number(att.presentDays || 0) + Number(att.weeklyOffPresent || 0)) <= 0;
+  // OWNER'S DAYS BOX IS LITERAL (fix 2026-10-15, the Shokin case): att.daysOverride is the figure the
+  // owner typed (set by paycalc / jobs applyOverride from md.override.days). It must pay exactly that
+  // many days — the join/exit window must NOT cap it (join 04-Sep + box 30 paid only 27 before, because
+  // effElapsed clamped to the window). The absent back-fill path below stays for every other worker.
+  const ovDays = att.daysOverride != null ? Math.max(0, Number(att.daysOverride) || 0) : null;
   const monthlyBaseDays = (att.noRecord || neverCame) ? 0  // no attendance this month (joined later / never came) -> pay 0, never a full month
+    : ovDays != null ? ovDays
     : Math.max(0, effElapsed - absentForBase - unpaidSat);
   const base = emp.type === 'daily'
     ? rate * dailyEquivDays

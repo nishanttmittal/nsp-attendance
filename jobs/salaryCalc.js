@@ -82,6 +82,9 @@ function computePay({ emp, att, daysInMonth, elapsedDays, fullMonth, advances = 
     // No attendance record for the month = joined later → pay ₹0, NEVER a silent full month
     // (owner 2026-07-10; ported from web 2026-07-28).
     : att.noRecord ? 0
+    // Owner's days box is LITERAL (2026-10-15, mirror of web payroll.js): att.daysOverride (from
+    // lib/applyOverride) pays exactly that many days — the join/exit window must not cap it.
+    : att.daysOverride != null ? perDay * Math.max(0, Number(att.daysOverride) || 0)
     : perDay * Math.max(0, effElapsed - absentForBase - unpaidSat);
   // net OT = Realtime OT (capped Working−Shift) minus late/early shortfall; can go negative.
   // Daily-wagers (owner rule 2026-07-22): FLAT daily wage only — OT hours never add pay.

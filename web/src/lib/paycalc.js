@@ -153,8 +153,10 @@ export function payFor(emp, attMap, mk, ctx, graceDelta = 0, punchDoc = null) {
     // Honor the override LITERALLY: pay exactly `ovDays` days (monthly base = perDay×ovDays, even if
     // ovDays > days-in-month → the owner can pay an extra day). absentDays is left un-floored so the
     // engine's max(0, elapsed − absent) resolves to ovDays; display paidDays = ovDays (matches pay).
+    // daysOverride (2026-10-15): tells computePay the figure is owner-typed, so a mid-month joiner/leaver
+    // is paid exactly ovDays too (the join/exit window used to cap it). KEEP IN SYNC with jobs/lib/applyOverride.js.
     effAtt = { ...effAtt,
-      presentDays: ovDays, equivalentDays: ovDays,   // equivalentDays drives daily/app-only base
+      presentDays: ovDays, equivalentDays: ovDays, daysOverride: ovDays,   // equivalentDays drives daily/app-only base
       weeklyOff: 0, weeklyOffPresent: 0, holiday: 0, unpaidWorkedSat: 0,
       absentDays: elapsed - ovDays, noRecord: false };
   }

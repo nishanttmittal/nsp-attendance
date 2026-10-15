@@ -19,9 +19,11 @@ function applyOverride(att, md, elapsedDays) {
     // Honour the override LITERALLY: pay exactly `days` days. absentDays is left un-floored so the
     // engine's max(0, elapsed − absent) resolves back to exactly that number.
     const ovDays = Number(ov.days) || 0;
+    // daysOverride (2026-10-15): marks the figure as owner-typed so salaryCalc pays exactly ovDays even
+    // when the join/exit window is shorter (mirror of paycalc.js).
     out = {
       ...out,
-      presentDays: ovDays, equivalentDays: ovDays,
+      presentDays: ovDays, equivalentDays: ovDays, daysOverride: ovDays,
       weeklyOff: 0, weeklyOffPresent: 0, holiday: 0, unpaidWorkedSat: 0,
       absentDays: (Number(elapsedDays) || 0) - ovDays,
       noRecord: false,
