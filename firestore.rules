@@ -965,7 +965,7 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
     // Contractor / Party payment / Owner personal = Anshul ji's tiles (owner 08-10-2026).
     function fxHead(h) {
       return h in ['Tea', 'Purchase Tax Free', 'Cartage', 'Petrol', 'Food', 'Loading/unloading', 'Maintanance Account', 'Factory Exp',
-        'Kaanta', 'Safai saman', 'Die / tool kaam', 'Office saman', 'Pani', 'Medical / pooja', 'Contractor', 'Party payment', 'Owner personal'];
+        'Kaanta', 'Safai saman', 'Die / tool kaam', 'Office saman', 'Pani', 'Medical / pooja', 'Loha', 'Contractor', 'Party payment', 'Owner personal'];
     }
     function fxEntryRead() { let role = fxRoleOf(); return role != '' && (resource.data.by == fxMe() || role in ['owner', 'incharge']); }
     function fxEntryCreate(id) {
