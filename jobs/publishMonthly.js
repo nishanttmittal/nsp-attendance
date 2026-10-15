@@ -56,6 +56,12 @@ async function downloadMonth(page, offset) {
       // full-month absentees → resign prompt (only for COMPLETE months)
       if (fullMonth) {
         const zero = emps.filter(e => (e.presentDays || 0) === 0);
+        // 22-09-2026: the portal returned a blank August for EVERYONE and 60+ present workers were flagged
+        // "absent the whole month". A blank month is a portal fault, never a mass resignation → skip.
+        if (emps.length && zero.length > emps.length / 2) {
+          console.log(`publishMonthly: ${label} looks BLANK on the portal (${zero.length}/${emps.length} zero) — resign prompts SKIPPED`);
+          zero.length = 0;
+        }
         const salSnap = await fdb.collection('att_salary').get();
         const sal = {}; salSnap.forEach(d => { sal[d.id] = d.data(); });
         const flagged = [];
@@ -63,6 +69,7 @@ async function downloadMonth(page, offset) {
           if (e.code === '1') continue; // the owner himself
           const s = sal[e.code];
           if (!s || s.active === false || s.appOnly) continue;
+          if (s.joinDate && String(s.joinDate).slice(0, 7) > label) continue;   // joined after this month
           const cur = s.resignPrompt;
           if (cur && cur.month === label) continue;          // already prompted/decided for this month
           await fdb.collection('att_salary').doc(e.code).set({
