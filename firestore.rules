@@ -967,6 +967,12 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
       return h in ['Tea', 'Purchase Tax Free', 'Cartage', 'Petrol', 'Food', 'Loading/unloading', 'Maintanance Account', 'Factory Exp',
         'Kaanta', 'Safai saman', 'Die / tool kaam', 'Office saman', 'Pani', 'Medical / pooja', 'Loha', 'Contractor', 'Party payment', 'Owner personal'];
     }
+    // Owner 15-10-2026: a line passed with OK is the owner's alone; a line OK at save (Anshul ji's own) locks to the owner
+    // 3 days after it was saved ("lock anshul own lines too after 3 days"). Same as passedLock in logic/falcon.js.
+    function fxStaffMayChange(o) {
+      return o.get('approvedBy', '') == ''
+        && (o.get('approval', 'pending') != 'ok' || request.time < o.createdAt + duration.value(72, 'h'));
+    }
     function fxEntryRead() { let role = fxRoleOf(); return role != '' && (resource.data.by == fxMe() || role in ['owner', 'incharge']); }
     function fxEntryCreate(id) {
       let d = request.resource.data;
@@ -1047,7 +1053,7 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
         (fxCancelOk(me, o, r)
           && (role in ['owner', 'incharge'] || (o.by == me && request.time < o.createdAt + duration.value(24, 'h')))
           // a line passed with OK: owner only (owner 15-10-2026 "ONLY BE ME")
-          && (role == 'owner' || o.get('approvedBy', '') == '')
+          && (role == 'owner' || fxStaffMayChange(o))
           // an advance Attendance already holds, or one waiting in the Welder inbox, is corrected THERE first — cancelling
           // it here would refund Falcon while the salary deduction stays (review 09-10-2026)
           // owner alone may cancel a line already sent (13-10-2026) — Falcon only, the other app is corrected there; never mid-send
@@ -1061,7 +1067,7 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
         // Anshul ji may change the NAME only (+ reason). Person and photo never change. If the amount changes, the person's
         // balance moves by the difference in the same batch (lastOp 'a:' + id). Old and first values stay on the line.
         || (role in ['owner', 'incharge'] && o.status == 'active'
-          && (role == 'owner' || o.get('approvedBy', '') == '') // passed with OK: owner only (owner 15-10-2026)
+          && (role == 'owner' || fxStaffMayChange(o)) // passed with OK, or own line older than 3 days: owner only (15-10-2026)
           && r.diff(o).affectedKeys().hasOnly(['detail', 'head', 'advFor', 'amount', 'date', 'editedBy', 'editedAt', 'editReason',
                'oldDetail', 'oldHead', 'oldAmount', 'oldDate', 'firstDetail', 'firstHead', 'firstAmount', 'firstDate'])
           && fxStr(r.detail, 120) && r.detail.size() > 0
