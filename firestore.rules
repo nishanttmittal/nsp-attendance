@@ -1046,6 +1046,8 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
         // cancel: staff any time; the spender their own line within 24 h
         (fxCancelOk(me, o, r)
           && (role in ['owner', 'incharge'] || (o.by == me && request.time < o.createdAt + duration.value(24, 'h')))
+          // a line passed with OK: owner only (owner 15-10-2026 "ONLY BE ME")
+          && (role == 'owner' || o.get('approvedBy', '') == '')
           // an advance Attendance already holds, or one waiting in the Welder inbox, is corrected THERE first — cancelling
           // it here would refund Falcon while the salary deduction stays (review 09-10-2026)
           // owner alone may cancel a line already sent (13-10-2026) — Falcon only, the other app is corrected there; never mid-send
@@ -1059,6 +1061,7 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
         // Anshul ji may change the NAME only (+ reason). Person and photo never change. If the amount changes, the person's
         // balance moves by the difference in the same batch (lastOp 'a:' + id). Old and first values stay on the line.
         || (role in ['owner', 'incharge'] && o.status == 'active'
+          && (role == 'owner' || o.get('approvedBy', '') == '') // passed with OK: owner only (owner 15-10-2026)
           && r.diff(o).affectedKeys().hasOnly(['detail', 'head', 'advFor', 'amount', 'date', 'editedBy', 'editedAt', 'editReason',
                'oldDetail', 'oldHead', 'oldAmount', 'oldDate', 'firstDetail', 'firstHead', 'firstAmount', 'firstDate'])
           && fxStr(r.detail, 120) && r.detail.size() > 0
