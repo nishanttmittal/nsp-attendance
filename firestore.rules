@@ -996,7 +996,7 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
         && (role != 'spender' || d.kind != 'adv' || d.get('selfAdv', false) == true || fxNotSelf(me, d.get('advFor', {}).get('code', '')))
         // photo compulsory for a spender: saman + bilty always; petrol / repair / other above ₹200 (same as logic/falcon.js
         // photoRequired). Anshul ji and the owner may save without one (owner 07-10-2026: "anshul need not enter photos").
-        && (role != 'spender' || !(d.kind in ['saman', 'bilty'] || (d.kind in ['petrol', 'repair', 'other'] && d.amount > 200)) || d.hasPhoto == true)
+        && (role != 'spender' || !(d.kind in ['saman', 'bilty'] || d.head == 'Loha' || (d.kind in ['petrol', 'repair', 'other'] && d.amount > 200)) || d.hasPhoto == true)
         && (d.hasPhoto == false || existsAfter(fxP('photos', id)))
         // second photo = the shop's slip, doc '<id>_s' (owner 11-10-2026); or the worker's word that no slip was given
         // the slip doc must be NEW in this very commit (never an older photo that happens to sit at that id), and no
