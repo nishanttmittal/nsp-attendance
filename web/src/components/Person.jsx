@@ -141,16 +141,23 @@ export default function Person({ code, mk, user, onBack }) {
     // to any later rule change. advanceCarry is always 0 now (advance folds fully into the balance).
     const breakdown = paymentBreakdown(pay);
     // INSTANT: write the lock directly (owner has att_salary write); it freezes + carries right away.
-    const res = await lockMonthDirect(code, mk, { cash, account, payable: pay.payable, advanceCarry: pay.advanceBalanceCarried, breakdown, reason }, user.email);
+    // recompute: the same calculation re-run on the worker document as it stands inside the lock
+    // transaction — if an advance / PF / override landed from another phone, the lock is refused.
+    const recompute = (fresh) => payFor(fresh, attMap, mk, ctx, graceDelta, punchDoc).pay.payable;
+    const res = await lockMonthDirect(code, mk, { cash, account, payable: pay.payable, advanceCarry: pay.advanceBalanceCarried, breakdown, reason, recompute }, user.email);
     // Refused because a LATER month is already paid — locking would rewrite its opening balance while
     // its payment stays frozen. Don't queue the robot either, or it would do exactly that in 5 minutes.
     if (res?.nextLocked) { alert(`Cannot lock ${mk} — ${res.nextLocked} is already paid & locked.\n\nReopen ${res.nextLocked} first, then lock ${mk}.`); return; }
     if (res?.alreadyLocked) { alert(`${mk} was already locked — nothing was saved now.`); return; }
+    if (res?.changed) { alert(`${emp.name || code}: figures changed while this page was open (screen ₹${res.changed.shown}, now ₹${res.changed.fresh}) — an advance, PF or days box was saved from another phone.\n\nNothing was saved. Go back and open the worker again.`); return; }
     // background (best-effort): the robot adds the salary-register snapshot + Telegram alert.
     queueLock(code, mk, { cash, account, payable: pay.payable, advanceCarry: pay.advanceBalanceCarried, breakdown, reason }, user.email).catch(() => {});
   });
   const doUnlock = (reason) => act(async () => {
-    await unlockMonthDirect(code, mk, reason, user.email);        // INSTANT reopen (no robot dependency)
+    const res = await unlockMonthDirect(code, mk, reason, user.email);        // INSTANT reopen (no robot dependency)
+    // Next month already paid & locked → refused (its frozen payment carries this month's balance).
+    // Don't queue the robot either — it refuses the same way, but there is nothing for it to do.
+    if (res?.nextLocked) { alert(`Agle mahine (${res.nextLocked}) ka hisab ho chuka hai — pehle use kholo.\n\nNext month ${res.nextLocked} is already paid & locked — unlock that first, then ${mk}.`); return; }
     queueUnlock(code, mk, reason, user.email).catch(() => {});    // background: register + Telegram (best-effort)
   });
   const today = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);

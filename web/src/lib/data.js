@@ -775,12 +775,15 @@ export async function unlockMonthDirect(code, month, reason, by) {
   const [y, m] = month.split('-').map(Number);
   const next = m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`;
   const months = { ...(e.months || {}) };
+  // CHRONOLOGY GUARD (2026-10-15, Codex + Grok review 12-10, owner yes 15-10): if NEXT month is already
+  // paid & locked, REFUSE. Reopening this month used to wipe its payment while next month's frozen
+  // payment still carried this month's closing balance — the two could never be reconciled. Unlock the
+  // later month first (same order rule as lockMonthDirect). Callers show the message; nothing is written.
+  const nextMd = months[next] || {};
+  if (nextMd.locked || nextMd.payment) return { nextLocked: next };
   months[month] = { ...md, locked: false, payment: null, unlockedAt: new Date().toISOString(), unlockedBy: by };
-  // Revert the carry we pushed to next month — BUT never touch next month if it's already locked
-  // (its balance is baked into its own frozen payment; overwriting would desync it). Unlock later months first.
-  if (!(months[next] || {}).locked) {
-    months[next] = { ...(months[next] || {}), openingBalance: Number(md.payment?.prevNextOpening || 0), advanceBalanceIn: Number(md.payment?.prevNextAdvance || 0) };
-  }
+  // Revert the carry we pushed to next month (next month is open — guaranteed by the guard above).
+  months[next] = { ...nextMd, openingBalance: Number(md.payment?.prevNextOpening || 0), advanceBalanceIn: Number(md.payment?.prevNextAdvance || 0) };
   const entry = { at: new Date().toISOString(), by, code, name: e.name || code, month, field: 'unlock', from: 'locked', to: 'reopened', reason: reason || '' };
   await saveEmployee(code, { months, decisions: [...(e.decisions || []), entry] });
   return { unlocked: true };
@@ -789,32 +792,62 @@ export async function unlockMonthDirect(code, month, reason, by) {
 // the balance right away (no 5-min wait). A background lock_month job then adds the register + Telegram.
 // `advanceCarry` is accepted for call-compatibility but deliberately ignored: the advance folds
 // fully into `closing` (one running account, owner 2026-07-13), so next month's advanceBalanceIn is 0.
-export async function lockMonthDirect(code, month, { cash, account, payable, breakdown, reason }, by) {
-  const e = await loadEmployee(code);
-  const md = (e.months || {})[month] || {};
-  if (md.locked) return { alreadyLocked: true };
+// `recompute(freshEmp)` (optional, 2026-10-15): the caller's own pay calculation re-run on the worker
+// document as it stands INSIDE the transaction. If it no longer gives the payable the screen showed
+// (an advance / PF / override saved from another phone in between), nothing is saved and
+// { changed: { shown, fresh } } comes back — the user re-opens the worker; a different amount is never
+// written silently. Tolerance ₹0.5 (rounding only).
+export async function lockMonthDirect(code, month, { cash, account, payable, breakdown, reason, recompute }, by) {
   const paid = Number(cash || 0) + Number(account || 0);
   const closing = Math.round((Number(payable || 0) - paid) * 100) / 100;
   const [y, m] = month.split('-').map(Number);
   const next = m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`;
-  const months = { ...(e.months || {}) };
-  // CHRONOLOGY GUARD (2026-07-31, Codex round 3). Locking writes next month's opening balance. If
-  // next month is ALREADY locked, its own payment is frozen around the old balance — overwriting it
-  // desyncs the carry chain (June re-locked after July is paid ⇒ July shows a balance its frozen
-  // payment never used). `unlockMonthDirect` has refused this since it was written; locking never
-  // did. Lock months in order; to redo an earlier month, unlock the later ones first.
-  const nextMd = months[next] || {};
-  if (nextMd.locked || nextMd.payment) return { nextLocked: next };
-  const prevNextOpening = Number(nextMd.openingBalance || 0);
-  const prevNextAdvance = Number(nextMd.advanceBalanceIn || 0);
   const date = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
-  // `breakdown` snapshots the salary figures AT LOCK so an already-paid month never re-renders under a
-  // later rule change. advanceBalanceIn is forced to 0: the advance folded fully into `closing` (one account).
-  months[month] = { ...md, locked: true, lockedAt: new Date().toISOString(),
-    payment: { cash: Number(cash || 0), account: Number(account || 0), net: paid, payable: Number(payable || 0), closing, date, mode: 'lock', prevNextOpening, prevNextAdvance, ...(breakdown ? { breakdown } : {}), by, reason: reason || '' } };
-  months[next] = { ...(months[next] || {}), openingBalance: closing, advanceBalanceIn: 0 };
-  const entry = { at: new Date().toISOString(), by, code, name: e.name || code, month, field: 'lock', from: `payable ₹${payable}`, to: `paid ₹${paid} (cash ${cash || 0}+acct ${account || 0}); carry ₹${closing}`, reason: reason || '' };
-  await saveEmployee(code, { months, decisions: [...(e.decisions || []), entry] });
+  // Builds the write from a FRESH employee document, or returns the refusal. Shared by the
+  // transaction path (live) and the local-store path (offline/dev) so both refuse identically.
+  const prepare = (e) => {
+    const md = (e.months || {})[month] || {};
+    if (md.locked || md.payment) return { refuse: { alreadyLocked: true } };
+    const months = { ...(e.months || {}) };
+    // CHRONOLOGY GUARD (2026-07-31, Codex round 3). Locking writes next month's opening balance. If
+    // next month is ALREADY locked, its own payment is frozen around the old balance — overwriting it
+    // desyncs the carry chain (June re-locked after July is paid ⇒ July shows a balance its frozen
+    // payment never used). Lock months in order; to redo an earlier month, unlock the later ones first.
+    const nextMd = months[next] || {};
+    if (nextMd.locked || nextMd.payment) return { refuse: { nextLocked: next } };
+    if (typeof recompute === 'function') {
+      const fresh = Math.round(Number(recompute(e) || 0) * 100) / 100;
+      if (Math.abs(fresh - Number(payable || 0)) > 0.5) return { refuse: { changed: { shown: Number(payable || 0), fresh } } };
+    }
+    const prevNextOpening = Number(nextMd.openingBalance || 0);
+    const prevNextAdvance = Number(nextMd.advanceBalanceIn || 0);
+    // `breakdown` snapshots the salary figures AT LOCK so an already-paid month never re-renders under a
+    // later rule change. advanceBalanceIn is forced to 0: the advance folded fully into `closing` (one account).
+    months[month] = { ...md, locked: true, lockedAt: new Date().toISOString(),
+      payment: { cash: Number(cash || 0), account: Number(account || 0), net: paid, payable: Number(payable || 0), closing, date, mode: 'lock', prevNextOpening, prevNextAdvance, ...(breakdown ? { breakdown } : {}), by, reason: reason || '' } };
+    months[next] = { ...(months[next] || {}), openingBalance: closing, advanceBalanceIn: 0 };
+    const entry = { at: new Date().toISOString(), by, code, name: e.name || code, month, field: 'lock', from: `payable ₹${payable}`, to: `paid ₹${paid} (cash ${cash || 0}+acct ${account || 0}); carry ₹${closing}`, reason: reason || '' };
+    return { patch: sanitizeEmployeePatch({ months, decisions: [...(e.decisions || []), entry] }) };
+  };
+  // TRANSACTION (2026-10-15, Codex + Grok review 12-10, owner yes 15-10). The old read-then-set let two
+  // phones lock the same month (both read "open", both wrote), and a manager's advance saved in the gap
+  // was paid out of a stale figure. The transaction re-reads the worker document, checks it is still
+  // open, re-checks the amount, and retries if anything moved under it. Same fields written as before.
+  if (isConfigured && db) {
+    const { runTransaction } = await import('firebase/firestore');
+    return runTransaction(db, async (tx) => {
+      const ref = doc(db, 'att_salary', code);
+      const snap = await tx.get(ref);
+      if (!snap.exists()) throw new Error('no employee ' + code);
+      const r = prepare(snap.data());
+      if (r.refuse) return r.refuse;
+      tx.set(ref, r.patch, { merge: true });
+      return { closing, paid };
+    });
+  }
+  const r = prepare(await loadEmployee(code));   // offline/local mode — single writer, no race to lose
+  if (r.refuse) return r.refuse;
+  await saveEmployee(code, r.patch);
   return { closing, paid };
 }
 export async function queueMarkPaid(code, month, mode, by, remark, amount, payId) {

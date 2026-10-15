@@ -283,8 +283,16 @@ async function handle(type, p) {
     const [y, m] = p.month.split('-').map(Number);
     const next = m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`;
     const months = { ...(e.months || {}) };
+    // CHRONOLOGY GUARD (2026-10-15, mirror of unlockMonthDirect): next month already paid & locked →
+    // refuse. Reopening would wipe this payment while next month's frozen payment still carries this
+    // month's closing balance. Unlock the later month first.
+    const nextMd = months[next] || {};
+    if (nextMd.locked || nextMd.payment) {
+      await advBot.sendTelegram(H`🚫 Could not reopen <b>${e.name || p.code}</b> ${p.month} — ${next} is already paid & locked. Reopen ${next} first, then ${p.month}.`).catch(() => {});
+      return `REFUSED — ${next} is already locked; unlock later months first`;
+    }
     months[p.month] = { ...md, locked: false, payment: null, unlockedAt: new Date().toISOString(), unlockedBy: p._by || 'owner' };
-    months[next] = { ...(months[next] || {}), openingBalance: Number(md.payment?.prevNextOpening || 0), advanceBalanceIn: Number(md.payment?.prevNextAdvance || 0) };
+    months[next] = { ...nextMd, openingBalance: Number(md.payment?.prevNextOpening || 0), advanceBalanceIn: Number(md.payment?.prevNextAdvance || 0) };
     const entry = { at: new Date().toISOString(), by: p._by || 'owner', code: p.code, name: e.name || p.code, month: p.month, field: 'unlock', from: 'locked', to: 'reopened', reason: p.reason || '' };
     await ref.set({ months, decisions: [...(e.decisions || []), entry] }, { merge: true });
     return `unlocked ${p.month}`;

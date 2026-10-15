@@ -167,11 +167,17 @@ function OwnerSalary({ user }) {
         bonus: bonusDay ? Math.round(((pay.bonus || 0) + perDay) * 100) / 100 : bd0.bonus,
         net: Math.round(((pay.net || 0) - pfDelta + bonusAdd) * 100) / 100 };
       const args = { cash: cashN, account: acctN, payable, advanceCarry: pay.advanceBalanceCarried, reason: `Salary ${mk}${bonusDay ? ' +bonus day' : ''}${pfN > 0 ? ` · PF ₹${pfN}` : ''}` };
-      const res = await lockMonthDirect(code, mk, { ...args, breakdown }, user.email);   // instant freeze + carry
+      // recompute: the row's own calculation re-run on the worker document inside the lock transaction.
+      // The PF just saved is already in the fresh document (so no pfDelta here); the bonus day lives only
+      // in this payment, so it is added back. Any other change (advance, days box from another phone)
+      // makes the lock refuse instead of paying a stale figure.
+      const recompute = (fresh) => (payFor(fresh, attMap, mk, ctx, 0, punches[code]).pay.payable || 0) + bonusAdd;
+      const res = await lockMonthDirect(code, mk, { ...args, breakdown, recompute }, user.email);   // instant freeze + carry
       // A later month is already paid — its opening balance is baked into its frozen payment, so
       // locking this one would desync the chain. Skip the queue too (the robot would redo it).
       if (res?.nextLocked) { alert(`Cannot lock ${mk} — ${res.nextLocked} is already paid & locked.\n\nReopen ${res.nextLocked} first, then lock ${mk}.`); return; }
       if (res?.alreadyLocked) { alert(`${mk} was already locked — nothing was saved now.`); setPayC(null); return; }
+      if (res?.changed) { alert(`${r.emp.name || code}: figures changed while the sheet was open (sheet ₹${res.changed.shown}, now ₹${res.changed.fresh}) — an advance, PF or days box was saved from another phone.\n\nNothing was saved. Close and reopen the Salary tab, then pay again.`); setPayC(null); return; }
       queueLock(code, mk, { ...args, breakdown }, user.email).catch(() => {});   // register + Telegram (snapshot rides along)
       // FAST: update ONLY this worker (1 read) instead of reloading the whole roster.
       // Pay & next keeps the (busy) sheet up until the next worker is ready, so nothing behind it —
@@ -201,7 +207,8 @@ function OwnerSalary({ user }) {
     const code = r.emp.code;
     setBusy(code);
     try {
-      await unlockMonthDirect(code, mk, 'undo', user.email);
+      const res = await unlockMonthDirect(code, mk, 'undo', user.email);
+      if (res?.nextLocked) { alert(`Agle mahine (${res.nextLocked}) ka hisab ho chuka hai — pehle use kholo.\n\nNext month ${res.nextLocked} is already paid & locked — unlock that first, then ${mk}.`); return; }
       queueUnlock(code, mk, 'undo', user.email).catch(() => {});   // cancel the queued lock_month so the robot can't re-lock it
       setJustPaid((p) => { const n = { ...p }; delete n[code]; return n; });
       const fresh = await loadEmployee(code).catch(() => null);
