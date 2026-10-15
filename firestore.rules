@@ -987,6 +987,8 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
         && d.hasPhoto is bool && fxStr(d.detail, 120) && fxStr(d.head, 40) && fxStr(d.byName, 40)
         // head is written by the phone: only the heads the tiles use (fxHead), so a tampered phone cannot invent one
         && (d.head == '' || fxHead(d.head))
+        // Loha only from 15-10-2026 (owner 15-10-2026 "loha from 15-10 only"); same date as LOHA_FROM in logic/falcon.js
+        && (d.head != 'Loha' || d.date >= '2026-10-15')
         // Anshul ji's heads are not a worker's
         && (role != 'spender' || !(d.head in ['Contractor', 'Party payment', 'Owner personal']))
         && (d.kind != 'adv' || d.advStatus == 'pending')
@@ -1078,7 +1080,8 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
           && (o.kind == 'adv'
             ? (r.get('head', '') == o.get('head', '') && r.advFor.name == r.detail && r.advFor.get('code', '') == o.advFor.get('code', ''))
             : (r.get('advFor', null) == o.get('advFor', null)
-              && (r.head == 'Suspense' || fxHead(r.head)))))
+              && (r.head == 'Suspense' || fxHead(r.head))
+              && (r.head != 'Loha' || r.date >= '2026-10-15'))))
       );
     }
     match /apps/falcon/entries/{id} {
