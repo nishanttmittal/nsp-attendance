@@ -72,13 +72,10 @@ export default function LoadingHisab({ user, readOnly = false }) {
 
   return (
     <div className="space-y-3">
-      <div className="bg-sky-50 border-2 border-sky-200 rounded-2xl p-3">
-        <div className="font-bold text-sky-900">🚚 Loading hisab — cleared till kab tak?</div>
-        <p className="text-[11px] text-sky-800 mt-0.5">
-          Each loader shows the date his account was last cleared, hours worked since (from the machine, rounded
-          per day like Anshul's slip, 10 h = 1 day), cash given since, and what is due now. {readOnly ? 'View only — the owner clears the hisab. You can give an advance.' : 'Owner-only.'}
-        </p>
-        {readOnly && asOf && <p className="text-[11px] text-sky-700 mt-0.5">Updated {new Date(asOf).toLocaleString('en-IN', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</p>}
+      {/* owner 16-10-2026 "clean it": the explainer box is gone — one line, cards first */}
+      <div className="flex items-baseline justify-between px-1">
+        <div className="font-bold text-slate-900">🚚 Loading hisab</div>
+        {readOnly && <div className="text-[11px] text-slate-500">View only{asOf ? ` · updated ${new Date(asOf).toLocaleString('en-IN', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}` : ''}</div>}
       </div>
       {err && <p className="text-sm text-rose-600 font-medium">{err}</p>}
 
@@ -152,6 +149,7 @@ function Stat({ label, value, warn, strong }) {
 
 function LoaderCard({ emp, h, readOnly, me, open, onToggle, onClear, onUndo }) {
   const casual = !!emp.appOnly;
+  const [allClears, setAllClears] = useState(false);   // past clearances: latest only unless "show all"
   return (
     <div className="bg-white rounded-2xl border-2 border-slate-200 p-3">
       <button onClick={onToggle} className="w-full text-left">
@@ -160,7 +158,7 @@ function LoaderCard({ emp, h, readOnly, me, open, onToggle, onClear, onUndo }) {
             <div className="font-bold text-slate-900 truncate">{emp.name}{emp.active === false && <span className="text-slate-400 font-normal"> · removed</span>}</div>
             <div className="text-xs text-slate-500">
               ✅ Cleared till <b className="text-slate-700">{h.last ? fmt(h.last.till) : 'never'}</b>
-              {casual ? ' · casual (not on machine)' : ` · since then ${h.daysWorked} day${h.daysWorked === 1 ? '' : 's'} · ${h.hours}h = ${dinGhante(h.hours, h.std)}`}
+              {casual ? ' · casual' : h.hours ? ` · ${dinGhante(h.hours, h.std)} since` : ' · nothing since'}
             </div>
             {h.missing > 0 && <div className="text-[11px] text-amber-700">⚠ {h.missing} day{h.missing > 1 ? 's' : ''} with a missing punch (counted 0)</div>}
           </div>
@@ -218,8 +216,11 @@ function LoaderCard({ emp, h, readOnly, me, open, onToggle, onClear, onUndo }) {
 
           {h.clears.length > 0 && (
             <div>
-              <div className="text-[10px] text-slate-400 uppercase tracking-wide">Past clearances</div>
-              {h.clears.slice().reverse().map((c, i) => (
+              <div className="flex items-center justify-between">
+                <div className="text-[10px] text-slate-400 uppercase tracking-wide">{allClears ? 'Past clearances' : 'Last clearance'}</div>
+                {h.clears.length > 1 && <button onClick={() => setAllClears((v) => !v)} className="text-[11px] text-slate-500 underline">{allClears ? 'show less' : `show all ${h.clears.length}`}</button>}
+              </div>
+              {h.clears.slice().reverse().slice(0, allClears ? undefined : 1).map((c, i) => (
                 <div key={c.id} className="flex items-center justify-between gap-2 border-t border-slate-100 py-1">
                   <span className="text-slate-600">
                     till <b>{fmt(c.till)}</b>{c.casualName ? <span className="text-slate-700"> · {c.casualName}</span> : null}{c.seed ? <span className="text-slate-400"> · opening</span>
