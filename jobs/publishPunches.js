@@ -17,7 +17,14 @@ function range(offset) {
   const first = new Date(now.getFullYear(), now.getMonth() - offset, 1);
   const lastOfMonth = new Date(now.getFullYear(), now.getMonth() - offset + 1, 0);
   const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
-  const to = offset === 0 ? yesterday : lastOfMonth;
+  // Owner 16-10-2026 ("do it"): the 21:00 run also pulls TODAY so the loading hisab can be cleared
+  // "till today" the same evening (loaders punch out by ~19:35). Before 20:30 IST we still stop at
+  // yesterday — a half-finished day would show single punches. A worker still inside at 21:00 shows
+  // as "no OUT" (0 h, flagged) until the 10:00 run completes the day (merge-set fills the OUT).
+  const istMin = (() => { const d = new Date(Date.now() + 5.5 * 3600 * 1000); return d.getUTCHours() * 60 + d.getUTCMinutes(); })();
+  const includeToday = process.env.INCLUDE_TODAY === '1' || (process.env.INCLUDE_TODAY !== '0' && istMin >= 20 * 60 + 30);
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const to = offset === 0 ? (includeToday ? today : yesterday) : lastOfMonth;
   return { first, to, label: `${first.getFullYear()}-${pad(first.getMonth() + 1)}` };
 }
 
