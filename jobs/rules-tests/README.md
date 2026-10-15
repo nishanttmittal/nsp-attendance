@@ -28,3 +28,13 @@ inactive / unrelated / anonymous users denied on read and write; owner create an
 correction allowed (including on a legacy doc with no `enteredBy`/`createdAt`); owner
 cannot change the date or delete; correction records are owner-only, require a reason,
 and are immutable afterwards.
+
+## freight-lock.rules.test.mjs — 19 cases (added 15-10-2026)
+Transport Freight settled-period lock (`tfLockedDate`, `tfEntryCreateOk/UpdateOk`, `tfAdvanceCreateOk/UpdateOk`,
+`tfTransporterUpdateOk`). `settleBatch` writes `settledThrough` on the transporter; the rules refuse any
+entry / advance / reversal dated on/before it (create, or update on its old OR new date) for manager and
+gaadiwala, allow a pending trip to be withdrawn / voided / returned on a locked date (no money moves), refuse
+pass / cancel there, keep the owner's powers unchanged, and stop a manager lowering `settledThrough`.
+Run exactly like the laser test (copy into `~/laser-rules-test`, same `firebase emulators:exec` line).
+Note: the emulator prints "evaluation error at L…" for every rule that does a `get()`/`exists()` lookup
+and then the final `false` — that is its two-phase evaluation, not a broken rule (probed 15-10-2026).

@@ -422,6 +422,79 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
     // Entry charge fields must never be negative (a negative freight would reduce
     // the payable) — the DB backstop for the app-layer dropError() check (P1-2).
     function tfNonNegMoney(d) { return d.get('freight', 0) >= 0 && d.get('lrCharge', 0) >= 0 && d.get('unloading', 0) >= 0 && d.get('misc', 0) >= 0 && d.get('extraPoint', 0) >= 0 && d.get('bags', 0) >= 0; }
+    // SETTLED-PERIOD LOCK (review 12-10-2026 gap 2). settleBatch writes `settledThrough`
+    // (yyyy-mm-dd) on the transporter; no phone may then create/move an entry, advance or
+    // reversal dated on/before it — such a write sits below the recompute cutoff, so
+    // "Recalculate" would silently erase it (money lost). One extra doc read per write.
+    // The owner keeps today's powers (admin repair paths); the app layer still holds his
+    // own queued items. A missing/blank date is left to the app's validation, not locked here.
+    function tfTransporterPath(tid) { return /databases/$(database)/documents/apps/transportfreight/transporters/$(tid); }
+    function tfSettledThrough(tid) {
+      let p = tfTransporterPath(tid);
+      return exists(p) ? get(p).data.get('settledThrough', '') : '';
+    }
+    // cheap date test first; the (costly) owner check only runs for a write that IS inside the cutoff
+    function tfLockedDate(tid, d) {
+      let cut = (tid is string && tid != '') ? tfSettledThrough(tid) : '';
+      return cut is string && cut != '' && d is string && d != '' && d <= cut;
+    }
+    // Role helpers below bind tfIsOwner() ONCE per write (`let`): every tfIsManager()/tfIsOwner()
+    // call re-walks token + users-doc lookups, and the emulator's 1000-expression cap was hit
+    // when the lock re-evaluated them (found in rules-tests/freight-lock.rules.test.mjs).
+    // One users-doc read per write: 'owner' | 'manager' | 'gaadiwala' | '' (same truth table as
+    // tfIsOwner / tfIsManager / tfIsGaadiwala). tfMyTid is read from the same doc.
+    function tfUser() { return signedIn() && tfExists() ? tfData() : {}; }
+    function tfRoleOf(u) { return bootstrapOwner() ? 'owner' : (u.get('active', false) == true ? u.get('role', '') : ''); }
+    function tfEntryCreateOk() {
+      let u = tfUser();
+      let role = tfRoleOf(u);
+      let d = request.resource.data;
+      let allowed = role == 'owner' || role == 'manager' || (role == 'gaadiwala'
+                       && d.transporterId == u.get('transporterId', '')
+                       && d.status == 'pending'
+                       && d.get('challanNo', 0) == 0
+                       && d.get('approvedBy', '') == '');
+      return allowed && tfNonNegMoney(d) && (role == 'owner' || !tfLockedDate(d.get('transporterId', ''), d.get('date', '')));
+    }
+    function tfEntryUpdateOk() {
+      let u = tfUser();
+      let role = tfRoleOf(u);
+      let o = resource.data;
+      let d = request.resource.data;
+      let allowed = role == 'owner' || role == 'manager' || (role == 'gaadiwala'
+                       && o.transporterId == u.get('transporterId', '')
+                       && d.transporterId == u.get('transporterId', '')
+                       && o.status in ['pending','needs_correction']
+                       && d.status in ['pending','needs_correction']
+                       && d.get('challanNo', 0) == 0);
+      // locked on its OLD or NEW date/transporter → only a pending-row flag change may pass
+      let locked = role != 'owner' && (tfLockedDate(o.get('transporterId', ''), o.get('date', '')) || tfLockedDate(d.get('transporterId', ''), d.get('date', '')));
+      return allowed && tfNonNegMoney(d) && (!locked || tfPendingFlagChangeOnly());
+    }
+    function tfAdvanceCreateOk() {
+      let role = tfRoleOf(tfUser());
+      let d = request.resource.data;
+      return (role == 'owner' || role == 'manager') && (role == 'owner' || !tfLockedDate(d.get('transporterId', ''), d.get('date', '')));
+    }
+    function tfAdvanceUpdateOk() {
+      let role = tfRoleOf(tfUser());
+      let o = resource.data;
+      let d = request.resource.data;
+      return (role == 'owner' || role == 'manager') && (role == 'owner' || !(tfLockedDate(o.get('transporterId', ''), o.get('date', '')) || tfLockedDate(d.get('transporterId', ''), d.get('date', ''))));
+    }
+    function tfTransporterUpdateOk() {
+      let role = tfRoleOf(tfUser());
+      return (role == 'owner' || role == 'manager') && (role == 'owner' || request.resource.data.get('settledThrough', '') >= resource.data.get('settledThrough', ''));
+    }
+    // A trip still awaiting approval carries no money, so it may be voided / returned /
+    // withdrawn (status + reason + deleted flag only) even when its date is locked — the app
+    // needs this to clear stuck pending chakkars. It may NOT be passed or cancelled.
+    function tfPendingFlagChangeOnly() {
+      return resource.data.get('status', 'passed') in ['pending', 'needs_correction']
+        && request.resource.data.get('status', 'passed') in ['pending', 'needs_correction', 'voided']
+        && request.resource.data.get('challanNo', 0) == resource.data.get('challanNo', 0)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'deleted', 'voidReason', 'correctionReason', 'cancelReason', 'approvedBy', 'approvedAt', 'challanNo', 'revision', 'updatedAt']);
+    }
 
     // Reads require a NON-anonymous (Google) login. Gaadiwala names/phones and
     // destination masters are restricted to app MEMBERS (manager/gaadiwala) — a
@@ -432,7 +505,8 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
     // Entry charge fields must be non-negative (tfNonNegMoney) so no write can
     // slip a negative freight past the app-layer block (P1-2).
     match /apps/transportfreight/users/{id}        { allow read: if tEmail() == id || tfIsManager(); allow write: if tfIsOwner(); }
-    match /apps/transportfreight/transporters/{id} { allow read: if tfIsManager() || (tfIsGaadiwala() && id == tfMyTid()); allow write: if tfIsManager(); }
+    // settledThrough may only move forward (a manager cannot unlock a settled period by lowering it).
+    match /apps/transportfreight/transporters/{id} { allow read: if tfIsManager() || (tfIsGaadiwala() && id == tfMyTid()); allow create, delete: if tfIsManager(); allow update: if tfTransporterUpdateOk(); }
     match /apps/transportfreight/destinations/{id} { allow read: if tfIsManager() || tfIsGaadiwala(); allow create: if tfIsManager() || tfIsGaadiwala(); allow update, delete: if tfIsManager(); }
     match /apps/transportfreight/meta/{id}         { allow read, write: if tfIsManager(); }
     match /apps/transportfreight/logs/{id}         { allow read: if tfIsManager(); allow create: if nonAnon(); }
@@ -444,25 +518,16 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
       allow read:   if tfIsManager() || (tfIsGaadiwala() && (resource == null || resource.data.transporterId == tfMyTid()));
       // gaadiwala may only submit HIS OWN pending trip, with no challan/approval injected.
       // Every entry write (manager or gaadiwala) must have non-negative charges (P1-2).
-      allow create: if (tfIsManager() || (tfIsGaadiwala()
-                       && request.resource.data.transporterId == tfMyTid()
-                       && request.resource.data.status == 'pending'
-                       && request.resource.data.get('challanNo', 0) == 0
-                       && request.resource.data.get('approvedBy', '') == ''))
-                       && tfNonNegMoney(request.resource.data);
-      allow update: if (tfIsManager() || (tfIsGaadiwala()
-                       && resource.data.transporterId == tfMyTid()
-                       && request.resource.data.transporterId == tfMyTid()
-                       && resource.data.status in ['pending','needs_correction']
-                       && request.resource.data.status in ['pending','needs_correction']
-                       && request.resource.data.get('challanNo', 0) == 0))
-                       && tfNonNegMoney(request.resource.data);
+      // Role conditions + non-negative money + settled-period lock live in tfEntryCreateOk /
+      // tfEntryUpdateOk above (same role logic as before 15-10-2026, plus the lock).
+      allow create: if tfEntryCreateOk();
+      allow update: if tfEntryUpdateOk();
       allow delete: if false; // financial record — never hard-deleted (cancel = status; withdraw = deleted flag via update)
     }
     match /apps/transportfreight/advances/{id} {
       allow read:   if tfIsManager() || (tfIsGaadiwala() && resource.data.transporterId == tfMyTid());
-      allow create: if tfIsManager();
-      allow update: if tfIsManager();
+      allow create: if tfAdvanceCreateOk();   // manager/owner + settled-period lock
+      allow update: if tfAdvanceUpdateOk();   // may not re-date into or out of a settled period
       allow delete: if false; // reversal = a new negative payment, never a delete
     }
     match /apps/transportfreight/settlements/{id} {
