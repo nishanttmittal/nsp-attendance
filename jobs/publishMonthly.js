@@ -38,6 +38,21 @@ async function downloadMonth(page, offset) {
       if (frozen.includes(label)) { console.log(`publishMonthly: SKIP frozen month ${label} (att_meta/freeze)`); continue; }
       // Portal punches before Sep-2026 were deleted on 07-10-2026 (owner) — a re-pull would blank these months.
       if (label < PORTAL_PURGED_BEFORE) { console.log(`publishMonthly: SKIP ${label} — portal punches purged before ${PORTAL_PURGED_BEFORE}`); continue; }
+      // BLANK-MONTH guard (owner 16-10-2026 "guard the write"): on 22-09-2026 the portal answered a blank August
+      // (0 present for everyone) and this job wrote those zeros over every worker's real August, then flagged 65
+      // present workers as full-month absentees. A month where more than half the workers are at zero is a portal
+      // fault, not attendance → write NOTHING for it, raise no prompts, tell the owner once. The next good pull
+      // writes the month as usual. (Early on the 1st of a month everyone may be 0 — skipping that run is harmless.)
+      const zeroCount = emps.filter(e => (e.presentDays || 0) === 0).length;
+      if (emps.length >= 10 && zeroCount > emps.length / 2) {
+        console.log(`publishMonthly: ${label} looks BLANK on the portal (${zeroCount}/${emps.length} zero) — month NOT written, no resign prompts`);
+        const bref = fdb.collection('att_alert_state').doc('blank_' + label + '_' + new Date().toISOString().slice(0, 10));
+        if (!(await bref.get()).exists) {
+          await sendTelegram(`⚠️ Attendance pull for <b>${label}</b> came back blank (${zeroCount} of ${emps.length} workers at 0 days). Nothing was saved — the next pull will retry.`).catch(() => {});
+          await bref.set({ at: new Date().toISOString(), zeroCount, total: emps.length });
+        }
+        continue;
+      }
       let batch = fdb.batch(), n = 0, written = 0;
       for (const e of emps) {
         const rec = {
@@ -56,8 +71,7 @@ async function downloadMonth(page, offset) {
       // full-month absentees → resign prompt (only for COMPLETE months)
       if (fullMonth) {
         const zero = emps.filter(e => (e.presentDays || 0) === 0);
-        // 22-09-2026: the portal returned a blank August for EVERYONE and 60+ present workers were flagged
-        // "absent the whole month". A blank month is a portal fault, never a mass resignation → skip.
+        // belt-and-braces: the blank-month guard above already skips such a month before anything is written
         if (emps.length && zero.length > emps.length / 2) {
           console.log(`publishMonthly: ${label} looks BLANK on the portal (${zero.length}/${emps.length} zero) — resign prompts SKIPPED`);
           zero.length = 0;
