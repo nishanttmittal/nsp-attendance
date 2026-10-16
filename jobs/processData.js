@@ -15,7 +15,7 @@ const today = `${pad(ist.getUTCDate())}/${pad(ist.getUTCMonth() + 1)}/${ist.getU
 const y = new Date(ist.getTime() - 86400000);
 const yesterday = `${pad(y.getUTCDate())}/${pad(y.getUTCMonth() + 1)}/${y.getUTCFullYear()}`;
 
-run('reprocessRange.js', { FROM: yesterday, TO: today });
+run('reprocessRange.js', { FROM: yesterday, TO: today, PULL: '1' }); // PULL: machine punches → portal first (16-10-2026)
 run('publishMonthly.js', { MONTHS: '0,1' });
 try { run('publishPunches.js', { MONTHS: '0,1' }); } catch (e) { console.error('publishPunches failed:', e.message); } // raw punches for the app-side engine (Shadow)
 try { run('missedPunchScan.js'); } catch (e) { console.error('missed scan failed:', e.message); }

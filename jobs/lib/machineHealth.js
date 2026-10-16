@@ -6,11 +6,11 @@
 //   - the machine is Offline (re-read 60 s later to skip a one-off blip), or
 //   - it is a working day and no punch has reached the portal by the morning check, or
 //   - from 20:30 the machine has morning punches but zero evening out-punches (the 15-10 case),
-// and one "back" line once it recovers. Read-only on the portal: it never changes anything.
-const { readGrid } = require('./realtime');
+// and one "back" line once it recovers. Its #Button3 click also pulls the machine's punches into the portal
+// (see deviceLog.js) — that is wanted; it changes no settings and deletes nothing.
+const { pullDeviceLog, LOG_URL } = require('./deviceLog');
 const { db } = require('./firestore');
 
-const LOG_URL = 'https://onlinerealsoft.com/ERP_AttendanceLog.aspx';
 
 function istNow() {
   const ist = new Date(Date.now() + 5.5 * 3600 * 1000);
@@ -33,37 +33,7 @@ async function readStatus(page) {
 
 // Today's punches as the portal sees them (it reads the device's memory live; 0 rows while Offline).
 async function readTodayPunches(page, dmy) {
-  page.on('dialog', d => d.accept().catch(() => {}));
-  // Changing the date / device fields can post the page back — do each step, then let it settle.
-  const settle = async () => { await page.waitForLoadState('domcontentloaded').catch(() => {}); await page.waitForTimeout(2000); };
-  for (const id of ['txtdate', 'txttodate']) {
-    await page.evaluate(([id, v]) => {
-      const el = document.getElementById(id); if (!el) return;
-      if (el._flatpickr) el._flatpickr.setDate(v, true, 'd/m/Y');
-      el.value = v; el.dispatchEvent(new Event('change', { bubbles: true }));
-    }, [id, dmy]).catch(() => {});
-    await settle();
-  }
-  await page.evaluate(() => {
-    const dl = document.getElementById('Device_List');
-    if (dl) { for (const o of dl.options) o.selected = true; dl.dispatchEvent(new Event('change', { bubbles: true })); }
-  }).catch(() => {});
-  await settle();
-  const got = await page.evaluate(() => [document.getElementById('txtdate')?.value, document.getElementById('txttodate')?.value]).catch(() => []);
-  if (got[0] !== dmy || got[1] !== dmy) throw new Error(`date fields not set (${got.join('..')}), wanted ${dmy}`);
-  // #Button3 may answer with a file download instead of a grid — swallow it, read the grid.
-  page.once('download', d => d.cancel().catch(() => {}));
-  await page.click('#Button3').catch(() => {});
-  // The page posts back (sometimes twice) before the grid shows — poll until the row count holds steady.
-  const isPunch = r => /^\d{5,}$/.test(r[0] || '') && /\d{1,2}:\d{2}/.test(r[1] || '');
-  let rows = [], prevN = -1, steady = 0;
-  for (let i = 0; i < 20 && steady < 2; i++) {
-    await page.waitForTimeout(4000);
-    const g = await readGrid(page).catch(() => null);
-    if (!g) { steady = 0; continue; }                  // mid-navigation, try again
-    rows = g.filter(isPunch);
-    steady = rows.length === prevN ? steady + 1 : 0; prevN = rows.length;
-  }
+  const rows = await pullDeviceLog(page, dmy);
   const mins = rows.map(r => {
     const m = String(r[1]).match(/(\d{1,2}):(\d{2}):\d{2}(?::\d+)?\s*(AM|PM)/i);
     if (!m) return null;
