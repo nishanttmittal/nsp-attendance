@@ -14,7 +14,9 @@ function run(file, env) {
 
 // min = IST minutes from midnight; day = weekday 0-6 (undefined = every day)
 const TASKS = [
-  { name: 'settings-guard', min: 6 * 60 + 45, run: () => run('settingsGuard.js') },               // 06:45 alert if Realtime shift/policy settings drifted (before processing!)
+  // settings-guard PAUSED 16-10-2026: SiftDetails.aspx is gone since the 02-08 portal move, so it failed
+  // 36×/day — 36 wasted portal logins daily (portal throttles at ~12). Re-enable once ported to ERP_ pages.
+  // { name: 'settings-guard', min: 6 * 60 + 45, run: () => run('settingsGuard.js') },               // 06:45 alert if Realtime shift/policy settings drifted (before processing!)
   // owner-set processing times: reprocess yesterday+today, publish current+last month, rescan punches
   { name: 'process-am', min: 10 * 60, run: () => run('processData.js') },                          // 10:00
   { name: 'process-pm', min: 17 * 60 + 40, run: () => run('processData.js') },                     // 17:40
