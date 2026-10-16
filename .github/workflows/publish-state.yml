@@ -36,6 +36,9 @@ jobs:
           REALTIME_USER: ${{ secrets.REALTIME_USER }}
           REALTIME_PASS: ${{ secrets.REALTIME_PASS }}
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}                       # machine offline alert (16-10-2026)
+          TELEGRAM_BOT_TOKEN_ATTENDANCE: ${{ secrets.TELEGRAM_BOT_TOKEN_ATTENDANCE }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       - name: Welder new-challan alert
         if: always()   # independent of floor scrape; read-only on welder data
         working-directory: jobs
