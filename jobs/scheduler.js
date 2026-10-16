@@ -6,9 +6,9 @@ const { execFileSync } = require('child_process');
 const path = require('path');
 const { db, FieldValue } = require('./lib/firestore');
 
-function run(file, env) {
+function run(file, env, ms = 280000) {
   execFileSync('node', [path.resolve(__dirname, file)], {
-    env: { ...process.env, ...env }, encoding: 'utf8', timeout: 280000, stdio: ['ignore', 'pipe', 'pipe'],
+    env: { ...process.env, ...env }, encoding: 'utf8', timeout: ms, stdio: ['ignore', 'pipe', 'pipe'],
   });
 }
 
@@ -17,10 +17,11 @@ const TASKS = [
   // settings-guard PAUSED 16-10-2026: SiftDetails.aspx is gone since the 02-08 portal move, so it failed
   // 36×/day — 36 wasted portal logins daily (portal throttles at ~12). Re-enable once ported to ERP_ pages.
   // { name: 'settings-guard', min: 6 * 60 + 45, run: () => run('settingsGuard.js') },               // 06:45 alert if Realtime shift/policy settings drifted (before processing!)
+  // processData gets 10 min (16-10-2026: the machine-pull step pushed it past 280 s → ETIMEDOUT at 21:00)
   // owner-set processing times: reprocess yesterday+today, publish current+last month, rescan punches
-  { name: 'process-am', min: 10 * 60, run: () => run('processData.js') },                          // 10:00
-  { name: 'process-pm', min: 17 * 60 + 40, run: () => run('processData.js') },                     // 17:40
-  { name: 'process-night', min: 21 * 60, run: () => run('processData.js') },                       // 21:00
+  { name: 'process-am', min: 10 * 60, run: () => run('processData.js', {}, 600000) },                          // 10:00
+  { name: 'process-pm', min: 17 * 60 + 40, run: () => run('processData.js', {}, 600000) },                     // 17:40
+  { name: 'process-night', min: 21 * 60, run: () => run('processData.js', {}, 600000) },                       // 21:00
   { name: 'long-absence', min: 9 * 60, run: () => run('longAbsence.js', { THRESHOLD: '4' }) },     // 09:00 long absence
   { name: 'morning-miss', min: 10 * 60, run: () => run('missedPunch.js', { MODE: 'morning' }) },   // 10:00 yesterday's missed punch
   { name: 'morning-summary', min: 10 * 60 + 30, run: () => run('morningDigest.js') },              // 10:30 simple digest (07-10-2026; was morningSummary.js)
