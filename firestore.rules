@@ -613,13 +613,26 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
     }
 
     // >>> POWDER BLOCK (managed by powder-coating/rules/compose.mjs — do not edit by hand)
-    // ---- Powder Coating (apps/powdercoating) — design v4.6, 21-Sep-2026 ----
-    // Roles from apps/powdercoating/users/{email}: role 'owner' | 'user1' | 'worker', active == true.
-    function pwPath() { return /databases/$(database)/documents/apps/powdercoating/users/$(tEmail()); }
-    function pwExists() { return tEmail() != '' && exists(pwPath()); }
-    function pwOwner() { return signedIn() && (bootstrapOwner() || (pwExists() && get(pwPath()).data.role == 'owner' && get(pwPath()).data.active == true)); }
-    function pwUser() { return signedIn() && (bootstrapOwner() || (pwExists() && get(pwPath()).data.active == true)); }
-    function pwRole() { return bootstrapOwner() ? 'owner' : get(pwPath()).data.get('role', 'worker'); }
+    // ---- Powder Coating (apps/powdercoating) — design v4.6, 21-Sep-2026; v5 sends + sender role 16-Oct-2026 ----
+    // Roles from apps/powdercoating/users/{email}: role 'owner' | 'user1' | 'worker' | 'sender', active == true.
+    // 16-Oct-2026: the 04-Oct gVerified() hardening made every pwEmail() call cost ~6 expressions and this block went
+    // past Firestore's 1,000-expression cap on direct receives / reversals / adjustments / acceptances (found by the
+    // emulator suite). Fix, same as Falcon 05-Oct: gVerified() ONCE at each gate (pwUser / pwStaff / pwOwner / pwSender),
+    // then the cheap pwEmail() everywhere inside; the role is read with one get(). Never use pwEmail() in an allow
+    // statement without one of those gates in front of it.
+    function pwEmail() { return request.auth.token.get('email', ''); }
+    function pwPath() { return /databases/$(database)/documents/apps/powdercoating/users/$(pwEmail()); }
+    function pwBoot() { return pwEmail() == 'nspenterprises24@gmail.com'; }
+    function pwRole() { return pwBoot() ? 'owner' : (exists(pwPath()) && get(pwPath()).data.get('active', false) == true ? get(pwPath()).data.get('role', 'worker') : ''); }
+    function pwUser() { return gVerified() && pwRole() != ''; }
+    function pwOwner() { return gVerified() && pwRole() == 'owner'; }
+    // powder STAFF = worker / user1 / owner. A 'sender' (press side) is a pwUser for reading but may never write the
+    // ledger, acceptances or day sheets — only "भेजा" slips (sends/).
+    function pwStaff() { return gVerified() && pwRole() in ['worker','user1','owner']; }
+    function pwPressPath() { return /databases/$(database)/documents/apps/press/users/$(pwEmail()); }
+    function pwPressUser() { return exists(pwPressPath()) && get(pwPressPath()).data.get('active', false) == true; }
+    function pwSender() { return gVerified() && (pwRole() in ['sender','user1','owner'] || pwPressUser()); }
+    function pwSendPath(id) { return /databases/$(database)/documents/apps/powdercoating/sends/$(id); }
     // 'YYYY-MM-DD' → the moment that day STARTS in India (00:00 IST = previous day 18:30 UTC).
     function pwDayStartIST(d) { return timestamp.date(int(d[0:4]), int(d[5:7]), int(d[8:10])) - duration.value(330, 'm'); }
     // A REAL calendar date: shape, month 01-12, day within that month's length, leap years (÷4, not ÷100 unless ÷400).
@@ -652,83 +665,114 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
     function pwMv() { return request.resource.data; }
     function pwQtyOk() { return pwMv().qty is int && pwMv().qty >= 1 && pwMv().qty <= 100000; }
     function pwBase(id) {
-      return pwMv().keys().hasOnly(['id','type','date','period','productId','productName','qty','source','welder','welderDispatchId','welderChallan','qtySent','reason','note','reverses','opId','createdBy','createdByRole','deviceId','createdAt','clientAt','schemaVersion'])
-        && pwMv().id == id
-        && pwMv().createdBy == tEmail()
-        && pwMv().createdAt == request.time
-        && pwIsDate(pwMv().date)
-        && pwMv().period == pwMv().date[0:7]
-        && pwMv().productId is string && pwMv().productId.size() > 0 && pwMv().productId.size() <= 120
-        && pwMv().productName is string && pwMv().productName.size() <= 120
-        && pwMv().opId is string && pwMv().opId.size() > 0 && pwMv().opId.size() <= 80
-        && pwMv().deviceId is string && pwMv().deviceId.size() <= 40
-        && pwMv().createdByRole in ['worker','user1','owner'] && pwMv().createdByRole == pwRole()
-        && pwMv().clientAt is string && pwMv().clientAt.size() <= 40
-        && pwMv().schemaVersion is int && pwMv().schemaVersion >= 1;
+      let m = request.resource.data;
+      return m.keys().hasOnly(['id','type','date','period','productId','productName','qty','source','welder','welderDispatchId','welderChallan','qtySent','sendId','reason','note','reverses','opId','createdBy','createdByRole','deviceId','createdAt','clientAt','schemaVersion'])
+        && m.id == id
+        && m.createdBy == pwEmail()
+        && m.createdAt == request.time
+        && pwIsDate(m.date)
+        && m.period == m.date[0:7]
+        && m.productId is string && m.productId.size() > 0 && m.productId.size() <= 120
+        && m.productName is string && m.productName.size() <= 120
+        && m.opId is string && m.opId.size() > 0 && m.opId.size() <= 80
+        && m.deviceId is string && m.deviceId.size() <= 40
+        && m.createdByRole in ['worker','user1','owner'] && m.createdByRole == pwRole()
+        && m.clientAt is string && m.clientAt.size() <= 40
+        && m.schemaVersion is int && m.schemaVersion >= 1;
     }
-    function pwIsWelderReceive() { return pwMv().type == 'receive' && 'welderDispatchId' in pwMv() && pwMv().welderDispatchId is string && pwMv().welderDispatchId != ''; }
+    function pwIsWelderReceive() { let m = request.resource.data; return m.type == 'receive' && 'welderDispatchId' in m && m.welderDispatchId is string && m.welderDispatchId != ''; }
     // direct receipt (no welder line): workers may book press / laser / other; 'welder' is NEVER a direct source;
     // pre-go-live material from a welder without an app challan is owner-only (sources naveen / jitender).
     function pwDirectSourceOk() {
-      return pwMv().source is string && pwMv().source != 'welder'
-        && (pwMv().source in ['press','laser','other'] || (pwOwner() && pwMv().source in ['naveen','jitender']));
+      let src = request.resource.data.source;
+      return src is string && src != 'welder'
+        && (src in ['press','laser','other'] || (pwRole() == 'owner' && src in ['naveen','jitender']));
     }
     // A welder receipt is only valid together with the acceptance transition written in the SAME operation:
     // the acceptance (after) points at this movement, and the movement's key fields equal the acceptance's stored snapshot.
     function pwWelderReceiveLinked(id) {
-      return existsAfter(pwAccPath(pwMv().welderDispatchId))
-        && ((id.matches('^rcv_.*') && getAfter(pwAccPath(pwMv().welderDispatchId)).data.lastOp.kind == 'receive' && getAfter(pwAccPath(pwMv().welderDispatchId)).data.lastOp.movementId == id)
-            || (id.matches('^fix_.*') && getAfter(pwAccPath(pwMv().welderDispatchId)).data.lastOp.kind == 'fix' && 'fix_' + getAfter(pwAccPath(pwMv().welderDispatchId)).data.lastOp.movementId == id))
-        && getAfter(pwAccPath(pwMv().welderDispatchId)).data.lastOp.opId == pwMv().opId
-        && pwMv().productId == getAfter(pwAccPath(pwMv().welderDispatchId)).data.productId
-        && pwMv().qtySent == getAfter(pwAccPath(pwMv().welderDispatchId)).data.snapshot.qty
-        && pwMv().welderChallan == getAfter(pwAccPath(pwMv().welderDispatchId)).data.snapshot.welderChallan
-        && pwMv().source == 'welder';
+      let m = request.resource.data;
+      let a = getAfter(pwAccPath(m.welderDispatchId)).data;
+      return existsAfter(pwAccPath(m.welderDispatchId))
+        && ((id.matches('^rcv_.*') && a.lastOp.kind == 'receive' && a.lastOp.movementId == id)
+            || (id.matches('^fix_.*') && a.lastOp.kind == 'fix' && 'fix_' + a.lastOp.movementId == id))
+        && a.lastOp.opId == m.opId
+        && m.productId == a.productId
+        && m.qtySent == a.snapshot.qty
+        && m.welderChallan == a.snapshot.welderChallan
+        && m.source == 'welder';
+    }
+    // v5: a receive that names a slip (sendId) is only valid as mv_snd_<sendId>, written in the SAME operation that
+    // turns that slip pending → received, with the slip pointing back at this movement and the counted qty equal.
+    function pwSendMvLinked(id) {
+      let m = request.resource.data;
+      let before = get(pwSendPath(m.sendId)).data;
+      let after = getAfter(pwSendPath(m.sendId)).data;
+      return m.type == 'receive' && exists(pwSendPath(m.sendId)) && existsAfter(pwSendPath(m.sendId))
+        && after.status == 'received' && after.movementId == id && after.receivedQty == m.qty && m.source == before.source
+        // first receipt: the slip flips pending → received in this operation
+        && ((id == 'mv_snd_' + m.sendId && before.status == 'pending')
+            // corrected count (Grok P1, 17-Oct): fix_<previous receipt>, with that receipt reversed in the SAME operation
+            || (id == 'fix_' + before.movementId && before.status == 'received' && id.matches('^fix_(fix_)*mv_snd_.*') && existsAfter(pwMvPath('rev_' + before.movementId))));
+    }
+    // Reversing a slip receipt must, in the same operation, take the slip out of 'received': → cancelled (receipt cancelled)
+    // or → received again pointing at a NEW fix_ movement (count corrected). A slip can never stay 'received' on a reversed receipt.
+    function pwSendRevertLinked(sid, origId) {
+      let before = get(pwSendPath(sid)).data;
+      let after = getAfter(pwSendPath(sid)).data;
+      return exists(pwSendPath(sid)) && before.status == 'received' && before.movementId == origId && existsAfter(pwSendPath(sid))
+        && (after.status == 'cancelled' || (after.status == 'received' && after.movementId == 'fix_' + origId && existsAfter(pwMvPath('fix_' + origId))));
     }
     // Worker/User1 entry types. Owner may backdate; others only within the window. Period must be open for everyone.
     function pwEntry(id) {
-      return pwMv().type in ['receive','coat_ok','rework','scrap'] && pwQtyOk()
-        && pwPeriodOpen(pwMv().period)
-        && (pwOwner() || pwRecent(pwMv().date))
-        && (pwMv().type != 'receive' || pwIsWelderReceive() || pwDirectSourceOk())
-        && (!pwIsWelderReceive() || (id.matches('^(fix_)*rcv_' + pwMv().welderDispatchId + '_[0-9]+$') && pwWelderReceiveLinked(id)))
-        && (pwMv().type != 'scrap' || (pwMv().reason is string && pwMv().reason.size() > 0));
+      let m = request.resource.data;
+      return m.type in ['receive','coat_ok','rework','scrap'] && pwQtyOk()
+        && pwPeriodOpen(m.period)
+        && (pwRole() == 'owner' || pwRecent(m.date))
+        && (m.type != 'receive' || pwIsWelderReceive() || pwDirectSourceOk())
+        && (!pwIsWelderReceive() || (id.matches('^(fix_)*rcv_' + m.welderDispatchId + '_[0-9]+$') && pwWelderReceiveLinked(id)))
+        && (id.matches('^(fix_)*mv_snd_.*') ? pwSendMvLinked(id) : m.get('sendId', '') == '')
+        && (m.type != 'scrap' || (m.reason is string && m.reason.size() > 0));
     }
     function pwOpening(id) {
-      return pwMv().type == 'opening' && pwOwner() && pwMv().qty is int && pwMv().qty >= 0 && pwMv().qty <= 1000000
-        && id == 'opn_' + pwMv().productId
-        && pwPeriodOpen(pwMv().period)
-        && exists(pwConfigPath()) && pwMv().date == pwGoLive();
+      let m = request.resource.data;
+      return m.type == 'opening' && pwRole() == 'owner' && m.qty is int && m.qty >= 0 && m.qty <= 1000000 && m.get('sendId', '') == ''
+        && id == 'opn_' + m.productId
+        && pwPeriodOpen(m.period)
+        && exists(pwConfigPath()) && m.date == pwGoLive();
     }
     // Adjustment: owner, open period, and the period doc written in the same operation must point at it as the
     // ONE effective adjustment for the product; if a previous pointer existed, that adjustment is reversed in the same write.
     function pwAdjustment(id) {
-      return pwMv().type == 'adjustment' && pwOwner() && pwPeriodOpen(pwMv().period)
-        && pwMv().qty is int && pwMv().qty != 0 && pwMv().qty >= -100000 && pwMv().qty <= 100000
-        && pwMv().reason is string && pwMv().reason.size() > 0
-        && id.matches('^adj_' + pwMv().period + '_' + pwMv().productId + '_[0-9]+$')
-        && existsAfter(pwPeriodPath(pwMv().period))
-        && getAfter(pwPeriodPath(pwMv().period)).data.effAdj[pwMv().productId] == id
-        && (!exists(pwPeriodPath(pwMv().period))
-            || !('effAdj' in get(pwPeriodPath(pwMv().period)).data)
-            || !(pwMv().productId in get(pwPeriodPath(pwMv().period)).data.effAdj)
-            || existsAfter(pwMvPath('rev_' + get(pwPeriodPath(pwMv().period)).data.effAdj[pwMv().productId]))
-            || exists(pwMvPath('rev_' + get(pwPeriodPath(pwMv().period)).data.effAdj[pwMv().productId])));
+      let m = request.resource.data;
+      return m.type == 'adjustment' && pwRole() == 'owner' && pwPeriodOpen(m.period) && m.get('sendId', '') == ''
+        && m.qty is int && m.qty != 0 && m.qty >= -100000 && m.qty <= 100000
+        && m.reason is string && m.reason.size() > 0
+        && id.matches('^adj_' + m.period + '_' + m.productId + '_[0-9]+$')
+        && existsAfter(pwPeriodPath(m.period))
+        && getAfter(pwPeriodPath(m.period)).data.effAdj[m.productId] == id
+        && (!exists(pwPeriodPath(m.period))
+            || !('effAdj' in get(pwPeriodPath(m.period)).data)
+            || !(m.productId in get(pwPeriodPath(m.period)).data.effAdj)
+            || existsAfter(pwMvPath('rev_' + get(pwPeriodPath(m.period)).data.effAdj[m.productId]))
+            || exists(pwMvPath('rev_' + get(pwPeriodPath(m.period)).data.effAdj[m.productId])));
     }
     function pwOrigPath() { return pwMvPath(request.resource.data.reverses); }
-    function pwOrig() { return get(pwOrigPath()).data; }
     // Reversal: rev_<orig>; orig exists, is not a reversal and not an opening; copies the original's
     // date/period/product/qty; the ORIGINAL's period must be open (owner reopens first, logged);
     // owner any age, else own entry within 2 days of the ORIGINAL's createdAt.
     function pwReversal(id) {
-      return pwMv().type == 'reversal' && pwMv().reverses is string && id == 'rev_' + pwMv().reverses
-        && exists(pwOrigPath()) && pwOrig().type != 'reversal' && pwOrig().type != 'opening'
-        && pwMv().productId == pwOrig().productId && pwMv().qty == pwOrig().qty
-        && pwMv().date == pwOrig().date && pwMv().period == pwOrig().period
-        && pwPeriodOpen(pwOrig().period)
-        && (pwOwner() || (pwOrig().type in ['receive','coat_ok','rework','scrap']
-            && pwOrig().createdBy == tEmail()
-            && request.time - pwOrig().createdAt <= duration.value(2, 'd')));
+      let m = request.resource.data;
+      let o = get(pwOrigPath()).data;
+      return m.type == 'reversal' && m.reverses is string && id == 'rev_' + m.reverses && m.get('sendId', '') == ''
+        && exists(pwOrigPath()) && o.type != 'reversal' && o.type != 'opening'
+        && (o.get('sendId', '') == '' || pwSendRevertLinked(o.sendId, m.reverses))
+        && m.productId == o.productId && m.qty == o.qty
+        && m.date == o.date && m.period == o.period
+        && pwPeriodOpen(o.period)
+        && (pwRole() == 'owner' || (o.type in ['receive','coat_ok','rework','scrap']
+            && o.createdBy == pwEmail()
+            && request.time - o.createdAt <= duration.value(2, 'd')));
     }
     match /apps/powdercoating/movements/{id} {
       allow read: if pwUser();
@@ -753,7 +797,7 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
         && pwAcc().seq is int && pwAcc().seq >= 0
         && pwAcc().status in ['open','complete','short-closed']
         && pwAcc().lastOp is map && pwAcc().lastOp.kind in ['receive','fix','cancel','close']
-        && pwAcc().lastOp.by == tEmail() && pwAcc().lastOp.opId is string && pwAcc().lastOp.opId.size() > 0
+        && pwAcc().lastOp.by == pwEmail() && pwAcc().lastOp.opId is string && pwAcc().lastOp.opId.size() > 0
         && pwAcc().snapshot is map && pwAcc().snapshot.qty is number
         && pwAcc().productId is string && pwAcc().productId.size() > 0;
     }
@@ -773,7 +817,7 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
     function pwAccMvLinked(m, id) {
       return pwMvAfter(m).type == 'receive' && pwMvAfter(m).welderDispatchId == id
         && pwMvAfter(m).productId == pwAcc().productId && pwMvAfter(m).opId == pwAcc().lastOp.opId
-        && pwMvAfter(m).createdBy == tEmail();
+        && pwMvAfter(m).createdBy == pwEmail();
     }
     function pwAccReceive(id, prevTotal, prevSeq) {
       return pwAcc().lastOp.kind == 'receive' && pwAcc().seq == prevSeq + 1
@@ -806,10 +850,10 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
       allow read: if pwUser();
       allow delete: if false;
       // first acceptance: the snapshot must equal the REAL welder dispatch (server-side, not trusted from the client)
-      allow create: if pwUser() && pwAccShape(id) && pwAccStatusOk() && pwAccReceive(id, 0, 0)
+      allow create: if pwStaff() && pwAccShape(id) && pwAccStatusOk() && pwAccReceive(id, 0, 0)
         && pwWdMatchesSnapshot(id, pwAcc().snapshot);
       // more material on a partial line: the live welder dispatch must still agree with the stored snapshot (the freeze, enforced)
-      allow update: if pwUser() && pwAccShape(id) && pwAccStatusOk()
+      allow update: if pwStaff() && pwAccShape(id) && pwAccStatusOk()
         && pwAcc().snapshot == pwAccPrev().snapshot && pwAcc().productId == pwAccPrev().productId
         && ((pwAccReceive(id, pwAccPrev().receivedTotal, pwAccPrev().seq) && pwAccPrev().status == 'open' && pwWdMatchesSnapshot(id, pwAccPrev().snapshot))
             || pwAccFix(id, pwAccPrev().receivedTotal) || pwAccCancel(id, pwAccPrev().receivedTotal) || pwAccClose());
@@ -824,7 +868,7 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
         && (pwDay().freshKg == null || (pwDay().freshKg is number && pwDay().freshKg >= 0 && pwDay().freshKg <= 10000))
         && (pwDay().reclaimedKg == null || (pwDay().reclaimedKg is number && pwDay().reclaimedKg >= 0 && pwDay().reclaimedKg <= 10000))
         && pwDay().notes is string && pwDay().notes.size() <= 500
-        && pwDay().updatedBy == tEmail() && pwDay().updatedAt == request.time && pwDay().rev is int
+        && pwDay().updatedBy == pwEmail() && pwDay().updatedAt == request.time && pwDay().rev is int
         && pwDay().history is list && pwDay().history.size() <= 20;
     }
     // history = previous entries + exactly one new summary (of the doc being replaced), capped at 20 (oldest dropped)
@@ -839,12 +883,83 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
     match /apps/powdercoating/daily/{date} {
       allow read: if pwUser();
       allow delete: if false;
-      allow create: if pwUser() && pwIsDate(date) && pwDayShape(date) && pwDay().rev == 1 && pwDay().createdBy == tEmail() && pwDay().history.size() == 0
+      allow create: if pwStaff() && pwIsDate(date) && pwDayShape(date) && pwDay().rev == 1 && pwDay().createdBy == pwEmail() && pwDay().history.size() == 0
         && pwPeriodOpen(date[0:7]) && (pwOwner() || pwRecent(date));
-      allow update: if pwUser() && pwIsDate(date) && pwDayShape(date) && pwDay().rev == resource.data.rev + 1
+      allow update: if pwStaff() && pwIsDate(date) && pwDayShape(date) && pwDay().rev == resource.data.rev + 1
         && pwDay().createdBy == resource.data.createdBy && pwDay().createdAt == resource.data.createdAt
         && pwDayHistoryAppended()
         && pwPeriodOpen(date[0:7]) && (pwOwner() || pwRecent(date));
+    }
+    // ---- v5: sends/{snd_<opId>} — "भेजा" slips from the press / laser side (or the Press app) ----
+    //   create  → by a sender (powder role 'sender' / user1 / owner, or an active Press-app user); status 'pending'; shape-locked
+    //   receive → only powder staff, pending → received, counted qty ≥ 1; the movement mv_snd_<id> must be NEW in the
+    //             same operation, be a receive naming this slip, and carry the same qty / product / creator
+    //   cancel  → pending → cancelled with a reason; by powder staff or by the slip's own creator
+    //   never deleted, never edited otherwise (a wrong slip is cancelled and a new one made)
+    function pwSd() { return request.resource.data; }
+    function pwSendCreateOk(id) {
+      return pwSd().keys().hasOnly(['id','date','period','source','productName','productId','qty','note','status','createdBy','createdByRole','createdByApp','deviceId','createdAt','clientAt','schemaVersion'])
+        && pwSd().id == id && id.matches('^snd_[A-Za-z0-9_-]{1,80}$')
+        && pwIsDate(pwSd().date) && pwSd().period == pwSd().date[0:7]
+        && (pwOwner() || pwRecent(pwSd().date))
+        && pwSd().source in ['press','laser','other']
+        && pwSd().productName is string && pwSd().productName.size() > 0 && pwSd().productName.size() <= 120
+        && pwSd().productId is string && pwSd().productId.size() <= 120
+        && pwSd().qty is int && pwSd().qty >= 1 && pwSd().qty <= 100000
+        && pwSd().note is string && pwSd().note.size() <= 200
+        && pwSd().status == 'pending'
+        && pwSd().createdBy == pwEmail() && pwSd().createdAt == request.time
+        && pwSd().createdByRole is string && pwSd().createdByRole.size() <= 20
+        && pwSd().createdByApp in ['powder','press']
+        && pwSd().deviceId is string && pwSd().deviceId.size() <= 40
+        && pwSd().clientAt is string && pwSd().clientAt.size() <= 40
+        && pwSd().schemaVersion is int && pwSd().schemaVersion >= 1;
+    }
+    function pwSendReceiveOk(id) {
+      return pwStaff() && resource.data.status == 'pending' && pwSd().status == 'received'
+        && pwSd().diff(resource.data).affectedKeys().hasOnly(['status','receivedQty','receivedBy','receivedAt','movementId','productId','productName'])
+        && pwSd().receivedQty is int && pwSd().receivedQty >= 1 && pwSd().receivedQty <= 100000
+        && pwSd().receivedBy == pwEmail() && pwSd().receivedAt == request.time
+        && pwSd().movementId == 'mv_snd_' + id
+        && pwSd().productId is string && pwSd().productId.size() > 0 && pwSd().productName is string && pwSd().productName.size() <= 120
+        && pwNewMv('mv_snd_' + id)
+        && pwMvAfter('mv_snd_' + id).type == 'receive' && pwMvAfter('mv_snd_' + id).get('sendId', '') == id
+        && pwMvAfter('mv_snd_' + id).qty == pwSd().receivedQty && pwMvAfter('mv_snd_' + id).productId == pwSd().productId
+        && pwMvAfter('mv_snd_' + id).createdBy == pwEmail();
+    }
+    function pwSendCancelOk() {
+      return resource.data.status == 'pending' && pwSd().status == 'cancelled'
+        && (pwStaff() || resource.data.createdBy == pwEmail())
+        && pwSd().diff(resource.data).affectedKeys().hasOnly(['status','cancelReason','cancelledBy','cancelledAt'])
+        && pwSd().cancelReason is string && pwSd().cancelReason.size() > 0 && pwSd().cancelReason.size() <= 200
+        && pwSd().cancelledBy == pwEmail() && pwSd().cancelledAt == request.time;
+    }
+    // received → cancelled, only together with the reversal of its receipt (the receipt is wrong / nothing actually came)
+    function pwSendRevertOk() {
+      let s = request.resource.data; let o = resource.data;
+      return pwStaff() && o.status == 'received' && s.status == 'cancelled'
+        && s.diff(o).affectedKeys().hasOnly(['status','cancelReason','cancelledBy','cancelledAt'])
+        && s.cancelReason is string && s.cancelReason.size() > 0 && s.cancelReason.size() <= 200
+        && s.cancelledBy == pwEmail() && s.cancelledAt == request.time
+        && pwNewMv('rev_' + o.movementId) && pwMvAfter('rev_' + o.movementId).reverses == o.movementId;
+    }
+    // received → received with a corrected count: the old receipt reversed + fix_<old> created in the same operation
+    function pwSendRefixOk(id) {
+      let s = request.resource.data; let o = resource.data;
+      return pwStaff() && o.status == 'received' && s.status == 'received'
+        && s.diff(o).affectedKeys().hasOnly(['receivedQty','movementId','receivedBy','receivedAt'])
+        && s.movementId == 'fix_' + o.movementId
+        && s.receivedQty is int && s.receivedQty >= 1 && s.receivedQty <= 100000
+        && s.receivedBy == pwEmail() && s.receivedAt == request.time
+        && pwNewMv('rev_' + o.movementId) && pwMvAfter('rev_' + o.movementId).reverses == o.movementId
+        && pwNewMv(s.movementId) && pwMvAfter(s.movementId).get('sendId', '') == id && pwMvAfter(s.movementId).qty == s.receivedQty
+        && pwMvAfter(s.movementId).createdBy == pwEmail();
+    }
+    match /apps/powdercoating/sends/{id} {
+      allow read: if pwUser() || (gVerified() && pwPressUser());   // press-app users read slips only with a VERIFIED Google login
+      allow delete: if false;
+      allow create: if pwSender() && pwSendCreateOk(id);
+      allow update: if gVerified() && (pwSendReceiveOk(id) || pwSendCancelOk() || pwSendRevertOk() || pwSendRefixOk(id));
     }
     // periods/{YYYY-MM}: owner-only, explicit state machine  open → closing → closed → open (reopen with reason).
     //   open/absent → open: count, adjSeq, effAdj may change
@@ -883,7 +998,7 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
       allow create: if pwOwner()
         && request.resource.data.keys().hasOnly(['goLiveDate','setBy','setAt'])
         && pwIsDate(request.resource.data.goLiveDate)
-        && request.resource.data.setBy == tEmail() && request.resource.data.setAt == request.time;
+        && request.resource.data.setBy == pwEmail() && request.resource.data.setAt == request.time;
     }
     match /apps/powdercoating/meta/{id}    { allow read: if pwUser(); allow write: if pwOwner() && id != 'config'; }
     // logs: OWNER actions only, fixed action set, shape-locked; create-only. Never an audit source of truth
@@ -891,7 +1006,7 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
     match /apps/powdercoating/logs/{id} {
       allow read: if pwUser();
       allow update, delete: if false;
-      allow create: if pwOwner() && request.resource.data.by == tEmail() && request.resource.data.role == 'owner'
+      allow create: if pwOwner() && request.resource.data.by == pwEmail() && request.resource.data.role == 'owner'
         && request.resource.data.keys().hasOnly(['id','ts','createdAt','action','detail','by','role'])
         && request.resource.data.id == id && request.resource.data.ts is string && request.resource.data.detail is map
         && request.resource.data.action in ['MONTH_COUNT','PERIOD_CLOSE_REFUSED','PERIOD_CLOSING_RECOVERED','PERIOD_REOPEN','USER_SET','PRODUCT_ALIAS']
@@ -1383,6 +1498,104 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
         && request.resource.data.get('name', '') is string && request.resource.data.get('name', '').size() <= 80;
     }
     // <<< MACHINES BLOCK
+    // >>> PRESS BLOCK (managed by press-app/rules/compose.mjs — do not edit by hand)
+    // ---- Press (apps/press) — Phase 1, 16-Oct-2026 ----
+    // Roles from apps/press/users/{email}: role 'owner' | 'user1' | 'worker', active == true. Cheap pattern (email + role
+    // resolved once per gate; gVerified() ONCE at each gate, prEmail() inside — never use prEmail() in an allow without a gate).
+    function prEmail() { return request.auth.token.get('email', ''); }
+    function prPath() { return /databases/$(database)/documents/apps/press/users/$(prEmail()); }
+    function prRole() { return prEmail() == 'nspenterprises24@gmail.com' ? 'owner' : (exists(prPath()) && get(prPath()).data.get('active', false) == true && get(prPath()).data.get('role', '') in ['worker','user1','owner'] ? get(prPath()).data.role : ''); }
+    function prUser() { return gVerified() && prRole() != ''; }
+    function prOwner() { return gVerified() && prRole() == 'owner'; }
+    function prDayStartIST(d) { return timestamp.date(int(d[0:4]), int(d[5:7]), int(d[8:10])) - duration.value(330, 'm'); }
+    function prLeap(y) { return y % 4 == 0 && (y % 100 != 0 || y % 400 == 0); }
+    function prDaysIn(y, m) { return m == 2 ? (prLeap(y) ? 29 : 28) : (m in [4, 6, 9, 11] ? 30 : 31); }
+    function prIsDate(d) { return d is string && d.size() == 10 && d.matches('^20[0-9][0-9]-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$') && int(d[8:10]) <= prDaysIn(int(d[0:4]), int(d[5:7])); }
+    // window: today, yesterday, day before (IST); owner any date
+    function prRecent(d) { return prDayStartIST(d) <= request.time && prDayStartIST(d) >= request.time - duration.value(3, 'd'); }
+    function prStr(d, k, max) { return d[k] is string && d[k].size() <= max; }
+    // entries: create-only rows; a wrong row is cancelled (status), never edited or deleted
+    function prEntryCreate(id) {
+      let e = request.resource.data;
+      return e.keys().hasOnly(['id','date','period','worker','machineNo','item','operation','die','pieces','counterStart','counterEnd','hasPhoto','thumb','note','status','cancelReason','rev','opId','updatedBy','updatedAt','createdBy','createdByRole','deviceId','createdAt','clientAt','schemaVersion'])
+        && e.id == id && id.matches('^e_[A-Za-z0-9_-]{1,80}$')
+        && prIsDate(e.date) && e.period == e.date[0:7] && (prRole() == 'owner' || prRecent(e.date))
+        && prStr(e, 'worker', 60) && e.worker.size() > 0
+        && prStr(e, 'machineNo', 20) && e.machineNo.size() > 0
+        && prStr(e, 'item', 120) && e.item.size() > 0
+        && prStr(e, 'operation', 60) && e.operation.size() > 0
+        && prStr(e, 'die', 120)
+        && e.pieces is int && e.pieces >= 1 && e.pieces <= 100000
+        && (e.counterStart == null || (e.counterStart is number && e.counterStart >= 0))
+        && (e.counterEnd == null || (e.counterEnd is number && e.counterEnd >= 0))
+        // photo = an inline JPEG only (never a URL the phone would fetch, never SVG); hasPhoto must say the truth
+        && e.hasPhoto is bool && prStr(e, 'thumb', 100000) && e.hasPhoto == (e.thumb.size() > 0)
+        && (e.thumb == '' || e.thumb.matches('^data:image/jpeg;base64,[A-Za-z0-9+/=]+$'))
+        && prStr(e, 'note', 300)
+        && e.status == 'ok' && e.cancelReason == '' && e.rev == 1
+        && prStr(e, 'opId', 80) && e.opId.size() > 0
+        && e.updatedBy == prEmail() && e.updatedAt == request.time
+        && e.createdBy == prEmail() && e.createdAt == request.time && e.createdByRole == prRole()
+        && prStr(e, 'deviceId', 40) && prStr(e, 'clientAt', 40) && e.schemaVersion is int && e.schemaVersion >= 1;
+    }
+    // cancel: ok → cancelled, reason required, rev +1; the creator within 3 days of the row's date, or the owner any time
+    function prEntryCancel() {
+      let e = request.resource.data;
+      let o = resource.data;
+      return o.status == 'ok' && e.status == 'cancelled'
+        && e.diff(o).affectedKeys().hasOnly(['status','cancelReason','rev','updatedBy','updatedAt'])
+        && e.cancelReason is string && e.cancelReason.size() > 0 && e.cancelReason.size() <= 200
+        && e.rev == o.rev + 1 && e.updatedBy == prEmail() && e.updatedAt == request.time
+        && (prRole() == 'owner' || (o.createdBy == prEmail() && prRecent(o.date)));
+    }
+    match /apps/press/entries/{id} {
+      allow read: if prUser();
+      allow delete: if false;
+      allow create: if prUser() && prEntryCreate(id);
+      allow update: if prUser() && prEntryCancel();
+    }
+    // dies: any press user may add or update (rev +1, previous state appended to history ≤ 10); never deleted (active:false)
+    function prDieShape(id) {
+      let d = request.resource.data;
+      return d.keys().hasOnly(['id','name','item','operation','presses','condition','note','active','rev','history','updatedBy','updatedAt','updatedAtClient','createdBy','createdByRole','deviceId','createdAt','clientAt','schemaVersion'])
+        && d.id == id && id.matches('^d_[A-Za-z0-9_-]{1,80}$')
+        && prStr(d, 'name', 120) && d.name.size() > 0 && prStr(d, 'item', 120) && prStr(d, 'operation', 60) && prStr(d, 'presses', 120) && prStr(d, 'note', 300)
+        && d.condition in ['ok','repair','broken'] && d.active is bool && d.rev is int
+        && d.history is list && d.history.size() <= 10
+        && d.updatedBy == prEmail() && d.updatedAt == request.time;
+    }
+    function prHistoryAppended(h, old) {
+      return h is list && old is list
+        && ((old.size() < 10 && h.size() == old.size() + 1 && (old.size() == 0 || h[0:old.size()] == old))
+            || (old.size() == 10 && h.size() == 10 && h[0:9] == old[1:10]))
+        && h[h.size() - 1] is map
+        && h[h.size() - 1].get('by', '') == resource.data.updatedBy
+        && h[h.size() - 1].get('condition', '') == resource.data.condition
+        && h[h.size() - 1].get('note', '') == resource.data.get('note', '');
+    }
+    match /apps/press/dies/{id} {
+      allow read: if prUser();
+      allow delete: if false;
+      allow create: if prUser() && prDieShape(id) && request.resource.data.rev == 1 && request.resource.data.history.size() == 0
+        && request.resource.data.createdBy == prEmail() && request.resource.data.createdAt == request.time;
+      // update: only the working fields change; creation fields are frozen; history = old history + exactly one new
+      // summary of the state being replaced (oldest dropped at 10), so nobody can rewrite what was there before
+      allow update: if prUser() && prDieShape(id) && request.resource.data.rev == resource.data.rev + 1
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name','item','operation','presses','condition','note','active','rev','history','updatedBy','updatedAt','updatedAtClient'])
+        && prHistoryAppended(request.resource.data.history, resource.data.history);
+    }
+    match /apps/press/meta/{id}  { allow read: if prUser(); allow write: if prOwner() && request.resource.data.list is list && request.resource.data.list.size() <= 300; }
+    match /apps/press/logs/{id} {
+      allow read: if prUser();
+      allow update, delete: if false;
+      allow create: if prOwner() && request.resource.data.by == prEmail() && request.resource.data.role == 'owner'
+        && request.resource.data.keys().hasOnly(['id','ts','createdAt','action','detail','by','role'])
+        && request.resource.data.id == id && request.resource.data.ts is string && request.resource.data.detail is map
+        && request.resource.data.action in ['USER_SET','LIST_SET','MACHINES_REFRESH'] && request.resource.data.createdAt == request.time;
+    }
+    // users: a signed-in Google account may read ITS OWN doc (to resolve its role); only the owner lists/writes
+    match /apps/press/users/{id} { allow get: if nonAnon() && (id == tEmail() || prOwner()); allow list: if prOwner(); allow write: if prOwner(); }
+    // <<< PRESS BLOCK
     // Read-meter telemetry (usage_reads/{YYYY-MM-DD}): every app instance batches
     // increments into totals.<app>. Write-only for any signed-in user (incl. anon
     // workers) so ALL apps can report; shape-locked to counters, no client reads.
