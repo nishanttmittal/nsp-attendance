@@ -108,14 +108,28 @@ function showDiff(liveContent, newContent) {
 // Confirmed working: "Validated OK (projects:test) — 0 warning(s), no ruleset created."
 // The 403 fallback below is KEPT deliberately: it is what makes this survive a future IAM change.
 // Note: the grant took ~1 minute to propagate — a 403 immediately after granting is not a failure.
+
+// Google's rules API answered 503 UNAVAILABLE on and off through 16/17-Oct-2026 (validation AND create). A 503 is not a
+// verdict on the rules, so each API call is retried: 8 attempts, 15 s apart. Anything other than 503/UNAVAILABLE fails at once.
+const is503 = (e) => e.response?.status === 503 || /UNAVAILABLE|currently unavailable/i.test(JSON.stringify(e.response?.data || e.message || ''));
+async function withRetry(label, fn, attempts = 8, waitMs = 15000) {
+  for (let i = 1; ; i++) {
+    try { return await fn(); }
+    catch (e) {
+      if (!is503(e) || i >= attempts) throw e;
+      console.log(`   ${label}: Google rules API 503 (attempt ${i}/${attempts}) — retrying in ${waitMs / 1000}s…`);
+      await new Promise(r => setTimeout(r, waitMs));
+    }
+  }
+}
 async function validateOnly(c, content) {
   let res;
   try {
-    res = await c.request({
+    res = await withRetry('validate', () => c.request({
       url: `https://firebaserules.googleapis.com/v1/projects/${PROJECT}:test`,
       method: 'POST',
       data: { source: { files: [{ name: 'firestore.rules', content }] } },
-    });
+    }));
   } catch (e) {
     if (e.response?.status === 403) {
       // Recommend the LEAST-PRIVILEGE route, matching what was actually granted on 2026-07-31.
@@ -223,20 +237,20 @@ async function main() {
   }
 
   // 4. create the ruleset (persistent + immutable — only now, after confirmation)
-  const created = await c.request({
+  const created = await withRetry('create ruleset', () => c.request({
     url: `https://firebaserules.googleapis.com/v1/projects/${PROJECT}/rulesets`,
     method: 'POST',
     data: { source: { files: [{ name: 'firestore.rules', content }] } },
-  }).catch(e => { throw new Error('ruleset rejected: ' + JSON.stringify(e.response?.data || e.message)); });
+  })).catch(e => { throw new Error('ruleset rejected: ' + JSON.stringify(e.response?.data || e.message)); });
   const rulesetName = created.data.name;
   console.log('Created ruleset ->', rulesetName);
 
   // 5. point the cloud.firestore release at the new ruleset
-  await c.request({
+  await withRetry('release', () => c.request({
     url: `https://firebaserules.googleapis.com/v1/projects/${PROJECT}/releases/cloud.firestore`,
     method: 'PATCH',
     data: { release: { name: `projects/${PROJECT}/releases/cloud.firestore`, rulesetName } },
-  });
+  }));
   console.log('PUBLISHED LIVE. cloud.firestore ->', rulesetName);
   // Read back and PROVE the release actually points at what we just created (Codex review 2026-07-30):
   // the PATCH returning 200 is not by itself evidence that the live rules changed.
