@@ -88,7 +88,8 @@ async function checkMachine(page, { send } = {}) {
     const workday = t.wday !== 6 && !hol;                       // Saturday = weekly off
 
     const problems = [];
-    if (st.status === 'Offline') problems.push('offline');
+    const floorHours = t.min >= 8 * 60 + 30 && t.min <= 21 * 60 + 15;   // machine may be switched off at night / weekly off
+    if (st.status === 'Offline' && workday && floorHours) problems.push('offline');
     if (st.status === 'Online' && workday && t.min >= 10 * 60 && p.punches === 0) problems.push('no-punches');
     if (st.status === 'Online' && workday && t.min >= 20 * 60 + 30 && p.punches >= 15 && p.eveningPunches === 0) problems.push('no-evening');
 
@@ -107,7 +108,7 @@ async function checkMachine(page, { send } = {}) {
     }
     const nowOpen = problems;
     const recovered = open.filter(k => !nowOpen.includes(k));
-    if (recovered.length && st.status === 'Online') msgs.push(`✅ Attendance machine is back online (${t.hhmm}). ${p.cards} people punched today, last punch ${fmt(p.lastMin)}.`);
+    if (recovered.includes('offline') && st.status === 'Online') msgs.push(`✅ Attendance machine is back online (${t.hhmm}). ${p.cards} people punched today, last punch ${fmt(p.lastMin)}.`);
 
     const dry = process.env.MACHINE_DRY === 'true';               // test: print, send nothing, save nothing
     if (dry) { console.log('[MACHINE_DRY] would send:', msgs.length ? msgs : 'nothing'); }
@@ -124,4 +125,11 @@ async function checkMachine(page, { send } = {}) {
   }
 }
 
-module.exports = { checkMachine, readStatus, readTodayPunches };
+// Hard cap: the floor pull runs under the worker's 5-min timeout — a slow portal must skip the
+// machine check, never fail the floor update.
+function checkMachineCapped(page, opts, ms = 100000) {
+  return Promise.race([checkMachine(page, opts),
+    new Promise(r => setTimeout(() => { console.error('machine check skipped: over ' + ms / 1000 + ' s'); r(null); }, ms).unref())]);
+}
+
+module.exports = { checkMachine: checkMachineCapped, checkMachineRaw: checkMachine, readStatus, readTodayPunches };
