@@ -112,9 +112,9 @@ const BATCHES = {
     { code: '00000141', name: 'kamta prasad jitender welder', dept: 'WELDING', gender: 'Male', shift: 'GEN', type: 'monthly', amount: 17000, joinDate: '2026-10-06' },
   ],
   // Owner 2026-10-16 20:50: "142-tophik-male-loading unloading". On the machine since Aug-2024 (on and off),
-  // never in the app. Back 15-10 (19:34 test punch), first full day 16-10. Loading crew rate Rs 700/day, LOD.
+  // never in the app. Started 15-10 (owner 21:10: "he started from yesterday"; only a 19:34 punch that day). Loading crew rate Rs 700/day, LOD.
   '2026-10-16': [
-    { code: '00000142', name: 'tophik loading', dept: 'LOADING', gender: 'Male', shift: 'LOD', type: 'daily', wage: 700, stdHours: 10, joinDate: '2026-10-16' },
+    { code: '00000142', name: 'tophik loading', dept: 'LOADING', gender: 'Male', shift: 'LOD', type: 'daily', wage: 700, stdHours: 10, joinDate: '2026-10-15' },
   ],
 };
 
