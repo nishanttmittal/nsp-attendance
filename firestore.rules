@@ -632,9 +632,9 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
     // ledger, acceptances or day sheets — only "भेजा" slips (sends/).
     function pwStaff() { return gVerified() && pwRole() in ['worker','user1','owner']; }
     function pwPressPath() { return /databases/$(database)/documents/apps/press/users/$(pwEmail()); }
-    function pwPressRole() { return exists(pwPressPath()) && get(pwPressPath()).data.get('active', false) == true && get(pwPressPath()).data.get('role', '') in ['worker','user1','owner'] ? get(pwPressPath()).data.role : ''; }
+    // the bootstrap owner is 'owner' in the Press app too (prRole does the same), with or without a press users doc
+    function pwPressRole() { return pwBoot() ? 'owner' : (exists(pwPressPath()) && get(pwPressPath()).data.get('active', false) == true && get(pwPressPath()).data.get('role', '') in ['worker','user1','owner'] ? get(pwPressPath()).data.role : ''); }
     function pwPressUser() { return pwPressRole() != ''; }
-    function pwSender() { return gVerified() && (pwRole() in ['sender','user1','owner'] || pwPressUser()); }
     function pwSendPath(id) { return /databases/$(database)/documents/apps/powdercoating/sends/$(id); }
     // 'YYYY-MM-DD' → the moment that day STARTS in India (00:00 IST = previous day 18:30 UTC).
     function pwDayStartIST(d) { return timestamp.date(int(d[0:4]), int(d[5:7]), int(d[8:10])) - duration.value(330, 'm'); }
@@ -926,7 +926,7 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
       return pwSd().keys().hasOnly(['id','date','period','source','productName','productId','qty','note','status','createdBy','createdByRole','createdByApp','deviceId','createdAt','clientAt','schemaVersion'])
         && pwSd().id == id && id.matches('^snd_[A-Za-z0-9_-]{1,80}$')
         && pwIsDate(pwSd().date) && pwSd().period == pwSd().date[0:7]
-        && (role == 'owner' || pwRecent(pwSd().date))
+        && (role == 'owner' || prole == 'owner' || pwRecent(pwSd().date))   // an owner in either app may backdate a slip
         && pwSd().source in ['press','laser','other']
         && pwSd().productName is string && pwSd().productName.size() > 0 && pwSd().productName.size() <= 120
         && pwSd().productId is string && pwSd().productId.size() <= 120
