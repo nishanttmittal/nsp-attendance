@@ -38,12 +38,26 @@ export function punchesSyncedTill(punchesByCode) {
   return max;
 }
 
+// Owner-given missing punch (owner 23-10-2026: "he ho at 19:30" — add on the app, not the portal).
+// emp.corrections [{date:'dd/mm/yyyy', in, out}] — the nightly machine sync rewrites att_punches, so the
+// fix lives here and only FILLS a blank side; a real machine punch always wins.
+export function punchFixes(emp) {
+  const fx = {};
+  for (const c of (emp && emp.corrections) || []) {
+    const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(String((c && c.date) || ''));
+    if (m) fx[`${m[3]}-${m[2]}-${m[1]}`] = { i: c.in || null, o: c.out || null };
+  }
+  return fx;
+}
+
 // Every punched day in [from, to] for one worker.
-export function daysInWindow(punchDoc, from, to) {
+export function daysInWindow(punchDoc, from, to, fixes = {}) {
   const out = [];
   for (const [mk, days] of Object.entries((punchDoc && punchDoc.months) || {})) {
-    for (const [dd, r] of Object.entries(days || {})) {
+    for (const [dd, r0] of Object.entries(days || {})) {
       const ymd = `${mk}-${dd}`;
+      const f = fixes[ymd];
+      const r = r0 && f ? { i: r0.i || f.i, o: r0.o || f.o } : r0;
       if (ymd < from || ymd > to || !r || !(r.i || r.o)) continue;
       const i = hoursOf(r.i), o = hoursOf(r.o);
       if (i != null && o != null) {
@@ -85,7 +99,7 @@ export function openHisab(emp, punchDoc, to) {
   const last = clears[clears.length - 1] || null;
   const seedTill = clears.length ? clears[0].till : '';
   const from = last ? addDays(last.till, 1) : (emp.joinDate || '2026-06-01');
-  const days = to >= from ? daysInWindow(punchDoc, from, to) : [];
+  const days = to >= from ? daysInWindow(punchDoc, from, to, punchFixes(emp)) : [];
   const hours = days.reduce((s, d) => s + d.hours, 0);
   const std = stdHoursOf(emp);
   const wage = Number(emp.wage) || 0;

@@ -20,6 +20,7 @@ function slimEmp(code, e) {
     wage: Number(e.wage) || 0, stdHours: Number(e.stdHours) || Number(e.standardHours) || null,
     active: e.active !== false, appOnly: !!e.appOnly, joinDate: e.joinDate || null,
     hisabClears: Array.isArray(e.hisabClears) ? e.hisabClears : [],
+    corrections: (e.corrections || []).filter((c) => c && c.date).map((c) => ({ date: c.date, in: c.in || '', out: c.out || '' })),
     advances: (e.advances || []).filter((a) => a && a.id && a.date)
       .map((a) => ({ id: a.id, date: a.date, amount: Number(a.amount) || 0, mode: a.mode || 'cash', remark: a.remark || '', by: a.paidBy || '', ...(a.extra ? { extra: a.extra } : {}) })),
     months,
