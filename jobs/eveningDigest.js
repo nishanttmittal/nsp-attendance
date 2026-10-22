@@ -65,13 +65,17 @@ async function moneyLines(fdb, day) {
 }
 async function build(day = istToday(), out = {}) {
   const fdb = db();
-  const [weld, plate, money] = await Promise.all([weldingLines(fdb, day), platingLines(fdb, day), moneyLines(fdb, day)]);
-  out.save = money.save;
+  const st0 = ((await STATE(fdb).get()).data()) || {};
+  const [weld, plate, money, loader] = await Promise.all([weldingLines(fdb, day), platingLines(fdb, day), moneyLines(fdb, day),
+    // loader money that would not reach the Loading hisab (owner 23-10-2026) — never blocks the digest
+    require('./falconLoaderCheck').loaderIssues(fdb, new Set(st0.loaderSeen || []), day).catch((e) => { console.error('loader check failed:', e.message); return { lines: [], newIds: [] }; })]);
+  out.save = { ...money.save, loaderSeen: [...(st0.loaderSeen || []), ...loader.newIds].slice(-5000) };
   const L = [`🌙 Aaj ka hisab — ${dmy(day)}`];
   L.push('Welding: ' + (weld.length ? '' : 'koi challan nahi')); for (const l of weld) L.push('  ' + l);
   L.push('Chrome plating: ' + (plate.length ? '' : 'kuch nahi')); for (const l of plate) L.push('  ' + l);
   L.push(money.adv.length ? `Advance diya: ${money.adv.length} · ${inr(money.advTotal)}` : 'Advance diya: nahi'); for (const l of money.adv) L.push('  ' + l);
   if (money.locks) L.push(`Salary lock: ${money.locks} staff · ${inr(money.lockTotal)}`);
+  for (const l of loader.lines) L.push(l);
   return L.join('\n');
 }
 module.exports = { build };
