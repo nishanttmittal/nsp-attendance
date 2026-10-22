@@ -6,6 +6,8 @@ const { gatherState } = require('./getState');
 const { sendPlain: sendTelegram, sendTech } = require('./lib/notify'); // plain text: WA as-is, Telegram escaped
 const { dmy } = require('./lib/simple');
 (async () => {
+  const once = require('./lib/onceADay');
+  if (await once.alreadySent('morningDigest')) { console.log('morning digest already sent today — skipped'); return; }
   const { browser, page } = await session();
   try {
     const s = await gatherState(page);
@@ -25,6 +27,6 @@ const { dmy } = require('./lib/simple');
     const under = Object.entries(s.deptRatio || {}).filter(([, r]) => r.total > 0 && r.pct < 50).map(([d, r]) => `${d} ${r.present}/${r.total}`);
     if (under.length) L.push('Kam staff: ' + under.join(', '));
     if (process.env.DRY) { console.log(L.join('\n')); return; }
-    await sendTelegram(L.join('\n')); console.error('morning digest sent');
+    await sendTelegram(L.join('\n')); await once.markSent('morningDigest'); console.error('morning digest sent');
   } finally { await browser.close(); }
 })();

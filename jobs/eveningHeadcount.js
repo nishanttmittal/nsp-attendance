@@ -15,6 +15,8 @@ function composeMessage(s) {
 
 if (require.main === module) {
   (async () => {
+    const once = require('./lib/onceADay');
+    if (await once.alreadySent('foodHeadcount')) { console.log('food headcount already sent today — skipped'); return; }
     const { browser, page } = await session();
     try {
       // 16-10-2026: punches reach the portal late (13-10: 48 not 63; 16-10: 2 not 62). Pull today's punches
@@ -24,6 +26,7 @@ if (require.main === module) {
       if (!(state.counts?.totalPresent ?? state.presentTotal) && !state.counts?.totalAbsent) { await sendTech('food headcount held — portal returned 0 present / 0 absent'); console.error('held: zeros'); return; }
       const msg = composeMessage(state);
       await sendTelegram(msg);
+      await once.markSent('foodHeadcount');
     } finally { await browser.close(); }
   })();
 }
