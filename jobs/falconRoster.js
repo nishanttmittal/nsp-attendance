@@ -41,6 +41,30 @@ async function mirrorRoster() {
     batch.set(dst.doc(row.code), { ...row, updatedAt: new Date() });
     n++; writes++;
   }
+  // Extra loaders (owner 22-10-2026): names already paid as extras in the 🚚 Loading tab become the "Kaun tha" pick list on
+  // Falcon's Labour → Loading tile (row extra:true — never an advance target, see falconAdvanceBridge). Last 120 days only,
+  // real names only (diary lines like "2 labour dihadi" are descriptions, not people).
+  const abc = src.docs.find(d => d.id === 'MAN-LOADING-ABC');
+  const fixed = require('./falconExtraBridge').fixedLoaderNames(src.docs);
+  const since = new Date(Date.now() - 120 * 864e5).toISOString().slice(0, 10);
+  const xNames = new Map();
+  for (const a of ((abc && abc.data().advances) || [])) {
+    if (!a || !a.extra || !(a.date >= since)) continue;
+    for (const r of a.extra.rows || []) {
+      const nm = String(r.name || '').trim();
+      if (!nm || /\d|labour|dihadi|ladk|wale|chowk|abc|xyz|safai|gaadi|kaam/i.test(nm) || nm.split(/\s+/).length > 3) continue;
+      if (fixed.has(nm.toLowerCase().split(/\s+/)[0])) continue;   // now a fixed loader (on the machine) — not an extra
+      const key = nm.toLowerCase().replace(/[^a-z\u0900-\u097f]+/g, '-');
+      if (!xNames.has(key)) xNames.set(key, nm.replace(/\b\w/g, c => c.toUpperCase()));
+    }
+  }
+  for (const [key, nm] of xNames) {
+    const row = { code: 'X-' + key, name: nm, dept: 'EXTRA LOADER', active: true, extra: true }, old = have[row.code];
+    seen.add(row.code);
+    if (old && old.name === row.name && old.active === true && old.extra === true) continue;
+    batch.set(dst.doc(row.code), { ...row, updatedAt: new Date() });
+    n++; writes++;
+  }
   // a worker deleted from att_salary disappears from the pick list (kept as inactive, never deleted)
   for (const id of Object.keys(have)) if (!seen.has(id) && have[id].active !== false) { batch.set(dst.doc(id), { active: false, updatedAt: new Date() }, { merge: true }); n++; writes++; }
   await flush();

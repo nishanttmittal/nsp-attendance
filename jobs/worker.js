@@ -581,6 +581,7 @@ async function main() {
   catch (e) { console.error('late capture failed:', e.message); }
   // Falcon advances → Attendance / Welder (owner 08-10-2026); never blocks the queue below
   try { await require('./falconAdvanceBridge').run(); } catch (e) { console.error('falcon advance bridge failed:', e.message); }
+  try { const x = await require('./falconExtraBridge').run(); if (x.added || x.updated || x.removed || x.locked.length || x.fixedSkipped.length) console.log('falcon extra loaders:', JSON.stringify(x)); } catch (e) { console.error('falcon extra-loader bridge failed:', e.message); }
   try { const n = await alertLate(); if (n) console.log(`late-alert: messaged ${n}`); }
   catch (e) { console.error('late alert failed:', e.message); }
 

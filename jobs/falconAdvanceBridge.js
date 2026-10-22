@@ -122,7 +122,7 @@ async function run({ dry = false } = {}) {
     f.collection('apps').doc('welder').collection('welders').get(),
     base.collection('users').get(),
   ]);
-  const roster = rosterSnap.docs.map(d => d.data());
+  const roster = rosterSnap.docs.map(d => d.data()).filter(r => !r.extra);   // extra-loader names are never an advance target (22-10-2026)
   const welders = weldSnap.docs.map(d => d.data().name).filter(Boolean);
   const nameOf = Object.fromEntries(users.docs.map(d => [d.id, d.data().name || d.id]));
   // Khud ka advance (owner 09-10-2026 "build b"): a worker's advance to HIMSELF reaches Attendance only on the OWNER's OK.
