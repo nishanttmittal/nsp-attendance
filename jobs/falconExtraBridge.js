@@ -21,7 +21,15 @@ const hoursOf = (w) => (w === 'Full din' ? 10 : Number(String(w || '').split(' '
 const norm = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
 // Fixed loaders (on the machine, paid via Clear hisab) must never also get an extra-loader day — that would pay the day twice.
 // First names of active LOADING workers + spellings seen on slips (tophik on the machine = Toufiq / Tofiq on paper).
-const ALIASES = { tophik: ['toufiq', 'tofiq', 'taufiq', 'tofik', 'toufik'], navi: ['nabi'], nagender: ['nagendra'] };
+// Hindi spellings too (owner 23-10-2026). Keep in step with falcon/src/logic/falcon.js LOADER_ALIASES.
+const ALIASES = {
+  tophik: ['toufiq', 'tofiq', 'taufiq', 'tofik', 'toufik', 'तौफीक', 'तोफिक', 'तौफिक', 'तोफीक', 'टोफिक', 'तौफ़ीक़'],
+  navi: ['nabi', 'नबी', 'नवी', 'नाबी'],
+  nagender: ['nagendra', 'नगेंद्र', 'नागेंद्र', 'नगेन्द्र', 'नागेन्द्र', 'नगेंदर'],
+  ravi: ['रवि', 'रवी'],
+  jitender: ['jitendra', 'जितेंद्र', 'जितेन्द्र', 'जितेंदर', 'जितेन्दर'],
+  dinesh: ['दिनेश'],
+};
 function fixedLoaderNames(salDocs) {
   const set = new Set();
   for (const d of salDocs) {
