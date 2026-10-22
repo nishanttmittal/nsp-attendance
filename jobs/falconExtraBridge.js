@@ -40,6 +40,7 @@ function parseXload(detail) {
   let i = 1, men = 1;
   const m = /^(\d+) aadmi$/.exec(p[i] || '');
   if (m) { men = Number(m[1]); i++; }
+  if (!(men >= 1 && men <= 20)) return null;   // phone-typed count: realistic crew size only (security review 22-10)
   const name = (p[i] || '').trim(), work = p[i + 1];
   if (!name || !XLOAD_WORK.includes(work)) return null;
   return { chip: p[0], men, name, hours: hoursOf(work), full: work === 'Full din', note: p.slice(i + 2).join(' · ') };
@@ -77,6 +78,9 @@ async function run({ dry = false, target = ABC, entriesOverride = null } = {}) {
   const lab = entriesOverride || labSnap.docs.map((d) => ({ ...d.data(), id: d.id }));
   for (const e of lab) {
     if (e.status !== 'active' || !(e.date >= GO_LIVE)) continue;
+    // same gate as the advance bridge: a worker's line reaches Attendance only after the owner / Anshul ji's OK (staff lines
+    // are OK at save). An OK'd line can then be changed by the owner only (Falcon rules), so a later update is his edit.
+    if (e.approval !== 'ok') continue;
     const x = parseXload(e.detail);
     if (!x || !(Number(e.amount) > 0)) continue;
     if (fixed.has(norm(x.name).split(' ')[0])) { fixedSkipped.push(`${e.date} ${x.name} ₹${e.amount}`); continue; }   // fixed crew → his Clear hisab
