@@ -1536,6 +1536,36 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
         && request.resource.data.active is bool
         && request.resource.data.get('name', '') is string && request.resource.data.get('name', '').size() <= 80;
     }
+    // Breakdown log (31-Oct-2026): one doc per breakdown. Opened once, closed once, never deleted.
+    // Times are the phone's clock (ms) so an offline entry keeps its real downtime; server stamps kept for audit.
+    function mcLogOpenKeys() { return ['id','machineId','machineNo','machineName','department','reason','note','openedAtMs','openedBy','createdAt','closed']; }
+    function mcLogCloseKeys() { return ['closed','closedAtMs','closedBy','closedAt','fix','part','cost','fixedBy','vendor']; }
+    function mcMs(v) { return v is int && v > 1767225600000 && v <= request.time.toMillis() + 600000; } // after 01-01-2026, not in the future (+10 min clock slack)
+    match /apps/machines/logs/{id} {
+      allow read: if mcRole() != '';
+      allow delete: if false;
+      allow create: if mcRole() in ['owner', 'editor']
+        && request.resource.data.keys().hasOnly(mcLogOpenKeys())
+        && request.resource.data.id == id && id.matches('^[A-Za-z0-9_-]{1,60}$')
+        && request.resource.data.machineId is string && exists(mcItemPath(request.resource.data.machineId))
+        && mcStr(request.resource.data, 'machineNo', 20) && mcStr(request.resource.data, 'machineName', 120)
+        && mcStr(request.resource.data, 'department', 60)
+        && request.resource.data.reason in ['electrical','mechanical','hydraulic','laser','tool','software','consumable','other']
+        && mcStr(request.resource.data, 'note', 300)
+        && mcMs(request.resource.data.openedAtMs)
+        && request.resource.data.openedBy == tEmail() && request.resource.data.createdAt == request.time
+        && request.resource.data.closed == false;
+      // close exactly once: only the close fields are added, the opening details never move
+      allow update: if mcRole() in ['owner', 'editor']
+        && resource.data.closed == false && request.resource.data.closed == true
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(mcLogCloseKeys())
+        && request.resource.data.keys().hasOnly(mcLogOpenKeys().concat(mcLogCloseKeys()))
+        && mcMs(request.resource.data.closedAtMs) && request.resource.data.closedAtMs >= resource.data.openedAtMs
+        && request.resource.data.closedBy == tEmail() && request.resource.data.closedAt == request.time
+        && mcStr(request.resource.data, 'fix', 300) && mcStr(request.resource.data, 'part', 120)
+        && request.resource.data.cost is int && request.resource.data.cost >= 0 && request.resource.data.cost <= 10000000
+        && request.resource.data.fixedBy in ['inhouse', 'vendor'] && mcStr(request.resource.data, 'vendor', 80);
+    }
     // <<< MACHINES BLOCK
     // >>> PRESS BLOCK (managed by press-app/rules/compose.mjs — do not edit by hand)
     // ---- Press (apps/press) — Phase 1, 16-Oct-2026 ----
