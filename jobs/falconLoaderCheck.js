@@ -3,6 +3,9 @@
 //   A. Falcon 👷 Labour line naming a FIXED loader or saying "advance" (not the extra-loader format) → should be 💵 Advance
 //   B. extra-loader line OK'd in Falcon but missing from 🚚 Extra loaders (bridge did not land it)
 //   C. extra-loader lines still waiting for Anshul ji's OK for more than a day (count only)
+//   D. OK'd Advance-tile lines whose typed name matched no worker (bridge 'unmatched') — the money is NOT in
+//      anyone's account. Owner 02-11-2026 ("yes fix"): ₹4,300 of loader advances sat like this 28–30 Oct because
+//      the bridge's own alert goes by Telegram, which fails on the factory network. Repeats daily until fixed.
 // A and B are listed ONCE (ids remembered with the digest state); C repeats daily while pending. Silent when clean.
 const { db } = require('./lib/firestore');
 const { parseXload, fixedLoaderNames } = require('./falconExtraBridge');
@@ -14,10 +17,11 @@ const inr = (n) => '₹' + Math.round(Number(n) || 0).toLocaleString('en-IN');
 const dm = (d) => `${d.slice(8, 10)}-${d.slice(5, 7)}`;
 
 async function loaderIssues(fdb = db(), seen = new Set(), today = new Date(Date.now() + 5.5 * 3600e3).toISOString().slice(0, 10)) {
-  const [lab, sal, abc] = await Promise.all([
+  const [lab, sal, abc, adv] = await Promise.all([
     fdb.collection('apps').doc('falcon').collection('entries').where('kind', '==', 'labour').get(),
     fdb.collection('att_salary').where('dept', 'in', ['LOADING', 'Loading', 'loading']).get(),
     fdb.collection('att_salary').doc('MAN-LOADING-ABC').get(),
+    fdb.collection('apps').doc('falcon').collection('entries').where('kind', '==', 'adv').get(),
   ]);
   const fixed = fixedLoaderNames(sal.docs);
   const landed = new Set(((abc.data() || {}).advances || []).filter((a) => a && a.falconId).map((a) => a.falconId));
@@ -39,7 +43,19 @@ async function loaderIssues(fdb = db(), seen = new Set(), today = new Date(Date.
     if (e.approval !== 'ok') { if (e.date < yday || (e.date === yday)) pending++; continue; }
     if (!landed.has(d.id) && !seen.has(d.id)) { missing.push(`${dm(e.date)} ${x.name} ${inr(e.amount)}`); newIds.push(d.id); }
   }
+  const unmatched = [];
+  for (const d of adv.docs) {
+    const e = d.data();
+    if (e.status !== 'active' || e.approval !== 'ok' || e.advStatus !== 'pending' || !e.advPush || e.advPush.status !== 'unmatched') continue;
+    unmatched.push({ date: e.date || '', text: `${dm(e.date || '0000-00-00')} ${(e.advFor && e.advFor.name) || e.detail || '?'} ${inr(e.amount)}`, amt: Number(e.amount) || 0 });
+  }
+  unmatched.sort((a, b) => a.date.localeCompare(b.date));
   const L = [];
+  if (unmatched.length) {
+    L.push(`💵 Falcon advance Attendance mein NAHI gaya (naam nahi mila): ${unmatched.length} · ${inr(unmatched.reduce((t, u) => t + u.amt, 0))}`);
+    unmatched.forEach((u) => L.push('  ' + u.text));
+    L.push('  → Falcon mein naam list se chuno, ya "Attendance mein daal diya" dabao');
+  }
   if (wrong.length) { L.push(`🚚 Labour tile pe loader ka paisa (Advance mein hona chahiye): ${wrong.length}`); wrong.forEach((l) => L.push('  ' + l)); }
   if (missing.length) { L.push(`🚚 Extra loader Attendance mein nahi aaya: ${missing.length}`); missing.forEach((l) => L.push('  ' + l)); }
   if (pending) L.push(`🚚 Extra loader OK baaki (Anshul ji): ${pending} line`);
