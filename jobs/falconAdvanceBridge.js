@@ -135,7 +135,7 @@ async function postFreight(f, ref, e, t, paidBy, who) {
       return { ok: true };
     }
     const tx0 = tdoc.data();
-    if (!tdoc.exists || tx0.deleted) { tx.update(ref, { advPush: { ...l.advPush, status: 'rejected', error: 'Gaadiwala freight app mein nahi mila — owner dekhe', at: now } }); return { ok: false, why: 'gaadiwala missing' }; }
+    if (!tdoc.exists || tx0.deleted || tx0.active === false) { tx.update(ref, { advPush: { ...l.advPush, status: 'rejected', error: 'Gaadiwala freight app mein nahi mila — owner dekhe', at: now } }); return { ok: false, why: 'gaadiwala missing' }; }
     const no = Math.max((Number((c.data() || {}).payment) || 0) + 1, 1);
     tx.set(cnt, { payment: no }, { merge: true });
     tx.set(advRef, { id: advRef.id, createdAt: now, updatedAt: now, date: e.date, transporterId: t.freight, transporterName: tx0.name || '', amount: Number(e.amount),
