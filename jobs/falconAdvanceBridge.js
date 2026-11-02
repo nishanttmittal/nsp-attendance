@@ -41,7 +41,13 @@ function resolveTarget(advFor, roster, welders) {
     if (!boss.length) return null;   // a welder with no contractor in his name (rakesh singh welder …) is the factory's own man → Attendance
     return boss.length === 1 ? { target: 'welder', name: boss[0], staff: r.name, staffCode: r.code } : { target: 'none', why: `${r.name}: do thekedar ke naam hain — owner dekhe` };
   };
+  // "List mein nahi" (owner 02-11-2026): the phone writes code NOL-<gaadi|safai|bahar> — never guessed, held for the owner
+  if (/^NOL-/.test(code)) return { target: 'none', hold: 'not-on-list', why: `List mein nahi (${code.slice(4)}) — owner decide kare` };
   const byCode = code ? roster.find(r => r.code === code && r.active !== false) : null;
+  // a gaadiwala / the Safai wala row (falconRoster.js) — picked or typed exactly as in the list
+  const special = (r) => r.freight ? { target: 'freight', code: r.code, name: r.name, freight: r.freight }
+    : r.cleaner ? { target: 'cleaner', code: r.code, name: r.name } : null;
+  if (byCode && (byCode.freight || byCode.cleaner)) return norm(byCode.name) === name ? special(byCode) : { target: 'none', why: 'naam list se dobara chuno' };
   // a welding contractor picked from the list (roster row written by falconRoster.js with `welder`) → his Welder-app
   // account, never Attendance (owner 13-10-2026 "add welder names")
   if (byCode && byCode.welder) return norm(byCode.name) === name && welders.includes(byCode.welder) ? { target: 'welder', name: byCode.welder } : { target: 'none', why: 'welder ka naam list se dobara chuno' };
@@ -55,6 +61,7 @@ function resolveTarget(advFor, roster, welders) {
   if (sameAsWelder && !WELD.test(name)) return { target: 'none', why: `${sameAsWelder} welder (thekedar) ya factory ka ${sameAsWelder}? Naam list se chuno` };
   // a contractor's man typed by hand exactly as in the list (no code on the line): same route as a list pick
   const typedStaff = roster.filter(r => r.active !== false && !r.welder && norm(r.name) === name);
+  if (typedStaff.length === 1 && special(typedStaff[0])) return special(typedStaff[0]);
   if (typedStaff.length === 1 && staffOf(typedStaff[0])) return staffOf(typedStaff[0]);
   if (WELD.test(name)) {
     const w = welders.find(w => name.includes(norm(w))) || welders.find(w => name.startsWith(norm(w).slice(0, 3)));
@@ -65,9 +72,9 @@ function resolveTarget(advFor, roster, welders) {
   }
   const active = roster.filter(r => r.active !== false && !r.welder);
   const exact = active.filter(r => norm(r.name) === name);
-  if (exact.length === 1) return staffOf(exact[0]) || { target: 'attendance', code: exact[0].code, name: exact[0].name };
+  if (exact.length === 1) return special(exact[0]) || staffOf(exact[0]) || { target: 'attendance', code: exact[0].code, name: exact[0].name };
   const prefix = active.filter(r => norm(r.name).startsWith(name + ' '));
-  if (exact.length === 0 && prefix.length === 1) return staffOf(prefix[0]) || { target: 'attendance', code: prefix[0].code, name: prefix[0].name };
+  if (exact.length === 0 && prefix.length === 1) return special(prefix[0]) || staffOf(prefix[0]) || { target: 'attendance', code: prefix[0].code, name: prefix[0].name };
   if (exact.length + prefix.length > 1) return { target: 'none', why: `ek se zyada worker: ${[...exact, ...prefix].map(r => r.name).join(' / ')}` };
   return { target: 'none', why: 'Attendance list mein yeh naam nahi' };
 }
@@ -110,6 +117,33 @@ async function queueWelder(f, e, welder, who, staff = '') {
     await col.doc(id).create({ target: 'welder', name: welder, code: '', amount: Number(e.amount), date: e.date, note: (staff ? `Staff advance — ${staff} · Falcon (${who})` : `Falcon (${who}): ${e.detail || ''}`).trim(), status: 'pending', source: 'falcon', falconId: e.id, ts: Date.now() });
   } catch (x) { if (x.code !== 6 && !/already exists/i.test(x.message || '')) throw x; }
   return id;
+}
+
+/** Gaadiwala advance → freight app (owner 02-11-2026), the same records the freight app writes for a payment: next
+ *  payment no. (meta/counters), advance doc, transporter runningBalance −amount, and the Falcon line marked done — ONE
+ *  transaction, fixed id falcon_<entryId> so a second run can never post it twice. */
+async function postFreight(f, ref, e, t, paidBy, who) {
+  const F = f.collection('apps').doc('transportfreight');
+  const advRef = F.collection('advances').doc('falcon_' + e.id), cnt = F.collection('meta').doc('counters'), tr = F.collection('transporters').doc(t.freight);
+  return f.runTransaction(async (tx) => {
+    const [cur, a, c, tdoc] = await Promise.all([tx.get(ref), tx.get(advRef), tx.get(cnt), tx.get(tr)]);
+    const l = cur.data();
+    if (!l || l.status !== 'active' || l.advStatus !== 'pending' || !l.advPush || l.advPush.status !== 'posting' || Number(l.amount) !== Number(e.amount)) return { ok: false, why: 'line badal gayi' };
+    const now = new Date().toISOString();
+    if (a.exists) {   // an earlier run posted it and died before marking the line
+      tx.update(ref, { advStatus: 'entered', advDoneBy: 'auto:freight', advDoneAt: new Date(), advPush: { ...l.advPush, status: 'done', paymentNo: a.data().paymentNo || 0, at: now } });
+      return { ok: true };
+    }
+    const tx0 = tdoc.data();
+    if (!tdoc.exists || tx0.deleted) { tx.update(ref, { advPush: { ...l.advPush, status: 'rejected', error: 'Gaadiwala freight app mein nahi mila — owner dekhe', at: now } }); return { ok: false, why: 'gaadiwala missing' }; }
+    const no = Math.max((Number((c.data() || {}).payment) || 0) + 1, 1);
+    tx.set(cnt, { payment: no }, { merge: true });
+    tx.set(advRef, { id: advRef.id, createdAt: now, updatedAt: now, date: e.date, transporterId: t.freight, transporterName: tx0.name || '', amount: Number(e.amount),
+      paidBy, note: `Falcon (${who}): ${e.detail || ''}`.trim().slice(0, 120), paymentNo: no, reversal: false, reversed: false, factoryId: 'main', deleted: false, createdByUser: 'falcon-bridge' });
+    tx.update(tr, { runningBalance: FieldValue.increment(-Number(e.amount)), updatedAt: now });
+    tx.update(ref, { advStatus: 'entered', advDoneBy: 'auto:freight', advDoneAt: new Date(), advPush: { ...l.advPush, status: 'done', paymentNo: no, at: now } });
+    return { ok: true };
+  });
 }
 
 async function run({ dry = false } = {}) {
@@ -246,7 +280,7 @@ async function run({ dry = false } = {}) {
     if (t.target === 'none') {
       const cur = (await d.ref.get()).data();
       if (!cur || cur.status !== 'active' || cur.hisab != null || cur.approval !== 'ok' || cur.advStatus !== 'pending' || (cur.advPush && cur.advPush.status !== 'posting') || !sameAdv(cur)) { out.waiting++; continue; }
-    } else if (!(await claim(f, d.ref, t.target === 'attendance' ? { target: 'attendance', code: t.code, name: t.name } : { target: 'welder', name: t.name }, sameAdv))) { out.waiting++; continue; }
+    } else if (!(await claim(f, d.ref, ['attendance', 'freight', 'cleaner'].includes(t.target) ? { target: t.target, code: t.code, name: t.name } : { target: 'welder', name: t.name }, sameAdv))) { out.waiting++; continue; }
     if (t.target === 'attendance') {
       // already typed into Attendance by hand (same worker, same day, same amount)? then only mark the Falcon line — no second advance
       const existing = ((await f.collection('att_salary').doc(t.code).get()).data() || {}).advances || [];
@@ -299,8 +333,15 @@ async function run({ dry = false } = {}) {
       const refId = await queueWelder(f, e, t.name, who, t.staff || '');
       await d.ref.update({ advPush: { target: 'welder', name: t.name, ...(t.staff ? { staff: t.staff } : {}), ref: refId, status: 'queued', at: now } });
       out.queuedWelder++;
+    } else if (t.target === 'freight') {
+      const r = await postFreight(f, d.ref, e, t, roleOfUser[e.by] === 'owner' || e.by === 'nspenterprises24@gmail.com' ? 'Nishant' : 'Anshul', who);
+      if (r.ok) out.pushed++; else { out.flagged++; await sendTech(`Falcon advance ${esc(label)} freight app mein nahi gaya: ${esc(r.why)}`).catch(() => {}); }
+    } else if (t.target === 'cleaner') {
+      // Safai wala is on no payroll (owner 21-10-2026): the money stays recorded in Falcon only
+      await d.ref.update({ advStatus: 'entered', advDoneBy: 'auto:cleaner', advDoneAt: new Date(), advPush: { target: 'cleaner', code: t.code, name: t.name, status: 'done', result: 'Safai wala — kisi payroll par nahi, Falcon mein hi likha (owner 21-10)', at: now } });
+      out.pushed++;
     } else {
-      await d.ref.update({ advPush: { target: 'none', status: 'unmatched', error: t.why, at: now } });
+      await d.ref.update({ advPush: { target: 'none', status: t.hold || 'unmatched', error: t.why, at: now } });
       await sendTech(`Falcon advance ${esc(label)} Attendance mein nahi gaya — ${esc(t.why)}. Owner Falcon mein "Attendance mein daal diya" dabaye ya naam theek kare.`).catch((x) => console.error('tech alert failed:', x.message));
       out.flagged++;
     }

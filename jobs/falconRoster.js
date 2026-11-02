@@ -65,6 +65,23 @@ async function mirrorRoster() {
     batch.set(dst.doc(row.code), { ...row, updatedAt: new Date() });
     n++; writes++;
   }
+  // Gaadiwalas + one "Safai wala" row (owner 02-11-2026 "yes okay": the Advance tile is pick-from-list only — free-typed names
+  // like "दीपू गाड़ी वाला" sat unposted for a week). A gaadiwala pick goes to his account in the freight app (bridge target
+  // 'freight'); the Safai wala is not on any payroll, so his line is recorded in Falcon only (owner's 21-10 rule).
+  const trs = await fdb.collection('apps').doc('transportfreight').collection('transporters').get();
+  const extraRows = [{ code: 'SAFAI', name: 'Safai wala (cleaner)', dept: 'SAFAI', active: true, cleaner: true }];
+  for (const t of trs.docs) {
+    const x = t.data();
+    if (x.deleted || x.active === false || !String(x.name || '').trim()) continue;
+    extraRows.push({ code: 'G-' + t.id, name: `${String(x.name).trim()} (gaadiwala)`, dept: 'GAADIWALA', active: true, freight: t.id });
+  }
+  for (const row of extraRows) {
+    const old = have[row.code];
+    seen.add(row.code);
+    if (old && old.name === row.name && old.active === true && old.freight === row.freight && old.cleaner === row.cleaner) continue;
+    batch.set(dst.doc(row.code), { ...row, updatedAt: new Date() });
+    n++; writes++;
+  }
   // a worker deleted from att_salary disappears from the pick list (kept as inactive, never deleted)
   for (const id of Object.keys(have)) if (!seen.has(id) && have[id].active !== false) { batch.set(dst.doc(id), { active: false, updatedAt: new Date() }, { merge: true }); n++; writes++; }
   await flush();

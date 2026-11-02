@@ -46,15 +46,17 @@ async function loaderIssues(fdb = db(), seen = new Set(), today = new Date(Date.
   const unmatched = [];
   for (const d of adv.docs) {
     const e = d.data();
-    if (e.status !== 'active' || e.approval !== 'ok' || e.advStatus !== 'pending' || !e.advPush || e.advPush.status !== 'unmatched') continue;
-    unmatched.push({ date: e.date || '', text: `${dm(e.date || '0000-00-00')} ${(e.advFor && e.advFor.name) || e.detail || '?'} ${inr(e.amount)}`, amt: Number(e.amount) || 0 });
+    if (e.status !== 'active' || e.approval !== 'ok' || e.advStatus !== 'pending' || !e.advPush || !['unmatched', 'not-on-list'].includes(e.advPush.status)) continue;
+    // "List mein nahi" lines (owner 02-11-2026) carry their type: gaadi / safai / bahar
+    const nol = e.advPush.status === 'not-on-list' ? ` [list mein nahi: ${String((e.advFor && e.advFor.code) || '').slice(4)}]` : '';
+    unmatched.push({ date: e.date || '', text: `${dm(e.date || '0000-00-00')} ${(e.advFor && e.advFor.name) || e.detail || '?'} ${inr(e.amount)}${nol}`, amt: Number(e.amount) || 0 });
   }
   unmatched.sort((a, b) => a.date.localeCompare(b.date));
   const L = [];
   if (unmatched.length) {
-    L.push(`💵 Falcon advance Attendance mein NAHI gaya (naam nahi mila): ${unmatched.length} · ${inr(unmatched.reduce((t, u) => t + u.amt, 0))}`);
+    L.push(`💵 Falcon advance kisi account mein NAHI gaya (owner decide kare): ${unmatched.length} · ${inr(unmatched.reduce((t, u) => t + u.amt, 0))}`);
     unmatched.forEach((u) => L.push('  ' + u.text));
-    L.push('  → Falcon mein naam list se chuno, ya "Attendance mein daal diya" dabao');
+    L.push('  → Claude ko batao kiska hai, ya Falcon mein "Attendance mein daal diya" dabao');
   }
   if (wrong.length) { L.push(`🚚 Labour tile pe loader ka paisa (Advance mein hona chahiye): ${wrong.length}`); wrong.forEach((l) => L.push('  ' + l)); }
   if (missing.length) { L.push(`🚚 Extra loader Attendance mein nahi aaya: ${missing.length}`); missing.forEach((l) => L.push('  ' + l)); }
