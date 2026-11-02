@@ -72,7 +72,7 @@ async function mirrorRoster() {
   const extraRows = [{ code: 'SAFAI', name: 'Safai wala (cleaner)', dept: 'SAFAI', active: true, cleaner: true }];
   for (const t of trs.docs) {
     const x = t.data();
-    if (x.deleted || x.active === false || !String(x.name || '').trim()) continue;
+    if (x.deleted || x.active === false || !String(x.name || '').trim() || /^test\b/i.test(String(x.name).trim())) continue;   // the freight app's test record
     extraRows.push({ code: 'G-' + t.id, name: `${String(x.name).trim()} (gaadiwala)`, dept: 'GAADIWALA', active: true, freight: t.id });
   }
   for (const row of extraRows) {
