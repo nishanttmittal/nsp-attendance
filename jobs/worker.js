@@ -722,5 +722,9 @@ async function main() {
 
 // only run the queue loop when executed directly (node worker.js / GitHub Actions);
 // when required by a test we just expose handle() so it can be driven in isolation.
-if (require.main === module) main();
+// 04-11-2026: one-shot script — exit once main() settles, even if a stray handle (leaked browser,
+// open socket) would otherwise keep Node alive. 5 s grace for in-flight Telegram sends; unref so a
+// clean run still exits on its own.
+if (require.main === module) main().then(() => 0, (e) => { console.error('worker failed:', e); return 1; })
+  .then((code) => setTimeout(() => process.exit(code), 5000).unref());
 module.exports = { handle, main, authorizeJob };

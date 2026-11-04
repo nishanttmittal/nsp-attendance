@@ -16,6 +16,7 @@ concurrency:
 jobs:
   worker:
     runs-on: ubuntu-24.04   # pinned 04-11-2026: ubuntu-latest became 26.04, Playwright 1.60 cannot install chromium there
+    timeout-minutes: 20     # 04-11-2026: a hung run (leaked browser) blocked the queue for 6 h
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

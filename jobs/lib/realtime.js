@@ -90,7 +90,10 @@ async function session() {
     return (t === 'stylesheet' || t === 'font' || t === 'image') ? route.abort() : route.continue();
   });
   const page = await context.newPage();
-  await login(page);
+  // 04-11-2026: if login fails (portal timeout from the GitHub runner at 00:01 IST on 04-11), close the
+  // browser HERE — the caller's finally never runs because session() never returned, and the leaked
+  // Chromium kept worker.js alive for 6 h, blocking every queued run behind it.
+  try { await login(page); } catch (e) { await browser.close().catch(() => {}); throw e; }
   return { browser, context, page };
 }
 
