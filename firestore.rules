@@ -886,13 +886,16 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
     // daily/{date}: shape-locked; rev advances by exactly one; attributed to the caller; non-negative numbers.
     function pwDay() { return request.resource.data; }
     function pwDayShape(date) {
-      return pwDay().keys().hasOnly(['id','date','period','noProduction','meterReading','meterAt','freshKg','reclaimedKg','notes','rev','updatedBy','updatedAt','updatedAtClient','createdBy','createdAt','history'])
+      // 05-11-2026 (owner): meterPhoto = gas-meter photo of the day, small JPEG data URL (<= 250 KB), meterPhotoAt = when taken
+      return pwDay().keys().hasOnly(['id','date','period','noProduction','meterReading','meterAt','freshKg','reclaimedKg','notes','rev','updatedBy','updatedAt','updatedAtClient','createdBy','createdAt','history','meterPhoto','meterPhotoAt'])
         && pwDay().id == date && pwDay().date == date && pwDay().period == date[0:7]
         && pwDay().noProduction is bool
         && (pwDay().meterReading == null || (pwDay().meterReading is number && pwDay().meterReading >= 0))
         && (pwDay().freshKg == null || (pwDay().freshKg is number && pwDay().freshKg >= 0 && pwDay().freshKg <= 10000))
         && (pwDay().reclaimedKg == null || (pwDay().reclaimedKg is number && pwDay().reclaimedKg >= 0 && pwDay().reclaimedKg <= 10000))
         && pwDay().notes is string && pwDay().notes.size() <= 500
+        && (!('meterPhoto' in pwDay()) || pwDay().meterPhoto == null || (pwDay().meterPhoto is string && pwDay().meterPhoto.size() <= 250000 && pwDay().meterPhoto[0:23] == 'data:image/jpeg;base64,'))
+        && (!('meterPhotoAt' in pwDay()) || (pwDay().meterPhotoAt is string && pwDay().meterPhotoAt.size() <= 40))
         && pwDay().updatedBy == pwEmail() && pwDay().updatedAt == request.time && pwDay().rev is int
         && pwDay().history is list && pwDay().history.size() <= 20;
     }
