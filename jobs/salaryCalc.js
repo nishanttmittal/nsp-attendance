@@ -55,7 +55,12 @@ function computePay({ emp, att, daysInMonth, elapsedDays, fullMonth, advances = 
   if (monthStart && toDate) {
     let start = monthStart, end = toDate;
     if (emp.joinDate) { const j = new Date(emp.joinDate); if (j > start) start = j; }
-    if (emp.exitDate) { const x = new Date(emp.exitDate); if (x < end) end = x; }
+    // REJOINED worker (mirror of web payroll.js fix 2026-10-12, ported 2026-11-06 — virender 67: left
+    // 13-Aug, back 01-Sep): count from rejoinDate and ignore the earlier exitDate, else every later month = 0 days.
+    const rj = emp.rejoinDate ? new Date(emp.rejoinDate) : null;
+    const rejoined = !!rj && end >= rj && (!emp.exitDate || rj > new Date(emp.exitDate));
+    if (rejoined) { if (rj > start) start = rj; }
+    else if (emp.exitDate) { const x = new Date(emp.exitDate); if (x < end) end = x; }
     effElapsed = Math.max(0, Math.round((end - start) / DAY) + 1);
   }
   // Owner rule (2026-06-14): a Saturday worked in a week that didn't earn the weekly-off
@@ -82,6 +87,10 @@ function computePay({ emp, att, daysInMonth, elapsedDays, fullMonth, advances = 
     // No attendance record for the month = joined later → pay ₹0, NEVER a silent full month
     // (owner 2026-07-10; ported from web 2026-07-28).
     : att.noRecord ? 0
+    // ZERO PRESENT = ZERO PAY (owner 2026-10-11; mirror of web payroll.js, ported 2026-11-06): a monthly
+    // worker with no present day and no worked Saturday is paid 0 days — the portal under-counts absents
+    // for no-shows. The owner's days box sets presentDays, so an override still wins.
+    : (Number(att.presentDays || 0) + Number(att.weeklyOffPresent || 0)) <= 0 && att.daysOverride == null ? 0
     // Owner's days box is LITERAL (2026-10-15, mirror of web payroll.js): att.daysOverride (from
     // lib/applyOverride) pays exactly that many days — the join/exit window must not cap it.
     : att.daysOverride != null ? perDay * Math.max(0, Number(att.daysOverride) || 0)
