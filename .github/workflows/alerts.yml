@@ -36,7 +36,11 @@ jobs:
       - working-directory: jobs
         run: npm ci
       - working-directory: jobs
-        run: npx playwright install --with-deps chromium
+        # retry (owner 20-11-2026 "yes retry"): Ubuntu package servers returned 503 on 19-11 17:30-17:50 IST and 3 runs failed.
+        # 3 tries 45 s apart; last resort installs chromium without OS packages (the runner image already has most of them).
+        run: |
+          for i in 1 2 3; do npx playwright install --with-deps chromium && exit 0; echo "playwright install failed (try $i), waiting 45 s"; sleep 45; done
+          npx playwright install chromium
       - name: Run scheduled task
         working-directory: jobs
         env:
