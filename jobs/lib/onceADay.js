@@ -10,4 +10,12 @@ async function alreadySent(key) {
   return (((await REF().get()).data()) || {})[key] === istDay();
 }
 async function markSent(key) { if (!process.env.DRY) await REF().set({ [key]: istDay(), [key + 'At']: new Date().toISOString() }, { merge: true }); }
-module.exports = { alreadySent, markSent };
+// TIME WINDOW guard (owner 20-11-2026: "why i am getting food alert at 2 at night"). GitHub's fallback cron for the
+// 17:40 food alert fired 8 h late (20:27 UTC = 01:57 IST) — a NEW IST day, so alreadySent() let it through.
+// A message that only makes sense at a time of day is skipped outside its window. FORCE=1 still sends.
+function outsideWindow(fromHour, toHour) {
+  if (process.env.FORCE === '1' || process.env.DRY) return false;
+  const h = new Date(Date.now() + 5.5 * 3600e3).getUTCHours();
+  return h < fromHour || h >= toHour;
+}
+module.exports = { alreadySent, markSent, outsideWindow };

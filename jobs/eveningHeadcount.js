@@ -16,6 +16,7 @@ function composeMessage(s) {
 if (require.main === module) {
   (async () => {
     const once = require('./lib/onceADay');
+    if (once.outsideWindow(17, 21)) { console.log('food headcount: outside 17:00-21:00 IST (late cron) — skipped'); return; }
     if (await once.alreadySent('foodHeadcount')) { console.log('food headcount already sent today — skipped'); return; }
     const { browser, page } = await session();
     try {

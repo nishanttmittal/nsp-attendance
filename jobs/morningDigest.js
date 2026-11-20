@@ -7,6 +7,7 @@ const { sendPlain: sendTelegram, sendTech } = require('./lib/notify'); // plain 
 const { dmy } = require('./lib/simple');
 (async () => {
   const once = require('./lib/onceADay');
+  if (once.outsideWindow(9, 15)) { console.log('morning digest: outside 09:00-15:00 IST (late cron) — skipped'); return; }
   if (await once.alreadySent('morningDigest')) { console.log('morning digest already sent today — skipped'); return; }
   const { browser, page } = await session();
   try {
