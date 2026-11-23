@@ -273,11 +273,15 @@ match /att_daily_stats/{d} { allow read: if attStaff(); allow write: if false; }
     match /apps/welder/products/{id}        { allow read: if wUser() || pwStaff(); allow write: if wManager(); }
     // <<< POWDER WELDER GRANT
     match /apps/welder/plating_outbox/{id}  { allow read, write: if wUser(); }
-    // Chrome challan photo (owner 23-11-2026), one small JPEG per welder challan, id = NAV-123. Welder-app users take /
-    // replace it; plating staff only view it. Never deleted (history).
+    // Chrome challan photo (owner 23-11-2026), one small JPEG per welder challan, id = NAV-123. Any welder-app user may
+    // add the FIRST photo; only manager/owner may replace it (it is evidence). Plating staff only view. Never deleted.
     match /apps/welder/challan_photos/{id} {
       allow read: if wUser() || pUser();
-      allow create, update: if wUser() && id.matches('^[A-Za-z]+-[0-9]+$')
+      allow create: if wUser() && photoOk(id);
+      allow update: if wManager() && photoOk(id);
+    }
+    function photoOk(id) {
+      return id.matches('^[A-Za-z]+-[0-9]+$')
         && request.resource.data.code == id
         && request.resource.data.image is string && request.resource.data.image.size() < 900000;
     }
